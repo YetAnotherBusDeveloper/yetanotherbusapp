@@ -1,12 +1,46 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/smart_route_service.dart';
+
+class _PartiallyFailingRepository extends BusRepository {
+  @override
+  Future<RouteDetailData> getCompleteBusInfo(
+    int routeKey, {
+    required BusProvider provider,
+    String? routeIdHint,
+    String? routeNameHint,
+  }) async {
+    if (routeKey == 1) {
+      throw StateError('route unavailable');
+    }
+    return RouteDetailData(
+      route: RouteSummary(
+        sourceProvider: provider.name,
+        hashMd5: '',
+        routeKey: routeKey,
+        routeId: '$routeKey',
+        routeName: routeNameHint ?? '$routeKey',
+        officialRouteName: routeNameHint ?? '$routeKey',
+        description: '',
+        category: '',
+        sequence: 0,
+        rtrip: 0,
+      ),
+      paths: const [],
+      stopsByPath: const {},
+      hasLiveData: true,
+    );
+  }
+}
 
 void main() {
   test('recordOpen increments total and hourly counters', () {
     const profile = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 12,
+      pathId: 0,
       routeName: '307',
       totalOpens: 2,
       lastOpenedAtMs: 0,
@@ -27,6 +61,7 @@ void main() {
     const profile = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 12,
+      pathId: 0,
       routeName: '307',
       totalOpens: 0,
       lastOpenedAtMs: 0,
@@ -48,6 +83,7 @@ void main() {
     final profile = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 12,
+      pathId: 0,
       routeName: '307',
       totalOpens: 0,
       lastOpenedAtMs: 0,
@@ -67,6 +103,7 @@ void main() {
     const morningRoute = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 101,
+      pathId: 0,
       routeName: '307',
       totalOpens: 8,
       lastOpenedAtMs: 1712000000000,
@@ -75,6 +112,7 @@ void main() {
     const nightRoute = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 102,
+      pathId: 0,
       routeName: '300',
       totalOpens: 20,
       lastOpenedAtMs: 1712000000000,
@@ -93,6 +131,7 @@ void main() {
     const morningRoute = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 101,
+      pathId: 0,
       routeName: '307',
       totalOpens: 8,
       lastOpenedAtMs: 1712000000000,
@@ -106,10 +145,28 @@ void main() {
     expect(result, isNull);
   });
 
+  test('chooseProfileForTime ignores legacy directionless history', () {
+    const legacyProfile = RouteUsageProfile(
+      provider: BusProvider.nwt,
+      routeKey: 101,
+      routeName: '307',
+      totalOpens: 10,
+      lastOpenedAtMs: 1712000000000,
+      hourlyOpens: <int, int>{7: 10},
+    );
+
+    final result = SmartRouteService.chooseProfileForTime(const [
+      legacyProfile,
+    ], DateTime(2026, 4, 4, 7, 20));
+
+    expect(result, isNull);
+  });
+
   test('chooseProfileForTime also uses selection history', () {
     const selectedRoute = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 202,
+      pathId: 0,
       routeName: '綠3',
       totalOpens: 3,
       lastOpenedAtMs: 1712000000000,
@@ -121,6 +178,7 @@ void main() {
     const weakerRoute = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 303,
+      pathId: 0,
       routeName: '綠5',
       totalOpens: 3,
       lastOpenedAtMs: 1712000000000,
@@ -140,6 +198,7 @@ void main() {
     final expiredSelectionRoute = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 202,
+      pathId: 0,
       routeName: '綠3',
       totalOpens: 3,
       lastOpenedAtMs: now
@@ -165,6 +224,7 @@ void main() {
     const notLearnedEnough = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 88,
+      pathId: 0,
       routeName: '11',
       totalOpens: 1,
       lastOpenedAtMs: 1712000000000,
@@ -188,6 +248,7 @@ void main() {
       final routeProfile = RouteUsageProfile(
         provider: BusProvider.nwt,
         routeKey: 12,
+        pathId: 1,
         routeName: '307',
         totalOpens: 6,
         lastOpenedAtMs: now
@@ -255,6 +316,7 @@ void main() {
     const profile = RouteUsageProfile(
       provider: BusProvider.nwt,
       routeKey: 12,
+      pathId: 1,
       routeName: '307',
       totalOpens: 5,
       lastOpenedAtMs: 1712000000000,
@@ -313,4 +375,196 @@ void main() {
     expect(suggestion.recommendedStop?.stopId, 1001);
     expect(suggestion.recommendedPath?.pathId, 1);
   });
+
+  test(
+    'buildSuggestion includes the nearest stop when location is available',
+    () {
+      const profile = RouteUsageProfile(
+        provider: BusProvider.nwt,
+        routeKey: 12,
+        pathId: 1,
+        routeName: '307',
+        totalOpens: 5,
+        lastOpenedAtMs: 1712000000000,
+        hourlyOpens: <int, int>{18: 5},
+      );
+      const detail = RouteDetailData(
+        route: RouteSummary(
+          sourceProvider: 'nwt',
+          hashMd5: '',
+          routeKey: 12,
+          routeId: '307',
+          routeName: '307',
+          officialRouteName: '307',
+          description: '',
+          category: '',
+          sequence: 0,
+          rtrip: 0,
+        ),
+        paths: [PathInfo(routeKey: 12, pathId: 1, name: '往市政府')],
+        stopsByPath: {
+          1: [
+            StopInfo(
+              routeKey: 12,
+              pathId: 1,
+              stopId: 1001,
+              stopName: '最近站牌',
+              sequence: 1,
+              lon: 121.5654,
+              lat: 25.033,
+              sec: 120,
+            ),
+            StopInfo(
+              routeKey: 12,
+              pathId: 1,
+              stopId: 1002,
+              stopName: '較遠站牌',
+              sequence: 2,
+              lon: 121.6,
+              lat: 25.06,
+              sec: 300,
+            ),
+          ],
+        },
+        hasLiveData: true,
+      );
+      final position = Position(
+        latitude: 25.0331,
+        longitude: 121.5655,
+        timestamp: DateTime(2026, 9, 21),
+        accuracy: 1,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+
+      final suggestion = SmartRouteService.buildSuggestion(
+        profile: profile,
+        score: 12,
+        reason: '根據使用習慣。',
+        detail: detail,
+        position: position,
+      );
+
+      expect(suggestion.recommendedStop?.stopName, '最近站牌');
+      expect(suggestion.recommendedPath?.pathId, 1);
+    },
+  );
+
+  test('buildSuggestion only searches the learned direction', () {
+    const profile = RouteUsageProfile(
+      provider: BusProvider.nwt,
+      routeKey: 12,
+      pathId: 1,
+      routeName: '307',
+      totalOpens: 5,
+      lastOpenedAtMs: 1712000000000,
+      hourlyOpens: <int, int>{18: 5},
+    );
+    const detail = RouteDetailData(
+      route: RouteSummary(
+        sourceProvider: 'nwt',
+        hashMd5: '',
+        routeKey: 12,
+        routeId: '307',
+        routeName: '307',
+        officialRouteName: '307',
+        description: '',
+        category: '',
+        sequence: 0,
+        rtrip: 0,
+      ),
+      paths: [
+        PathInfo(routeKey: 12, pathId: 0, name: '往反方向'),
+        PathInfo(routeKey: 12, pathId: 1, name: '往市政府'),
+      ],
+      stopsByPath: {
+        0: [
+          StopInfo(
+            routeKey: 12,
+            pathId: 0,
+            stopId: 1,
+            stopName: '較近但方向錯誤',
+            sequence: 1,
+            lon: 121.5655,
+            lat: 25.0331,
+            sec: 60,
+          ),
+        ],
+        1: [
+          StopInfo(
+            routeKey: 12,
+            pathId: 1,
+            stopId: 2,
+            stopName: '正確方向',
+            sequence: 1,
+            lon: 121.57,
+            lat: 25.04,
+            sec: 120,
+          ),
+        ],
+      },
+      hasLiveData: true,
+    );
+    final position = Position(
+      latitude: 25.0331,
+      longitude: 121.5655,
+      timestamp: DateTime(2026, 9, 21),
+      accuracy: 1,
+      altitude: 0,
+      altitudeAccuracy: 0,
+      heading: 0,
+      headingAccuracy: 0,
+      speed: 0,
+      speedAccuracy: 0,
+    );
+
+    final suggestion = SmartRouteService.buildSuggestion(
+      profile: profile,
+      score: 12,
+      reason: '根據使用習慣。',
+      detail: detail,
+      position: position,
+    );
+
+    expect(suggestion.recommendedPath?.pathId, 1);
+    expect(suggestion.recommendedStop?.stopId, 2);
+  });
+
+  test(
+    'loadSuggestions keeps successful routes when one route fails',
+    () async {
+      final now = DateTime(2026, 9, 21, 8);
+      final suggestions = await SmartRouteService.loadSuggestions(
+        repository: _PartiallyFailingRepository(),
+        profiles: [
+          RouteUsageProfile(
+            provider: BusProvider.nwt,
+            routeKey: 1,
+            pathId: 0,
+            routeName: '失敗路線',
+            totalOpens: 4,
+            lastOpenedAtMs: now.millisecondsSinceEpoch,
+            hourlyOpens: const {8: 4},
+          ),
+          RouteUsageProfile(
+            provider: BusProvider.nwt,
+            routeKey: 2,
+            pathId: 0,
+            routeName: '成功路線',
+            totalOpens: 3,
+            lastOpenedAtMs: now.millisecondsSinceEpoch,
+            hourlyOpens: const {8: 3},
+          ),
+        ],
+        now: now,
+      );
+
+      expect(suggestions, hasLength(1));
+      expect(suggestions.single.profile.routeKey, 2);
+    },
+  );
 }

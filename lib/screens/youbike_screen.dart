@@ -12,6 +12,7 @@ import '../app/bus_app.dart';
 import '../core/debouncer.dart';
 import '../core/request_sequence.dart';
 import '../core/transit_repository.dart';
+import '../core/user_location.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/platform_map_provider.dart';
 import '../widgets/ad_banner_widget.dart';
@@ -54,6 +55,8 @@ class _YouBikeScreenState extends State<YouBikeScreen>
   double _googleCameraZoom = _defaultZoom;
   LatLng? _userLocation;
   bool _locating = true;
+  bool _locationRequestInFlight = false;
+  String? _locationError;
   bool _loadingStations = false;
   List<BikeStation> _stations = [];
   BikeStation? _selectedStation;
@@ -108,39 +111,65 @@ class _YouBikeScreenState extends State<YouBikeScreen>
   }
 
   Future<void> _initLocation() async {
+    if (_locationRequestInFlight) {
+      return;
+    }
+    _locationRequestInFlight = true;
+    if (mounted && !_locating) {
+      setState(() {
+        _locating = true;
+        _locationError = null;
+      });
+    }
+
     try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _startWithDefault();
-        return;
-      }
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied ||
-            permission == LocationPermission.deniedForever) {
-          _startWithDefault();
-          return;
-        }
-      }
-      final pos = await Geolocator.getCurrentPosition();
+      final pos = await resolveUserPosition();
       if (!mounted) return;
       final loc = LatLng(pos.latitude, pos.longitude);
       setState(() {
         _userLocation = loc;
         _center = loc;
         _locating = false;
+        _locationError = null;
       });
-      _loadNearby(loc);
-    } catch (_) {
-      _startWithDefault();
+      unawaited(_loadNearby(loc));
+    } catch (error) {
+      if (!mounted) return;
+      final message = error is LocationFailure
+          ? error.message
+          : '目前無法取得定位，請稍後再試。';
+      final serviceDisabled = error is LocationFailure && error.serviceDisabled;
+      final deniedForever = error is LocationFailure && error.deniedForever;
+      setState(() {
+        _locating = false;
+        _locationError = message;
+      });
+      unawaited(_loadNearby(_center));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _locationError != message) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$message 已改為顯示預設區域。'),
+            action: SnackBarAction(
+              label: serviceDisabled
+                  ? '定位設定'
+                  : deniedForever
+                  ? '權限設定'
+                  : '重試',
+              onPressed: serviceDisabled
+                  ? () => unawaited(Geolocator.openLocationSettings())
+                  : deniedForever
+                  ? () => unawaited(Geolocator.openAppSettings())
+                  : () => unawaited(_initLocation()),
+            ),
+          ),
+        );
+      });
+    } finally {
+      _locationRequestInFlight = false;
     }
-  }
-
-  void _startWithDefault() {
-    if (!mounted) return;
-    setState(() => _locating = false);
-    _loadNearby(_center);
   }
 
   Future<void> _loadNearby(LatLng loc) async {
@@ -880,16 +909,29 @@ class _YouBikeScreenState extends State<YouBikeScreen>
             right: 0,
             child: LinearProgressIndicator(),
           ),
-        if (_userLocation != null)
-          Positioned(
-            right: 16,
-            bottom: 24,
-            child: FloatingActionButton.small(
-              heroTag: 'recenter',
-              onPressed: _recenterToUser,
-              child: const Icon(Icons.my_location_rounded),
-            ),
+        Positioned(
+          right: 16,
+          bottom: 24,
+          child: FloatingActionButton.small(
+            heroTag: 'recenter',
+            tooltip: _userLocation == null ? '重新定位' : '回到目前位置',
+            onPressed: _locating
+                ? null
+                : _userLocation == null
+                ? () => unawaited(_initLocation())
+                : _recenterToUser,
+            child: _locating
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    _userLocation == null
+                        ? Icons.location_searching_rounded
+                        : Icons.my_location_rounded,
+                  ),
           ),
+        ),
       ],
     );
   }

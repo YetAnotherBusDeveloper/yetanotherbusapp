@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/friendly_error.dart';
+import '../widgets/app_content_transition.dart';
 import '../widgets/markdown_content_view.dart';
 
 class LegalMarkdownPage extends StatefulWidget {
@@ -77,61 +78,64 @@ class _LegalMarkdownPageState extends State<LegalMarkdownPage> {
           ),
         ],
       ),
-      body: _loading && _content == null
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadDocument,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                  if (_error case final error?)
-                    Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 920),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                          child: Card(
-                            color: theme.colorScheme.errorContainer,
-                            child: Padding(
-                              padding: const EdgeInsets.all(18),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '文件更新失敗',
-                                    style: theme.textTheme.titleMedium,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(error),
-                                  const SizedBox(height: 12),
-                                  FilledButton.tonalIcon(
-                                    onPressed: _loadDocument,
-                                    icon: const Icon(Icons.refresh_rounded),
-                                    label: const Text('重試'),
-                                  ),
-                                ],
+      body: AppContentTransition(
+        state: (_content == null, _content == null && _loading),
+        child: _loading && _content == null
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _loadDocument,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  children: [
+                    if (_error case final error?)
+                      Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 920),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                            child: Card(
+                              color: theme.colorScheme.errorContainer,
+                              child: Padding(
+                                padding: const EdgeInsets.all(18),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '文件更新失敗',
+                                      style: theme.textTheme.titleMedium,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(error),
+                                    const SizedBox(height: 12),
+                                    FilledButton.tonalIcon(
+                                      onPressed: _loadDocument,
+                                      icon: const Icon(Icons.refresh_rounded),
+                                      label: const Text('重試'),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  if (_content case final content?)
-                    MarkdownContentView(markdown: content)
-                  else if (!_loading)
-                    Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: FilledButton.tonalIcon(
-                          onPressed: _loadDocument,
-                          icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('重新載入文件'),
+                    if (_content case final content?)
+                      MarkdownContentView(markdown: content)
+                    else if (!_loading)
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: FilledButton.tonalIcon(
+                            onPressed: _loadDocument,
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('重新載入文件'),
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
+      ),
     );
   }
 }

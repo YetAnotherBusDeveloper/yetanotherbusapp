@@ -161,6 +161,191 @@ void main() {
       );
     },
   );
+
+  test(
+    'route history sync is opt-in, preserves other devices, and removes its own bucket when disabled',
+    () async {
+      final storage = StorageService();
+      final syncService = _FakeAccountSyncService(
+        remotePreferences: const {
+          'routeHistory': {
+            'version': 1,
+            'devices': {
+              'remote-device': {
+                'modifiedAtMs': 2,
+                'history': [
+                  {
+                    'provider': 'nwt',
+                    'routeKey': 99,
+                    'routeName': '遠端路線',
+                    'timestampMs': 2,
+                  },
+                  {
+                    'provider': 7,
+                    'routeKey': 100,
+                    'routeName': '損壞資料',
+                    'timestampMs': 3,
+                  },
+                ],
+                'routeUsageProfiles': [
+                  {
+                    'provider': 'nwt',
+                    'routeKey': 100,
+                    'routeName': 7,
+                    'totalOpens': 1,
+                    'lastOpenedAtMs': 3,
+                  },
+                ],
+              },
+            },
+          },
+        },
+      );
+      final buildInfo = AppBuildInfo(
+        version: '1.0.0',
+        buildNumber: '1',
+        gitSha: 'test',
+        defaultUpdateChannel: AppUpdateChannel.release,
+      );
+      final controller = AppController(
+        repository: BusRepository(),
+        storage: storage,
+        analytics: await AppAnalytics.initialize(),
+        buildInfo: buildInfo,
+        appUpdateService: AppUpdateService(buildInfo: buildInfo),
+        appUpdateInstaller: createAppUpdateInstaller(),
+        authService: _FakeAuthService(),
+        accountSyncService: syncService,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.completeAuthCallback(
+        const AppLaunchAction(
+          target: AppLaunchTarget.authCallback,
+          authToken: 'test-token',
+          authAccountId: 'test-account',
+          authDeviceId: 'test-device',
+          authRole: 'user',
+          authProvider: 'test',
+          authDisplayName: 'Test User',
+        ),
+      );
+      expect(controller.routeHistorySyncEnabled, isFalse);
+
+      await controller.addHistoryEntry(
+        const RouteSummary(
+          sourceProvider: 'nwt',
+          hashMd5: '',
+          routeKey: 12,
+          routeId: '12',
+          routeName: '本機路線',
+          officialRouteName: '本機路線',
+          description: '',
+          category: '',
+          sequence: 0,
+          rtrip: 0,
+        ),
+        provider: BusProvider.nwt,
+        pathId: 0,
+        pathName: '往市區',
+      );
+      await controller.setRouteHistorySyncEnabled(true);
+      await controller.recordRouteSelection(
+        provider: BusProvider.nwt,
+        routeKey: 12,
+        routeName: '本機路線',
+        selectedAt: DateTime.now(),
+        pathId: 0,
+      );
+      await controller.recordRouteSelection(
+        provider: BusProvider.nwt,
+        routeKey: 12,
+        routeName: '本機路線',
+        selectedAt: DateTime.now(),
+        pathId: 1,
+      );
+      expect(
+        controller.routeUsageProfiles.map((profile) => profile.pathId),
+        containsAll(<int?>[0, 1]),
+      );
+      expect(syncService.preferencePayload, isNull);
+
+      await controller.setAccountSyncEnabled(true);
+
+      final enabledDevices =
+          (syncService.preferencePayload!['routeHistory'] as Map)['devices']
+              as Map;
+      expect(
+        (syncService.preferencePayload!['routeHistory'] as Map)['version'],
+        2,
+      );
+      expect(
+        enabledDevices.keys,
+        containsAll(['remote-device', 'test-device']),
+      );
+      expect(
+        controller.history.map((entry) => entry.routeKey),
+        containsAll([12, 99]),
+      );
+
+      await controller.setRouteHistorySyncEnabled(false);
+
+      final disabledDevices =
+          (syncService.preferencePayload!['routeHistory'] as Map)['devices']
+              as Map;
+      expect(disabledDevices.keys, contains('remote-device'));
+      expect(disabledDevices.keys, isNot(contains('test-device')));
+      expect(controller.routeHistorySyncEnabled, isFalse);
+      final localState = await storage.loadAccountSyncLocalState(
+        'test-account',
+      );
+      expect(localState.routeHistoryDevicePayload, isNotNull);
+
+      await controller.setRouteHistorySyncEnabled(true);
+      final reenabledDevices =
+          (syncService.preferencePayload!['routeHistory'] as Map)['devices']
+              as Map;
+      final ownProfiles =
+          (reenabledDevices['test-device'] as Map)['routeUsageProfiles']
+              as List;
+      expect(ownProfiles, hasLength(2));
+      expect(
+        ownProfiles.map((profile) => (profile as Map)['totalSelections']),
+        everyElement(1),
+      );
+      expect(
+        ownProfiles.map((profile) => (profile as Map)['pathId']),
+        containsAll([0, 1]),
+      );
+
+      await controller.setAccountSyncEnabled(false);
+      syncService.failPreferenceWrites = true;
+      await expectLater(
+        controller.setRouteHistorySyncEnabled(false),
+        throwsStateError,
+      );
+      expect(controller.routeHistorySyncEnabled, isFalse);
+      final pendingState = await storage.loadAccountSyncLocalState(
+        'test-account',
+      );
+      expect(pendingState.routeHistoryDeletionPending, isTrue);
+
+      syncService.failPreferenceWrites = false;
+      await controller.setRouteHistorySyncEnabled(false);
+      final optOutDevices =
+          (syncService.preferencePayload!['routeHistory'] as Map)['devices']
+              as Map;
+      expect(optOutDevices.keys, isNot(contains('test-device')));
+      expect(controller.routeHistorySyncEnabled, isFalse);
+      final deletedState = await storage.loadAccountSyncLocalState(
+        'test-account',
+      );
+      expect(deletedState.routeHistoryDeletionPending, isFalse);
+
+      await controller.logoutAuth();
+      expect(controller.history.map((entry) => entry.routeKey), [12]);
+    },
+  );
 }
 
 class _FakeAuthService extends AuthService {
@@ -201,6 +386,8 @@ class _FakeAuthService extends AuthService {
 }
 
 class _FakeAccountSyncService extends AccountSyncService {
+  _FakeAccountSyncService({this.remotePreferences = const {}});
+
   static const _oldFavorite = {
     'provider': 'tpe',
     'routeKey': 123,
@@ -209,8 +396,11 @@ class _FakeAccountSyncService extends AccountSyncService {
   };
 
   Map<String, dynamic>? favoritePayload;
+  Map<String, dynamic>? preferencePayload;
   int? favoriteSchemaVersion;
   int favoriteRestoreCount = 0;
+  bool failPreferenceWrites = false;
+  final Map<String, dynamic> remotePreferences;
 
   @override
   Future<AccountSyncSummary> fetchSummary() async {
@@ -227,7 +417,7 @@ class _FakeAccountSyncService extends AccountSyncService {
         ),
         AccountSyncNamespace.preferences: _document(
           AccountSyncNamespace.preferences,
-          payload: const {},
+          payload: remotePreferences,
         ),
       },
     );
@@ -256,6 +446,11 @@ class _FakeAccountSyncService extends AccountSyncService {
     if (namespace == AccountSyncNamespace.favorites) {
       favoritePayload = payload;
       favoriteSchemaVersion = schemaVersion;
+    } else {
+      if (failPreferenceWrites) {
+        throw StateError('preference write failed');
+      }
+      preferencePayload = payload;
     }
     final documentPayload = namespace == AccountSyncNamespace.favorites
         ? {

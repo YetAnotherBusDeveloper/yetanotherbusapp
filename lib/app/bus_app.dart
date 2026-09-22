@@ -10,6 +10,7 @@ import 'package:palette_generator/palette_generator.dart';
 import '../core/announcement_models.dart';
 import '../core/announcement_push_service.dart';
 import '../core/app_controller.dart';
+import '../core/app_motion.dart';
 import '../core/auth_service.dart';
 import '../core/app_analytics.dart';
 import '../core/app_routes.dart';
@@ -197,6 +198,7 @@ class BusApp extends StatelessWidget {
 
     return ThemeData(
       useMaterial3: true,
+      pageTransitionsTheme: AppMotion.pageTransitions,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: scaffoldBackground,
       appBarTheme: AppBarTheme(

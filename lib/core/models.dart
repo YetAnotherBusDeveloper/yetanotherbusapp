@@ -344,6 +344,7 @@ class AppSettings {
     required this.alwaysShowSeconds,
     required this.enableHapticFeedback,
     required this.enableCompactMode,
+    required this.showWeatherInAppBar,
     required this.enableSmartRecommendations,
     required this.enableAutoFavoriteFrequentStops,
     required this.enableSmartRouteNotifications,
@@ -386,6 +387,7 @@ class AppSettings {
       alwaysShowSeconds: false,
       enableHapticFeedback: true,
       enableCompactMode: false,
+      showWeatherInAppBar: true,
       enableSmartRecommendations: true,
       enableAutoFavoriteFrequentStops: true,
       enableSmartRouteNotifications: false,
@@ -490,6 +492,7 @@ class AppSettings {
       alwaysShowSeconds: json['alwaysShowSeconds'] as bool? ?? false,
       enableHapticFeedback: json['enableHapticFeedback'] as bool? ?? true,
       enableCompactMode: json['enableCompactMode'] as bool? ?? false,
+      showWeatherInAppBar: json['showWeatherInAppBar'] as bool? ?? true,
       enableSmartRecommendations:
           json['enableSmartRecommendations'] as bool? ?? true,
       enableAutoFavoriteFrequentStops:
@@ -568,6 +571,7 @@ class AppSettings {
   final bool alwaysShowSeconds;
   final bool enableHapticFeedback;
   final bool enableCompactMode;
+  final bool showWeatherInAppBar;
   final bool enableSmartRecommendations;
   final bool enableAutoFavoriteFrequentStops;
   final bool enableSmartRouteNotifications;
@@ -609,6 +613,7 @@ class AppSettings {
     bool? alwaysShowSeconds,
     bool? enableHapticFeedback,
     bool? enableCompactMode,
+    bool? showWeatherInAppBar,
     bool? enableSmartRecommendations,
     bool? enableAutoFavoriteFrequentStops,
     bool? enableSmartRouteNotifications,
@@ -653,6 +658,7 @@ class AppSettings {
       alwaysShowSeconds: alwaysShowSeconds ?? this.alwaysShowSeconds,
       enableHapticFeedback: enableHapticFeedback ?? this.enableHapticFeedback,
       enableCompactMode: enableCompactMode ?? this.enableCompactMode,
+      showWeatherInAppBar: showWeatherInAppBar ?? this.showWeatherInAppBar,
       enableSmartRecommendations:
           enableSmartRecommendations ?? this.enableSmartRecommendations,
       enableAutoFavoriteFrequentStops:
@@ -716,6 +722,7 @@ class AppSettings {
       'alwaysShowSeconds': alwaysShowSeconds,
       'enableHapticFeedback': enableHapticFeedback,
       'enableCompactMode': enableCompactMode,
+      'showWeatherInAppBar': showWeatherInAppBar,
       'enableSmartRecommendations': enableSmartRecommendations,
       'enableAutoFavoriteFrequentStops': enableAutoFavoriteFrequentStops,
       'enableSmartRouteNotifications': enableSmartRouteNotifications,
@@ -749,6 +756,7 @@ class SearchHistoryEntry {
     required this.routeKey,
     required this.routeName,
     this.routeId,
+    this.pathId,
     this.pathName,
     required this.timestampMs,
   });
@@ -761,6 +769,7 @@ class SearchHistoryEntry {
       routeId: (json['routeId'] as String?)?.trim().isNotEmpty == true
           ? (json['routeId'] as String).trim()
           : null,
+      pathId: (json['pathId'] as num?)?.toInt(),
       pathName: (json['pathName'] as String?)?.trim().isNotEmpty == true
           ? (json['pathName'] as String).trim()
           : null,
@@ -772,6 +781,7 @@ class SearchHistoryEntry {
   final int routeKey;
   final String routeName;
   final String? routeId;
+  final int? pathId;
   final String? pathName;
   final int timestampMs;
 
@@ -781,6 +791,7 @@ class SearchHistoryEntry {
       'routeKey': routeKey,
       'routeName': routeName,
       if (routeId != null) 'routeId': routeId,
+      if (pathId != null) 'pathId': pathId,
       if (pathName != null) 'pathName': pathName,
       'timestampMs': timestampMs,
     };
@@ -1103,7 +1114,9 @@ class FavoriteUsageProfile {
   }
 
   bool matchesRoute(RouteUsageProfile profile) {
-    return provider == profile.provider && routeKey == profile.routeKey;
+    return provider == profile.provider &&
+        routeKey == profile.routeKey &&
+        pathId == profile.pathId;
   }
 
   bool matchesFavorite(FavoriteStop favorite) {
@@ -1137,6 +1150,7 @@ class RouteUsageProfile {
   const RouteUsageProfile({
     required this.provider,
     required this.routeKey,
+    this.pathId,
     required this.routeName,
     required this.totalOpens,
     required this.lastOpenedAtMs,
@@ -1169,6 +1183,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: busProviderFromString(json['provider'] as String? ?? 'tpe'),
       routeKey: (json['routeKey'] as num?)?.toInt() ?? 0,
+      pathId: (json['pathId'] as num?)?.toInt(),
       routeName: json['routeName'] as String? ?? '',
       totalOpens: (json['totalOpens'] as num?)?.toInt() ?? 0,
       lastOpenedAtMs: (json['lastOpenedAtMs'] as num?)?.toInt() ?? 0,
@@ -1181,6 +1196,7 @@ class RouteUsageProfile {
 
   final BusProvider provider;
   final int routeKey;
+  final int? pathId;
   final String routeName;
   final int totalOpens;
   final int lastOpenedAtMs;
@@ -1199,6 +1215,7 @@ class RouteUsageProfile {
     return {
       'provider': provider.name,
       'routeKey': routeKey,
+      if (pathId != null) 'pathId': pathId,
       'routeName': routeName,
       'totalOpens': totalOpens,
       'lastOpenedAtMs': lastOpenedAtMs,
@@ -1290,6 +1307,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       routeName: routeName?.trim().isNotEmpty == true
           ? routeName!.trim()
           : this.routeName,
@@ -1308,6 +1326,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       routeName: routeName?.trim().isNotEmpty == true
           ? routeName!.trim()
           : this.routeName,
@@ -1322,6 +1341,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       routeName: routeName,
       totalOpens: totalOpens,
       lastOpenedAtMs: lastOpenedAtMs,
@@ -1333,6 +1353,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       routeName: routeName,
       totalOpens: totalOpens,
       lastOpenedAtMs: lastOpenedAtMs,

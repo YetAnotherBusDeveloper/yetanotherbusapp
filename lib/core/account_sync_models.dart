@@ -321,17 +321,27 @@ class AccountSyncLocalState {
     required this.syncEnabled,
     required this.favorites,
     required this.preferences,
+    this.routeHistorySyncEnabled = false,
+    this.routeHistoryDeletionPending = false,
+    this.routeHistoryModifiedAtMs,
+    this.routeHistoryDevicePayload,
   });
 
   final bool? syncEnabled;
   final AccountSyncNamespaceLocalState favorites;
   final AccountSyncNamespaceLocalState preferences;
+  final bool routeHistorySyncEnabled;
+  final bool routeHistoryDeletionPending;
+  final int? routeHistoryModifiedAtMs;
+  final Map<String, dynamic>? routeHistoryDevicePayload;
 
   factory AccountSyncLocalState.empty() {
     return const AccountSyncLocalState(
       syncEnabled: null,
       favorites: AccountSyncNamespaceLocalState(),
       preferences: AccountSyncNamespaceLocalState(),
+      routeHistorySyncEnabled: false,
+      routeHistoryDeletionPending: false,
     );
   }
 
@@ -354,6 +364,17 @@ class AccountSyncLocalState {
               ),
             )
           : const AccountSyncNamespaceLocalState(),
+      routeHistorySyncEnabled: json['route_history_sync_enabled'] == true,
+      routeHistoryDeletionPending:
+          json['route_history_deletion_pending'] == true,
+      routeHistoryModifiedAtMs: _jsonIntOrNull(
+        json['route_history_modified_at_ms'],
+      ),
+      routeHistoryDevicePayload: json['route_history_device_payload'] is Map
+          ? (json['route_history_device_payload'] as Map).map(
+              (key, value) => MapEntry(key.toString(), _deepCloneJson(value)),
+            )
+          : null,
     );
   }
 
@@ -373,11 +394,19 @@ class AccountSyncLocalState {
         syncEnabled: syncEnabled,
         favorites: state,
         preferences: preferences,
+        routeHistorySyncEnabled: routeHistorySyncEnabled,
+        routeHistoryDeletionPending: routeHistoryDeletionPending,
+        routeHistoryModifiedAtMs: routeHistoryModifiedAtMs,
+        routeHistoryDevicePayload: routeHistoryDevicePayload,
       ),
       AccountSyncNamespace.preferences => AccountSyncLocalState(
         syncEnabled: syncEnabled,
         favorites: favorites,
         preferences: state,
+        routeHistorySyncEnabled: routeHistorySyncEnabled,
+        routeHistoryDeletionPending: routeHistoryDeletionPending,
+        routeHistoryModifiedAtMs: routeHistoryModifiedAtMs,
+        routeHistoryDevicePayload: routeHistoryDevicePayload,
       ),
     };
   }
@@ -386,6 +415,12 @@ class AccountSyncLocalState {
     Object? syncEnabled = _missingAccountSyncValue,
     AccountSyncNamespaceLocalState? favorites,
     AccountSyncNamespaceLocalState? preferences,
+    bool? routeHistorySyncEnabled,
+    bool? routeHistoryDeletionPending,
+    int? routeHistoryModifiedAtMs,
+    bool clearRouteHistoryModifiedAtMs = false,
+    Map<String, dynamic>? routeHistoryDevicePayload,
+    bool clearRouteHistoryDevicePayload = false,
   }) {
     return AccountSyncLocalState(
       syncEnabled: identical(syncEnabled, _missingAccountSyncValue)
@@ -393,6 +428,16 @@ class AccountSyncLocalState {
           : syncEnabled as bool?,
       favorites: favorites ?? this.favorites,
       preferences: preferences ?? this.preferences,
+      routeHistorySyncEnabled:
+          routeHistorySyncEnabled ?? this.routeHistorySyncEnabled,
+      routeHistoryDeletionPending:
+          routeHistoryDeletionPending ?? this.routeHistoryDeletionPending,
+      routeHistoryModifiedAtMs: clearRouteHistoryModifiedAtMs
+          ? null
+          : (routeHistoryModifiedAtMs ?? this.routeHistoryModifiedAtMs),
+      routeHistoryDevicePayload: clearRouteHistoryDevicePayload
+          ? null
+          : (routeHistoryDevicePayload ?? this.routeHistoryDevicePayload),
     );
   }
 
@@ -401,6 +446,14 @@ class AccountSyncLocalState {
       if (syncEnabled != null) 'sync_enabled': syncEnabled,
       'favorites': favorites.toJson(),
       'preferences': preferences.toJson(),
+      'route_history_sync_enabled': routeHistorySyncEnabled,
+      'route_history_deletion_pending': routeHistoryDeletionPending,
+      if (routeHistoryModifiedAtMs != null)
+        'route_history_modified_at_ms': routeHistoryModifiedAtMs,
+      if (routeHistoryDevicePayload != null)
+        'route_history_device_payload': jsonDecode(
+          jsonEncode(routeHistoryDevicePayload),
+        ),
     };
   }
 }

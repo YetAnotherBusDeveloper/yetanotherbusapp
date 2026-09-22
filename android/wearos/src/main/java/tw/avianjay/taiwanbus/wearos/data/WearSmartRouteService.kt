@@ -24,9 +24,10 @@ object WearSmartRouteService {
         if (profiles.isEmpty()) {
             return null
         }
-        val scoped = profiles.filter {
+        val directionalProfiles = profiles.filter { it.pathId != null }
+        val scoped = directionalProfiles.filter {
             it.provider.equals(preferredProvider, ignoreCase = true)
-        }.ifEmpty { profiles }
+        }.ifEmpty { directionalProfiles }
 
         val nowHour = hourOf(now)
         val prevHour = (nowHour + 23) % 24
@@ -51,6 +52,7 @@ object WearSmartRouteService {
             routeId = profile.routeId,
             routeName = profile.routeName.ifBlank { profile.routeKey.toString() },
             provider = profile.provider,
+            pathId = profile.pathId ?: return null,
             reason = "根據你的使用習慣。",
             source = "local",
             generatedAtMs = now,

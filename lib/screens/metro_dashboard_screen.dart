@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
+import '../widgets/app_content_transition.dart';
 import '../core/friendly_error.dart';
 import '../core/metro_direction.dart';
 import '../core/request_sequence.dart';
@@ -45,6 +46,7 @@ class _MetroScreenState extends State<MetroScreen> {
   MetroSystem? _selectedSystem;
   MetroLine? _selectedLine;
   String? _selectedStationId;
+  int? _selectedDirection;
 
   List<MetroLiveBoardEntry> _etaEntries = [];
   String _etaSource = 'unknown';
@@ -160,6 +162,12 @@ class _MetroScreenState extends State<MetroScreen> {
         stationOfLine,
         selectedLine?.lineId,
       );
+      final directions = selectedLine == null
+          ? const <MetroStationOfLine>[]
+          : buildMetroDirections(
+              lineId: selectedLine.lineId,
+              stationOfLine: stationOfLine,
+            );
 
       setState(() {
         _lines = lines;
@@ -167,6 +175,7 @@ class _MetroScreenState extends State<MetroScreen> {
         _stationOfLine = stationOfLine;
         _selectedLine = selectedLine;
         _selectedStationId = selectedStationId;
+        _selectedDirection = _validDirection(directions, _selectedDirection);
       });
       if (selectedLine != null) {
         await _loadLineEta(line: selectedLine);
@@ -190,10 +199,15 @@ class _MetroScreenState extends State<MetroScreen> {
       return;
     }
     final request = _etaRequest.next();
+    final directions = buildMetroDirections(
+      lineId: activeLine.lineId,
+      stationOfLine: _stationOfLine,
+    );
     setState(() {
       _loadingEta = true;
       _lineError = null;
       _selectedLine = activeLine;
+      _selectedDirection = _validDirection(directions, _selectedDirection);
     });
     try {
       final eta = await _repo.getMetroLineEta(
@@ -260,6 +274,21 @@ class _MetroScreenState extends State<MetroScreen> {
       }
     }
     return null;
+  }
+
+  int? _validDirection(
+    List<MetroStationOfLine> directions,
+    int? preferredDirection,
+  ) {
+    if (directions.isEmpty) {
+      return null;
+    }
+    if (directions.any(
+      (direction) => direction.direction == preferredDirection,
+    )) {
+      return preferredDirection;
+    }
+    return directions.first.direction;
   }
 
   String? _firstStationId(
@@ -479,37 +508,43 @@ class _MetroScreenState extends State<MetroScreen> {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 960),
-                child: _loading && _systems.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
-                    : _pageError != null && _systems.isEmpty
-                    ? _ErrorState(
-                        message: _pageError!,
-                        onRetry: () => _loadSystems(refresh: true),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _selectedSystem == null
-                            ? () => _loadSystems(refresh: true)
-                            : () => _loadSystemData(
-                                system: _selectedSystem!,
-                                refresh: true,
-                              ),
-                        child: ListView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.all(16),
-                          children: [
-                            _buildSystemSelector(theme),
-                            const SizedBox(height: 16),
-                            _buildLineSelector(theme),
-                            const SizedBox(height: 16),
-                            if (_lineError != null) ...[
-                              Text(
-                                _lineError!,
-                                style: TextStyle(
-                                  color: theme.colorScheme.error,
+                child: AppContentTransition(
+                  state: (
+                    _systems.isEmpty,
+                    _systems.isEmpty && _loading,
+                    _systems.isEmpty && _pageError != null,
+                  ),
+                  child: _loading && _systems.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : _pageError != null && _systems.isEmpty
+                      ? _ErrorState(
+                          message: _pageError!,
+                          onRetry: () => _loadSystems(refresh: true),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: _selectedSystem == null
+                              ? () => _loadSystems(refresh: true)
+                              : () => _loadSystemData(
+                                  system: _selectedSystem!,
+                                  refresh: true,
                                 ),
-                              ),
+                          child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(16),
+                            children: [
+                              _buildSystemSelector(theme),
                               const SizedBox(height: 16),
-                            ],
+                              _buildLineSelector(theme),
+                              const SizedBox(height: 16),
+                              if (_lineError != null) ...[
+                                Text(
+                                  _lineError!,
+                                  style: TextStyle(
+                                    color: theme.colorScheme.error,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                              ],
                             if (_selectedLine != null) ...[
                               _buildSourceBanner(theme),
                               const SizedBox(height: 16),
@@ -520,8 +555,8 @@ class _MetroScreenState extends State<MetroScreen> {
                                   setState(() => _panel = panel),
                             ),
                             const SizedBox(height: 16),
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 220),
+                            AppContentTransition(
+                              state: _panel,
                               child: switch (_panel) {
                                 _MetroPanel.live => _buildLivePanel(theme),
                                 _MetroPanel.map => _buildMapPanel(theme),
@@ -529,7 +564,7 @@ class _MetroScreenState extends State<MetroScreen> {
                             ),
                           ],
                         ),
-                      ),
+                ),
               ),
             ),
           ),
@@ -673,7 +708,6 @@ class _MetroScreenState extends State<MetroScreen> {
   Widget _buildSourceBanner(ThemeData theme) {
     final currentHeadway = _currentHeadway;
     final message = switch (_etaSource) {
-      'liveboard' => '目前使用即時到站資料。',
       'timetable' => _etaMessage ?? '目前改用時刻表推估到站。',
       'frequency' =>
         currentHeadway == null
@@ -728,39 +762,51 @@ class _MetroScreenState extends State<MetroScreen> {
       );
     }
 
+    final directions = _lineDirections;
+    final selectedDirection = _validDirection(directions, _selectedDirection);
+    final direction = directions.firstWhere(
+      (item) => item.direction == selectedDirection,
+      orElse: () => directions.first,
+    );
+
     return Column(
       key: const ValueKey('metro_live'),
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: _lineDirections.indexed
-          .map((item) {
-            final directionIndex = item.$1;
-            final direction = item.$2;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _DirectionSection(
-                direction: direction,
-                lineColor: _parseLineColor(_selectedLine!.color),
-                headway: _currentHeadway,
-                etaSource: _etaSource,
-                initiallyExpanded: directionIndex == 0,
-                onStationTap: (stationId) {
-                  setState(() {
-                    _selectedStationId = stationId;
-                    _panel = _MetroPanel.map;
-                  });
-                },
-                stationBuilder: (station) => _MetroStationRow(
-                  station: station,
-                  entry: _nearestEntry(direction, station),
-                  lineColor: _parseLineColor(_selectedLine!.color),
-                  frequencyLabel: _currentHeadway == null
-                      ? null
-                      : '${_currentHeadway!.minHeadway}-${_currentHeadway!.maxHeadway}分',
-                ),
-              ),
-            );
-          })
-          .toList(growable: false),
+      children: [
+        if (directions.length > 1) ...[
+          MetroDirectionSelector(
+            directions: directions,
+            selectedDirection: direction.direction,
+            onChanged: (value) => setState(() => _selectedDirection = value),
+          ),
+          const SizedBox(height: 20),
+        ],
+        AppContentTransition(
+          state: direction.direction,
+          child: _DirectionSection(
+            key: ValueKey('metro_direction_${direction.direction}'),
+            direction: direction,
+            lineColor: _parseLineColor(_selectedLine!.color),
+            headway: _currentHeadway,
+            etaSource: _etaSource,
+            onStationTap: (stationId) {
+              setState(() {
+                _selectedStationId = stationId;
+                _panel = _MetroPanel.map;
+              });
+            },
+            stationBuilder: (station) => _MetroStationRow(
+              station: station,
+              entry: _nearestEntry(direction, station),
+              lineColor: _parseLineColor(_selectedLine!.color),
+              frequencyLabel: _currentHeadway == null
+                  ? null
+                  : '${_currentHeadway!.minHeadway}-${_currentHeadway!.maxHeadway}分',
+            ),
+            initiallyExpanded: true,
+          ),
+        ),
+      ],
     );
   }
 
@@ -904,6 +950,7 @@ class _PanelButton extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onPressed,
+    super.key,
   });
 
   final IconData icon;
@@ -919,12 +966,12 @@ class _PanelButton extends StatelessWidget {
           ? FilledButton.icon(
               onPressed: onPressed,
               icon: Icon(icon),
-              label: Text(label),
+              label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
             )
           : FilledButton.tonalIcon(
               onPressed: onPressed,
               icon: Icon(icon),
-              label: Text(label),
+              label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
     );
   }
@@ -998,6 +1045,79 @@ class _LinePill extends StatelessWidget {
   }
 }
 
+class MetroDirectionSelector extends StatelessWidget {
+  const MetroDirectionSelector({
+    required this.directions,
+    required this.selectedDirection,
+    required this.onChanged,
+    super.key,
+  });
+
+  final List<MetroStationOfLine> directions;
+  final int selectedDirection;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final buttons = <Widget>[];
+    for (final entry in directions.indexed) {
+      final index = entry.$1;
+      final direction = entry.$2;
+      final destination = direction.stations.isEmpty
+          ? '方向 ${direction.direction + 1}'
+          : direction.stations.last.name;
+      if (buttons.isNotEmpty) {
+        buttons.add(const SizedBox(width: 12));
+      }
+      buttons.add(
+        Expanded(
+          child: _PanelButton(
+            key: ValueKey('metro_direction_button_${direction.direction}'),
+            icon: index == 1
+                ? Icons.arrow_back_rounded
+                : Icons.arrow_forward_rounded,
+            label: '往$destination',
+            selected: direction.direction == selectedDirection,
+            onPressed: () => onChanged(direction.direction),
+          ),
+        ),
+      );
+    }
+    return Card(
+      key: const ValueKey('metro_direction_selector'),
+      margin: const EdgeInsets.only(top: 8),
+      color: theme.colorScheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.swap_horiz_rounded,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '行駛方向',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(children: buttons),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _DirectionSection extends StatelessWidget {
   const _DirectionSection({
     required this.direction,
@@ -1007,6 +1127,7 @@ class _DirectionSection extends StatelessWidget {
     required this.stationBuilder,
     required this.onStationTap,
     required this.initiallyExpanded,
+    super.key,
   });
 
   final MetroStationOfLine direction;
@@ -1092,6 +1213,7 @@ class _MetroStationRow extends StatelessWidget {
           seconds: entry?.estimatedTime,
           message: entry == null ? frequencyLabel : null,
           size: 56,
+          darkBackground: true,
         ),
         const SizedBox(width: 14),
         Expanded(
@@ -1237,7 +1359,11 @@ class _MetroArrivalTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          GenericEtaBadge(seconds: entry.estimatedTime, size: 52),
+          GenericEtaBadge(
+            seconds: entry.estimatedTime,
+            size: 52,
+            darkBackground: true,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(

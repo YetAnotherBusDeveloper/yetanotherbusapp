@@ -101,16 +101,20 @@ const _stopsBody = {
 };
 
 class _FakeGeolocator extends GeolocatorPlatform {
+  static int requestCount = 0;
+
   @override
-  Future<bool> isLocationServiceEnabled() async => false;
+  Future<bool> isLocationServiceEnabled() async => true;
 
   @override
   Future<LocationPermission> checkPermission() async =>
       LocationPermission.denied;
 
   @override
-  Future<LocationPermission> requestPermission() async =>
-      LocationPermission.denied;
+  Future<LocationPermission> requestPermission() async {
+    requestCount++;
+    return LocationPermission.denied;
+  }
 }
 
 MockClient _failingClient(_RequestLog log, int status) {
@@ -339,6 +343,25 @@ Future<void> _pumpUntil(
   fail(reason);
 }
 
+Marker _busMarker(WidgetTester tester, String label) {
+  for (final layer in tester.widgetList<MarkerLayer>(
+    find.byType(MarkerLayer),
+  )) {
+    for (final marker in layer.markers) {
+      final gesture = marker.child;
+      if (gesture is! GestureDetector || gesture.child is! Opacity) {
+        continue;
+      }
+      final opacity = gesture.child! as Opacity;
+      final busMarker = opacity.child;
+      if (busMarker is BusMapBusMarker && busMarker.label == label) {
+        return marker;
+      }
+    }
+  }
+  throw TestFailure('bus marker $label was not found');
+}
+
 /// Same harness, but the server refuses every request.
 void _failingMapTest(
   String description,
@@ -347,6 +370,7 @@ void _failingMapTest(
 ) {
   testWidgets(description, (tester) async {
     SharedPreferences.setMockInitialValues({});
+    _FakeGeolocator.requestCount = 0;
     GeolocatorPlatform.instance = _FakeGeolocator();
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     final controller = await _createController(
@@ -378,6 +402,7 @@ void _mapTest(
 }) {
   testWidgets(description, (tester) async {
     SharedPreferences.setMockInitialValues({});
+    _FakeGeolocator.requestCount = 0;
     GeolocatorPlatform.instance = _FakeGeolocator();
     // Windows has no Google Maps, so the flutter_map branch renders.
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
@@ -411,7 +436,51 @@ void main() {
     );
 
     expect(find.byType(BusMapBusMarker), findsNWidgets(2));
+    final eastbound = tester
+        .widgetList<BusMapBusMarker>(find.byType(BusMapBusMarker))
+        .singleWhere((marker) => marker.label == '234 KKA-1234');
+    expect(eastbound.heading, 90);
+    expect(find.byType(BusMapHeadingIndicator), findsNWidgets(2));
     expect(log.count('/cities/TPE/buses'), 1);
+  });
+
+  _mapTest('requests location on open and lets the rider retry', (
+    tester,
+    log,
+    controller,
+  ) async {
+    await _pumpMap(tester, controller);
+    await _pumpUntil(
+      tester,
+      () => _FakeGeolocator.requestCount == 1,
+      reason: 'the initial location request never ran',
+    );
+
+    expect(find.byType(BusMapBusMarker), findsWidgets);
+
+    await tester.tap(find.byTooltip('定位'));
+    await tester.pump();
+
+    expect(_FakeGeolocator.requestCount, 2);
+    expect(find.text('沒有取得定位權限。'), findsOneWidget);
+  });
+
+  _mapTest('moves an unselected bus smoothly between server updates', (
+    tester,
+    log,
+    controller,
+  ) async {
+    await _pumpMap(tester, controller);
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+    );
+    final before = _busMarker(tester, '234 KKA-1234').point;
+
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final after = _busMarker(tester, '234 KKA-1234').point;
+    expect(after.longitude, greaterThan(before.longitude));
   });
 
   _mapTest('a bus the feed could not pin down is still named', (

@@ -4,12 +4,20 @@ import 'transit_repository.dart';
 
 /// A location attempt that failed for a reason worth telling the user about.
 class LocationFailure implements Exception {
-  const LocationFailure(this.message, {this.deniedForever = false});
+  const LocationFailure(
+    this.message, {
+    this.deniedForever = false,
+    this.serviceDisabled = false,
+  });
 
   final String message;
 
   /// The user has to go into system settings; asking again will not help.
   final bool deniedForever;
+
+  /// The device-wide location switch is off, so app permission settings alone
+  /// cannot resolve the failure.
+  final bool serviceDisabled;
 
   @override
   String toString() => message;
@@ -27,7 +35,7 @@ Future<Position> resolveUserPosition({
   LocationAccuracy accuracy = LocationAccuracy.medium,
 }) async {
   if (!await Geolocator.isLocationServiceEnabled()) {
-    throw const LocationFailure('定位服務尚未開啟。');
+    throw const LocationFailure('定位服務尚未開啟。', serviceDisabled: true);
   }
 
   var permission = await Geolocator.checkPermission();
@@ -54,7 +62,7 @@ Future<Position> resolveUserPosition({
         accuracy: accuracy,
         timeLimit: timeLimit,
       ),
-    );
+    ).timeout(timeLimit);
   } catch (_) {
     if (lastKnown != null) {
       return lastKnown;
@@ -65,7 +73,10 @@ Future<Position> resolveUserPosition({
 
 /// A station plus how far the user is from it.
 class NearestRailStation {
-  const NearestRailStation({required this.station, required this.distanceMeters});
+  const NearestRailStation({
+    required this.station,
+    required this.distanceMeters,
+  });
 
   final RailStation station;
   final double distanceMeters;

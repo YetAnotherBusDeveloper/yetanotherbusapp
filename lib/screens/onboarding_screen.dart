@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../app/bus_app.dart';
+import '../core/app_motion.dart';
+import '../widgets/app_content_transition.dart';
 import '../core/app_controller.dart';
 import '../core/app_routes.dart';
 import '../core/friendly_error.dart';
@@ -36,11 +38,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _goToStep(int index) async {
-    await _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 280),
-      curve: Curves.easeOutCubic,
-    );
+    _pageController.jumpToPage(index);
   }
 
   Future<void> _nextStep() async {
@@ -180,7 +178,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             right: index == _effectiveStepCount - 1 ? 0 : 8,
                           ),
                           child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 220),
+                            duration: AppMotion.duration(context),
+                            curve: AppMotion.curve,
                             height: 6,
                             decoration: BoxDecoration(
                               color: active
@@ -195,44 +194,47 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                   const SizedBox(height: 18),
                   Expanded(
-                    child: PageView(
-                      controller: _pageController,
-                      physics: const NeverScrollableScrollPhysics(),
-                      onPageChanged: (index) {
-                        setState(() {
-                          _stepIndex = index;
-                        });
-                      },
-                      children: [
-                        _IntroStep(onNext: _nextStep),
-                        _PermissionStep(
-                          requestingPermission: _requestingPermission,
-                          resolvingLocation: _resolvingLocation,
-                          permissionMessage: _permissionMessage,
-                          onRequestPermission:
-                              _requestLocationPermissionAndContinue,
-                          onSkip: _nextStep,
-                          onBack: () => _goToStep(_stepIndex - 1),
-                        ),
-                        if (_hasDatabaseStep)
-                          _DatabaseStep(
-                            controller: controller,
-                            suggestedProvider: _suggestedProvider,
-                            onProviderToggled: (provider, selected) async {
-                              _manualProviderSelection = true;
-                              if (selected) {
-                                await controller.updateProvider(provider);
-                              } else {
-                                await controller.toggleSelectedProvider(
-                                  provider,
-                                  false,
-                                );
-                              }
-                            },
+                    child: AppContentTransition(
+                      state: _stepIndex,
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        onPageChanged: (index) {
+                          setState(() {
+                            _stepIndex = index;
+                          });
+                        },
+                        children: [
+                          _IntroStep(onNext: _nextStep),
+                          _PermissionStep(
+                            requestingPermission: _requestingPermission,
+                            resolvingLocation: _resolvingLocation,
+                            permissionMessage: _permissionMessage,
+                            onRequestPermission:
+                                _requestLocationPermissionAndContinue,
+                            onSkip: _nextStep,
                             onBack: () => _goToStep(_stepIndex - 1),
-                            onFinish: _nextStep,
                           ),
-                      ],
+                          if (_hasDatabaseStep)
+                            _DatabaseStep(
+                              controller: controller,
+                              suggestedProvider: _suggestedProvider,
+                              onProviderToggled: (provider, selected) async {
+                                _manualProviderSelection = true;
+                                if (selected) {
+                                  await controller.updateProvider(provider);
+                                } else {
+                                  await controller.toggleSelectedProvider(
+                                    provider,
+                                    false,
+                                  );
+                                }
+                              },
+                              onBack: () => _goToStep(_stepIndex - 1),
+                              onFinish: _nextStep,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ],

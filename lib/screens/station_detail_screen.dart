@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
 import '../app/bus_app.dart';
+import '../widgets/app_content_transition.dart';
 import '../core/android_home_integration.dart';
 import '../core/app_routes.dart';
 import '../core/friendly_error.dart';
@@ -100,26 +101,33 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
           ),
         ],
       ),
-      body: _loading && station == null
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null && station == null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(_error!, textAlign: TextAlign.center),
-                    const SizedBox(height: 12),
-                    FilledButton.tonal(
-                      onPressed: () => unawaited(_load()),
-                      child: const Text('重試'),
-                    ),
-                  ],
+      body: AppContentTransition(
+        state: station != null
+            ? 'content'
+            : _loading
+            ? 'loading'
+            : 'error',
+        child: _loading && station == null
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null && station == null
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!, textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      FilledButton.tonal(
+                        onPressed: () => unawaited(_load()),
+                        child: const Text('重試'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            )
-          : _buildStation(station!),
+              )
+            : _buildStation(station!),
+      ),
     );
   }
 

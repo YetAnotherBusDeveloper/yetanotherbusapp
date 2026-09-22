@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
+import '../widgets/app_content_transition.dart';
 import '../core/friendly_error.dart';
 import '../core/rail_line_stations.dart';
 import '../core/rail_time.dart';
@@ -393,44 +394,51 @@ class _ThsrScreenState extends State<ThsrScreen> {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 960),
-                child: _loadingStations && _stations.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
-                    : _pageError != null && _stations.isEmpty
-                    ? TransitErrorState(
-                        message: _pageError!,
-                        onRetry: () => _loadInitialData(refresh: true),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: () => _loadInitialData(refresh: true),
-                        child: ListView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.all(16),
-                          children: [
-                            if (_alerts.isNotEmpty) ...[
-                              RailAlertCard(alerts: _alerts),
+                child: AppContentTransition(
+                  state: (
+                    _stations.isEmpty,
+                    _stations.isEmpty && _loadingStations,
+                    _stations.isEmpty && _pageError != null,
+                  ),
+                  child: _loadingStations && _stations.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : _pageError != null && _stations.isEmpty
+                      ? TransitErrorState(
+                          message: _pageError!,
+                          onRetry: () => _loadInitialData(refresh: true),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: () => _loadInitialData(refresh: true),
+                          child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(16),
+                            children: [
+                              if (_alerts.isNotEmpty) ...[
+                                RailAlertCard(alerts: _alerts),
+                                const SizedBox(height: 16),
+                              ],
+                              _buildSeatOverview(theme),
                               const SizedBox(height: 16),
+                              _ThsrPanelButtons(
+                                current: _panel,
+                                onChanged: (panel) =>
+                                    setState(() => _panel = panel),
+                              ),
+                              const SizedBox(height: 16),
+                              AppContentTransition(
+                                state: _panel,
+                                child: switch (_panel) {
+                                  _ThsrPanel.timetable => _buildTimetablePanel(
+                                    theme,
+                                  ),
+                                  _ThsrPanel.seats => _buildSeatPanel(theme),
+                                  _ThsrPanel.map => _buildMapPanel(theme),
+                                },
+                              ),
                             ],
-                            _buildSeatOverview(theme),
-                            const SizedBox(height: 16),
-                            _ThsrPanelButtons(
-                              current: _panel,
-                              onChanged: (panel) =>
-                                  setState(() => _panel = panel),
-                            ),
-                            const SizedBox(height: 16),
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 220),
-                              child: switch (_panel) {
-                                _ThsrPanel.timetable => _buildTimetablePanel(
-                                  theme,
-                                ),
-                                _ThsrPanel.seats => _buildSeatPanel(theme),
-                                _ThsrPanel.map => _buildMapPanel(theme),
-                              },
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
           ),
@@ -829,7 +837,6 @@ class _ThsrScreenState extends State<ThsrScreen> {
       ],
     );
   }
-
 }
 
 class _ThsrPanelButtons extends StatelessWidget {
@@ -873,7 +880,6 @@ class _ThsrPanelButtons extends StatelessWidget {
   }
 }
 
-
 class _ThsrTimetableTile extends StatelessWidget {
   const _ThsrTimetableTile({required this.train, this.isPast = false});
 
@@ -899,9 +905,7 @@ class _ThsrTimetableTile extends StatelessWidget {
         : (isDark ? Colors.orange.shade200 : Colors.orange.shade900);
 
     return Card(
-      color: isPast
-          ? cs.surfaceContainerHighest.withValues(alpha: 0.22)
-          : null,
+      color: isPast ? cs.surfaceContainerHighest.withValues(alpha: 0.22) : null,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
@@ -985,7 +989,6 @@ class _ThsrTimetableTile extends StatelessWidget {
       ),
     );
   }
-
 }
 
 class _ThsrSeatTile extends StatelessWidget {
@@ -1014,9 +1017,7 @@ class _ThsrSeatTile extends StatelessWidget {
               : Colors.orange.shade100);
 
     return Card(
-      color: isPast
-          ? cs.surfaceContainerHighest.withValues(alpha: 0.22)
-          : null,
+      color: isPast ? cs.surfaceContainerHighest.withValues(alpha: 0.22) : null,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -1175,8 +1176,6 @@ class _SeatChipStyle {
   final Color background;
 }
 
-
-
 class _SelectedThsrStationCard extends StatelessWidget {
   const _SelectedThsrStationCard({
     required this.station,
@@ -1254,5 +1253,3 @@ class _SelectedThsrStationCard extends StatelessWidget {
     );
   }
 }
-
-

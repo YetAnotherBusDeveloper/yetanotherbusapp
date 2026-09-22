@@ -220,7 +220,7 @@ void _screenTest(
 }
 
 void main() {
-  _screenTest('delays then fades in route stops once data is ready', (
+  _screenTest('fades in route stops immediately once data is ready', (
     tester,
     repository,
   ) async {
@@ -235,11 +235,7 @@ void main() {
     expect(stopsFade, findsOneWidget);
     expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 0);
 
-    await tester.pump(const Duration(milliseconds: 499));
-    expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 0);
-
-    await tester.pump(const Duration(milliseconds: 1));
-    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pump(const Duration(milliseconds: 110));
     expect(
       tester.widget<FadeTransition>(stopsFade).opacity.value,
       greaterThan(0),

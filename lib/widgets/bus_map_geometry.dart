@@ -135,6 +135,14 @@ double bearingBetween(LatLng start, LatLng end) {
   return (math.atan2(y, x) * 180 / math.pi + 360) % 360;
 }
 
+double? normalizeHeading(double? heading) {
+  if (heading == null || !heading.isFinite) {
+    return null;
+  }
+  final normalized = heading % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
 ({double dx, double dy}) _toMeters(
   LatLng point, {
   required double referenceLat,
@@ -261,6 +269,27 @@ class RouteGeometry {
       return lerpLatLng(points[index], points[index + 1], t);
     }
     return points.last;
+  }
+
+  /// The forward bearing of the segment containing [distanceMeters].
+  ///
+  /// At an exact vertex the outgoing segment wins, which keeps a bus pointing
+  /// into the turn it is about to travel rather than back along the prior leg.
+  double? bearingAtDistance(double distanceMeters) {
+    if (points.length <= 1 || segmentBearings.isEmpty) {
+      return null;
+    }
+    if (distanceMeters >= totalLengthMeters) {
+      return normalizeHeading(segmentBearings[points.length - 2]);
+    }
+
+    final clampedDistance = math.max(0.0, distanceMeters);
+    for (var index = 0; index < points.length - 1; index++) {
+      if (clampedDistance < cumulativeDistances[index + 1]) {
+        return normalizeHeading(segmentBearings[index]);
+      }
+    }
+    return normalizeHeading(segmentBearings[points.length - 2]);
   }
 }
 

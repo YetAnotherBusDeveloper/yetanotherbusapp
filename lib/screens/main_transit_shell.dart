@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../app/bus_app.dart';
+import '../core/app_motion.dart';
 import '../core/desktop_discord_presence_service.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/transit_drawer.dart';
@@ -29,11 +30,10 @@ class _MainTransitShellState extends State<MainTransitShell>
   TransitMode? _outgoingMode;
   final Set<TransitMode> _loadedModes = {TransitMode.bus};
   late final AnimationController _modeTransitionController;
-  double _modeTransitionDirection = 1;
 
   static const _desktopRailExtendedBreakpoint = 1280.0;
   static const _compactNavigationHeight = 64.0;
-  static const _switchDuration = Duration(milliseconds: 220);
+  static const _switchDuration = AppMotion.standard;
 
   @override
   void initState() {
@@ -50,6 +50,9 @@ class _MainTransitShellState extends State<MainTransitShell>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _modeTransitionController.value = 1;
+    }
     unawaited(_syncDesktopPresenceForMode(_currentMode));
   }
 
@@ -63,20 +66,14 @@ class _MainTransitShellState extends State<MainTransitShell>
       return;
     }
     final outgoingMode = _currentMode;
-    final outgoingIndex = kTransitModeDestinations.indexWhere(
-      (destination) => destination.mode == outgoingMode,
-    );
-    final incomingIndex = kTransitModeDestinations.indexWhere(
-      (destination) => destination.mode == mode,
-    );
+    final animate = !MediaQuery.disableAnimationsOf(context);
 
     setState(() {
       _loadedModes.add(mode);
-      _outgoingMode = outgoingMode;
+      _outgoingMode = animate ? outgoingMode : null;
       _currentMode = mode;
-      _modeTransitionDirection = incomingIndex < outgoingIndex ? -1 : 1;
     });
-    _modeTransitionController.forward(from: 0);
+    if (animate) _modeTransitionController.forward(from: 0);
     unawaited(_syncDesktopPresenceForMode(mode));
   }
 
@@ -216,6 +213,7 @@ class _MainTransitShellState extends State<MainTransitShell>
         child: SafeArea(
           top: false,
           child: NavigationBar(
+            animationDuration: AppMotion.duration(context),
             height: _compactNavigationHeight,
             backgroundColor: Colors.transparent,
             elevation: 0,
@@ -285,17 +283,10 @@ class _MainTransitShellState extends State<MainTransitShell>
               animation: _modeTransitionController,
               child: content,
               builder: (context, child) {
-                final offset = isActive && _outgoingMode != null
-                    ? _modeTransitionDirection *
-                          (1 -
-                              Curves.easeOutCubic.transform(
-                                _modeTransitionController.value,
-                              ))
-                    : 0.0;
-                return FractionalTranslation(
-                  translation: Offset(offset, 0),
-                  child: child,
-                );
+                final opacity = isActive && _outgoingMode != null
+                    ? AppMotion.curve.transform(_modeTransitionController.value)
+                    : 1.0;
+                return Opacity(opacity: opacity, child: child);
               },
             ),
           ),

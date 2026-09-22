@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/transit_repository.dart';
+import '../core/app_motion.dart';
+import 'app_content_transition.dart';
 
 /// Segmented-looking button used by the transit dashboards to switch panels.
 ///
@@ -24,17 +26,20 @@ class TransitPanelButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: 48,
-      child: selected
-          ? FilledButton.icon(
-              onPressed: onPressed,
-              icon: Icon(icon),
-              label: Text(label),
-            )
-          : FilledButton.tonalIcon(
-              onPressed: onPressed,
-              icon: Icon(icon),
-              label: Text(label),
-            ),
+      child: FilledButton.icon(
+        style: FilledButton.styleFrom(
+          animationDuration: AppMotion.duration(context),
+          backgroundColor: selected
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.secondaryContainer,
+          foregroundColor: selected
+              ? Theme.of(context).colorScheme.onPrimary
+              : Theme.of(context).colorScheme.onSecondaryContainer,
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon),
+        label: Text(label),
+      ),
     );
   }
 }
@@ -204,10 +209,15 @@ class PastTrainsDisclosure extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         child: Row(
           children: [
-            Icon(
-              expanded ? Icons.expand_more_rounded : Icons.chevron_right_rounded,
-              size: 20,
-              color: theme.colorScheme.onSurfaceVariant,
+            AppContentTransition(
+              state: expanded,
+              child: Icon(
+                expanded
+                    ? Icons.expand_more_rounded
+                    : Icons.chevron_right_rounded,
+                size: 20,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(width: 6),
             Text(

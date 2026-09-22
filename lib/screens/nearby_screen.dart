@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../app/bus_app.dart';
+import '../widgets/app_content_transition.dart';
 import '../core/bus_repository.dart';
 import '../core/friendly_error.dart';
 import '../core/models.dart';
 import '../core/route_direction_label.dart';
+import '../core/user_location.dart';
 import 'adaptive_settings_presenter.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/eta_badge.dart';
@@ -35,10 +37,14 @@ class _NearbyStopGroup {
 class _NearbyScreenState extends State<NearbyScreen> {
   bool _loading = true;
   String? _error;
+  LocationFailure? _locationFailure;
   List<NearbyStopResult> _results = const [];
   Map<String, LiveStopMap> _liveMaps = const {};
   bool _loadingEtas = false;
   int _requestGeneration = 0;
+  int _etaLoadsInFlight = 0;
+  int _etaLoadSequence = 0;
+  final Map<String, int> _liveMapSequenceByRoute = {};
 
   @override
   void initState() {
@@ -54,26 +60,15 @@ class _NearbyScreenState extends State<NearbyScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _locationFailure = null;
       _liveMaps = const {};
+      _liveMapSequenceByRoute.clear();
+      _etaLoadsInFlight = 0;
       _loadingEtas = false;
     });
 
     try {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        throw StateError('定位服務尚未開啓。');
-      }
-
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        throw StateError('沒有取得定位權限。');
-      }
-
-      final position = await Geolocator.getCurrentPosition();
+      final position = await resolveUserPosition();
       final results = await controller.getNearbyStops(
         latitude: position.latitude,
         longitude: position.longitude,
@@ -86,9 +81,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
         _results = results;
       });
 
+      unawaited(_loadEtas(results, requestGeneration: requestGeneration));
       // Phase 2: fill every visible stop group, then load any ETAs that were
-      // not already embedded by the station endpoint. Neither blocks the seed
-      // rows from rendering.
+      // not already embedded by the station endpoint. Seed ETA loading runs in
+      // parallel so slow station-group completion cannot delay first arrivals.
       unawaited(
         _completeNearbyStops(
           position: position,
@@ -103,6 +99,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       setState(() {
         _results = const [];
         _error = friendlyErrorMessage(error);
+        _locationFailure = error is LocationFailure ? error : null;
       });
     } finally {
       if (mounted && requestGeneration == _requestGeneration) {
@@ -125,7 +122,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
     }
 
     final controller = AppControllerScope.read(context);
-    setState(() => _loadingEtas = true);
 
     var completedResults = seedResults;
     try {
@@ -142,10 +138,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
     if (!mounted || requestGeneration != _requestGeneration) {
       return;
     }
+    final mergedResults = _preserveEmbeddedEtas(completedResults, _results);
     setState(() {
-      _results = completedResults;
+      _results = mergedResults;
     });
-    await _loadEtas(completedResults, requestGeneration: requestGeneration);
+    await _loadEtas(mergedResults, requestGeneration: requestGeneration);
   }
 
   bool _hasEmbeddedLiveData(StopInfo stop) {
@@ -172,46 +169,96 @@ class _NearbyScreenState extends State<NearbyScreen> {
         .toSet()
         .toList(growable: false);
     if (routeIds.isEmpty) {
-      setState(() => _loadingEtas = false);
       return;
     }
 
+    final loadSequence = ++_etaLoadSequence;
+    _etaLoadsInFlight += 1;
+    setState(() => _loadingEtas = true);
     Map<String, LiveStopMap> liveMaps = const {};
     try {
-      liveMaps = await controller.repository.getBatchLiveStopMaps(routeIds);
-    } catch (_) {}
+      try {
+        liveMaps = await controller.repository.getBatchLiveStopMaps(routeIds);
+      } catch (_) {}
 
-    final missingRouteIds = routeIds
-        .map((routeId) => routeId.trim())
-        .where((routeId) => !liveMaps.containsKey(routeId))
-        .toSet();
-    if (missingRouteIds.isNotEmpty) {
-      final fallbackEntries = await Future.wait(
-        missingRouteIds.map((routeId) async {
-          try {
-            final liveMap = await controller.repository.getLiveStopMap(routeId);
-            return MapEntry(routeId, liveMap);
-          } catch (_) {
-            return null;
+      final missingRouteIds = routeIds
+          .map((routeId) => routeId.trim())
+          .where((routeId) => !liveMaps.containsKey(routeId))
+          .toSet();
+      if (missingRouteIds.isNotEmpty) {
+        final fallbackEntries = await Future.wait(
+          missingRouteIds.map((routeId) async {
+            try {
+              final liveMap = await controller.repository.getLiveStopMap(
+                routeId,
+              );
+              return MapEntry(routeId, liveMap);
+            } catch (_) {
+              return null;
+            }
+          }),
+        );
+        final merged = Map<String, LiveStopMap>.from(liveMaps);
+        for (final entry in fallbackEntries) {
+          if (entry != null) {
+            merged[entry.key] = entry.value;
           }
-        }),
-      );
-      final merged = Map<String, LiveStopMap>.from(liveMaps);
-      for (final entry in fallbackEntries) {
-        if (entry != null) {
-          merged[entry.key] = entry.value;
         }
+        liveMaps = merged;
       }
-      liveMaps = merged;
-    }
 
-    if (!mounted || requestGeneration != _requestGeneration) {
-      return;
+      if (!mounted || requestGeneration != _requestGeneration) {
+        return;
+      }
+      setState(() {
+        final merged = Map<String, LiveStopMap>.from(_liveMaps);
+        for (final entry in liveMaps.entries) {
+          if (loadSequence >= (_liveMapSequenceByRoute[entry.key] ?? 0)) {
+            merged[entry.key] = entry.value;
+            _liveMapSequenceByRoute[entry.key] = loadSequence;
+          }
+        }
+        _liveMaps = merged;
+      });
+    } finally {
+      if (mounted && requestGeneration == _requestGeneration) {
+        _etaLoadsInFlight -= 1;
+        setState(() {
+          _loadingEtas = _etaLoadsInFlight > 0;
+        });
+      }
     }
-    setState(() {
-      _liveMaps = liveMaps;
-      _loadingEtas = false;
-    });
+  }
+
+  List<NearbyStopResult> _preserveEmbeddedEtas(
+    List<NearbyStopResult> completed,
+    List<NearbyStopResult> current,
+  ) {
+    final currentByKey = {
+      for (final item in current) _nearbyResultKey(item): item,
+    };
+    return completed
+        .map((item) {
+          final previous = currentByKey[_nearbyResultKey(item)];
+          if (previous == null ||
+              _hasEmbeddedLiveData(item.stop) ||
+              !_hasEmbeddedLiveData(previous.stop)) {
+            return item;
+          }
+          return NearbyStopResult(
+            route: item.route,
+            stop: previous.stop,
+            distanceMeters: item.distanceMeters,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  String _nearbyResultKey(NearbyStopResult item) {
+    final stopId = item.stop.rawStopId?.trim().isNotEmpty == true
+        ? item.stop.rawStopId!.trim()
+        : item.stop.stopId.toString();
+    return '${item.route.routeId.trim()}:${item.stop.pathId}:$stopId';
   }
 
   StopInfo _liveStop(NearbyStopResult item) {
@@ -225,6 +272,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       msg: payload.msg,
       t: payload.t,
       buses: payload.buses,
+      etas: payload.etas,
     );
   }
 
@@ -433,111 +481,133 @@ class _NearbyScreenState extends State<NearbyScreen> {
             ),
           ],
         ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(_error!, textAlign: TextAlign.center),
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        alignment: WrapAlignment.center,
-                        children: [
-                          FilledButton(
-                            onPressed: _loadNearbyStops,
-                            child: const Text('重試'),
-                          ),
-                          OutlinedButton(
-                            onPressed: () {
-                              openAdaptiveSettingsScreen(context);
-                            },
-                            child: const Text('前往設定'),
-                          ),
-                        ],
-                      ),
-                    ],
+        body: AppContentTransition(
+          state: _loading
+              ? 'loading'
+              : _error != null
+              ? 'error'
+              : groups.isEmpty
+              ? 'empty'
+              : 'content',
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!, textAlign: TextAlign.center),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            FilledButton(
+                              onPressed: _loadNearbyStops,
+                              child: const Text('重試'),
+                            ),
+                            OutlinedButton(
+                              onPressed:
+                                  _locationFailure?.serviceDisabled == true
+                                  ? () => unawaited(
+                                      Geolocator.openLocationSettings(),
+                                    )
+                                  : _locationFailure?.deniedForever == true
+                                  ? () =>
+                                        unawaited(Geolocator.openAppSettings())
+                                  : () => openAdaptiveSettingsScreen(context),
+                              child: Text(
+                                _locationFailure?.serviceDisabled == true
+                                    ? '定位設定'
+                                    : _locationFailure?.deniedForever == true
+                                    ? '權限設定'
+                                    : '前往設定',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              )
-            : groups.isEmpty
-            ? const Center(child: Text('附近沒有找到站牌。'))
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 760),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                    itemCount: groups.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final group = groups[index];
-                      return Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 52,
-                                    height: 52,
-                                    alignment: Alignment.center,
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.primaryContainer,
-                                      borderRadius: BorderRadius.circular(16),
+                )
+              : groups.isEmpty
+              ? const Center(child: Text('附近沒有找到站牌。'))
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                      itemCount: groups.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final group = groups[index];
+                        return Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Container(
+                                      width: 52,
+                                      height: 52,
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        color:
+                                            theme.colorScheme.primaryContainer,
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Text(
+                                        formatDistance(group.distanceMeters),
+                                        textAlign: TextAlign.center,
+                                        style: theme.textTheme.labelMedium,
+                                      ),
                                     ),
-                                    child: Text(
-                                      formatDistance(group.distanceMeters),
-                                      textAlign: TextAlign.center,
-                                      style: theme.textTheme.labelMedium,
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Text(
+                                        group.stopName,
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Text(
-                                      group.stopName,
-                                      style: theme.textTheme.titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                                  ],
+                                ),
+                                if (_loadingEtas) ...[
+                                  const SizedBox(height: 10),
+                                  const LinearProgressIndicator(minHeight: 2),
+                                ],
+                                const SizedBox(height: 8),
+                                for (
+                                  var index = 0;
+                                  index < group.routes.length;
+                                  index++
+                                ) ...[
+                                  if (index > 0) const Divider(height: 1),
+                                  _buildRouteRow(
+                                    theme,
+                                    group.routes[index],
+                                    alwaysShowSeconds:
+                                        controller.settings.alwaysShowSeconds,
                                   ),
                                 ],
-                              ),
-                              if (_loadingEtas) ...[
-                                const SizedBox(height: 10),
-                                const LinearProgressIndicator(minHeight: 2),
                               ],
-                              const SizedBox(height: 8),
-                              for (
-                                var index = 0;
-                                index < group.routes.length;
-                                index++
-                              ) ...[
-                                if (index > 0) const Divider(height: 1),
-                                _buildRouteRow(
-                                  theme,
-                                  group.routes[index],
-                                  alwaysShowSeconds:
-                                      controller.settings.alwaysShowSeconds,
-                                ),
-                              ],
-                            ],
+                            ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }

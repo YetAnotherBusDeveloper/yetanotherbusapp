@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
+import '../widgets/app_content_transition.dart';
 import '../core/friendly_error.dart';
 import '../core/rail_line_stations.dart';
 import '../core/rail_time.dart';
@@ -546,36 +547,43 @@ class _TraScreenState extends State<TraScreen> {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 960),
-                child: _loadingStations && _stations.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
-                    : _pageError != null && _stations.isEmpty
-                    ? TransitErrorState(
-                        message: _pageError!,
-                        onRetry: () => _loadInitialData(refresh: true),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: () => _loadInitialData(refresh: true),
-                        child: ListView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.all(16),
-                          children: [
-                            if (_alerts.isNotEmpty) ...[
-                              RailAlertCard(alerts: _alerts),
+                child: AppContentTransition(
+                  state: (
+                    _stations.isEmpty,
+                    _stations.isEmpty && _loadingStations,
+                    _stations.isEmpty && _pageError != null,
+                  ),
+                  child: _loadingStations && _stations.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : _pageError != null && _stations.isEmpty
+                      ? TransitErrorState(
+                          message: _pageError!,
+                          onRetry: () => _loadInitialData(refresh: true),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: () => _loadInitialData(refresh: true),
+                          child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.all(16),
+                            children: [
+                              if (_alerts.isNotEmpty) ...[
+                                RailAlertCard(alerts: _alerts),
+                                const SizedBox(height: 16),
+                              ],
+                              _buildOdCard(theme, rows),
                               const SizedBox(height: 16),
+                              _buildPanelButtons(),
+                              const SizedBox(height: 16),
+                              AppContentTransition(
+                                state: _panel,
+                                child: _panel == _TraPanel.query
+                                    ? _buildQueryPanel(theme, rows)
+                                    : _buildMapPanel(theme),
+                              ),
                             ],
-                            _buildOdCard(theme, rows),
-                            const SizedBox(height: 16),
-                            _buildPanelButtons(),
-                            const SizedBox(height: 16),
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 220),
-                              child: _panel == _TraPanel.query
-                                  ? _buildQueryPanel(theme, rows)
-                                  : _buildMapPanel(theme),
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
+                ),
               ),
             ),
           ),
@@ -868,7 +876,6 @@ class _TraScreenState extends State<TraScreen> {
     );
   }
 
-
   String _positionSummary(TraTrainPosition position) {
     return switch (position.status) {
       'between_stations' =>
@@ -898,7 +905,6 @@ class _TraOdRow {
   /// leave. Null when the scheduled time could not be read.
   final DateTime? effectiveDeparture;
 }
-
 
 class _TraOdTile extends StatelessWidget {
   const _TraOdTile({

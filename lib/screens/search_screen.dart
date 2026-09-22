@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../app/bus_app.dart';
+import '../core/app_motion.dart';
+import '../widgets/app_content_transition.dart';
 import '../core/app_controller.dart';
 import '../core/friendly_error.dart';
 import '../core/haptic_feedback_service.dart';
 import '../core/models.dart';
+import '../core/route_direction_label.dart';
 import '../core/route_search_ranking.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/cat_state_card.dart';
@@ -1110,7 +1113,22 @@ class _SearchScreenState extends State<SearchScreen> {
               .catchError((_) => const <CancelledDeparture>[]);
     unawaited(() async {
       if (saveHistory && route != null) {
-        await busController.addHistoryEntry(route, provider: provider);
+        String? pathName;
+        if (initialPathId != null) {
+          final topology = await initialTopologyFuture;
+          for (final path in topology?.paths ?? const <PathInfo>[]) {
+            if (path.pathId == initialPathId) {
+              pathName = path.name;
+              break;
+            }
+          }
+        }
+        await busController.addHistoryEntry(
+          route,
+          provider: provider,
+          pathId: initialPathId,
+          pathName: pathName,
+        );
       }
       final autoFavorited = await busController.recordRouteSelection(
         provider: provider,
@@ -1139,12 +1157,6 @@ class _SearchScreenState extends State<SearchScreen> {
       initialCancelledDeparturesFuture: initialCancelledDeparturesFuture,
       suppressAutoDestinationSelection: suppressAutoDestinationSelection,
     );
-  }
-
-  List<Widget> _buildRouteResultCards(AppController busController) {
-    return _results
-        .map((item) => _buildRouteResultCard(item, busController))
-        .toList(growable: false);
   }
 
   Widget _buildRouteResultCard(
@@ -1226,6 +1238,15 @@ class _SearchScreenState extends State<SearchScreen> {
     final missingProviders = selectedProviders
         .where((provider) => !busController.isDatabaseReady(provider))
         .toList();
+    final resultState = _controller.text.trim().isEmpty
+        ? 'history'
+        : _isLoading
+        ? 'loading'
+        : _error != null
+        ? 'error'
+        : _results.isEmpty
+        ? 'empty'
+        : 'results';
 
     return BackgroundImageWrapper(
       pageKey: 'search',
@@ -1235,88 +1256,116 @@ class _SearchScreenState extends State<SearchScreen> {
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 680),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            child: Column(
               children: [
-                TextField(
-                  controller: _controller,
-                  focusNode: _searchFocusNode,
-                  onChanged: _onQueryChanged,
-                  onTap: _onSearchFieldTap,
-                  readOnly: _supportsRouteKeypad && !_isUsingNativeKeyboard,
-                  showCursor: true,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: _submitNativeSearch,
-                  decoration: InputDecoration(
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    hintText: '搜尋公車路線或站牌名稱',
-                    suffixIcon: _buildSearchSuffix(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _searchFocusNode,
+                    onChanged: _onQueryChanged,
+                    onTap: _onSearchFieldTap,
+                    readOnly: _supportsRouteKeypad && !_isUsingNativeKeyboard,
+                    showCursor: true,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: _submitNativeSearch,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      hintText: '搜尋公車路線或站牌名稱',
+                      suffixIcon: _buildSearchSuffix(),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 16),
                 if (_isResolvingStopDistances) ...[
                   const LinearProgressIndicator(),
                   const SizedBox(height: 12),
                 ],
-                if (_controller.text.trim().isEmpty)
-                  _HistorySection(
-                    history: busController.history,
-                    onClear: busController.clearHistory,
-                    onSelect: (entry) {
-                      unawaited(
-                        _openRoute(
-                          provider: entry.provider,
-                          routeKey: entry.routeKey,
-                          routeName: entry.routeName,
-                          routeIdHint: entry.routeId,
-                          source: 'search_history',
-                        ),
-                      );
-                    },
-                  )
-                else if (_isLoading)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (_error != null)
-                  CatStateCard(
-                    mood: CatStateMood.cry,
-                    title: '搜尋撞到貓貓了',
-                    message: _error,
-                  )
-                else if (_isResolvingStopDistances && _results.isEmpty)
-                  const CatStateCard(
-                    mood: CatStateMood.laugh,
-                    title: '貓貓正在翻站牌',
-                    message: '正在搜尋附近可搭的站牌...',
-                  )
-                else if (_results.isEmpty)
-                  CatStateCard(
-                    mood: CatStateMood.sad,
-                    title: '沒有找到這台貓公車',
-                    message: missingProviders.isEmpty
-                        ? '試試看少打一點，或換成站牌名稱搜尋。'
-                        : '部分站牌搜尋需要本機資料庫，先更新資料庫後再試一次。',
-                  )
-                else
-                  ..._buildRouteResultCards(busController),
+                Expanded(
+                  child: AppContentTransition(
+                    state: resultState,
+                    child: resultState == 'results'
+                        ? ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                            itemCount: _results.length,
+                            itemBuilder: (context, index) =>
+                                _buildRouteResultCard(
+                                  _results[index],
+                                  busController,
+                                ),
+                          )
+                        : ListView(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                            children: [
+                              if (resultState == 'history')
+                                _HistorySection(
+                                  history: busController.history,
+                                  onClear: busController.clearHistory,
+                                  onSelect: (entry) {
+                                    unawaited(
+                                      _openRoute(
+                                        provider: entry.provider,
+                                        routeKey: entry.routeKey,
+                                        routeName: entry.routeName,
+                                        routeIdHint: entry.routeId,
+                                        initialPathId: entry.pathId,
+                                        source: 'search_history',
+                                      ),
+                                    );
+                                  },
+                                )
+                              else if (_isLoading)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 40),
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                )
+                              else if (_error != null)
+                                CatStateCard(
+                                  mood: CatStateMood.cry,
+                                  title: '搜尋撞到貓貓了',
+                                  message: _error,
+                                )
+                              else if (_isResolvingStopDistances &&
+                                  _results.isEmpty)
+                                const CatStateCard(
+                                  mood: CatStateMood.laugh,
+                                  title: '貓貓正在翻站牌',
+                                  message: '正在搜尋附近可搭的站牌...',
+                                )
+                              else if (_results.isEmpty)
+                                CatStateCard(
+                                  mood: CatStateMood.sad,
+                                  title: '沒有找到這台貓公車',
+                                  message: missingProviders.isEmpty
+                                      ? '試試看少打一點，或換成站牌名稱搜尋。'
+                                      : '部分站牌搜尋需要本機資料庫，先更新資料庫後再試一次。',
+                                ),
+                            ],
+                          ),
+                  ),
+                ),
               ],
             ),
           ),
         ),
-        bottomNavigationBar:
-            _supportsRouteKeypad &&
-                _isRouteKeypadVisible &&
-                !_isUsingNativeKeyboard
-            ? RouteSearchKeypad(
-                controller: _controller,
-                onChanged: _onQueryChanged,
-                onRequestTextInput: _requestNativeKeyboard,
-                onCollapse: _collapseRouteKeypad,
-                availableRouteNames: _availableRouteNames,
-              )
-            : null,
+        bottomNavigationBar: AnimatedSize(
+          duration: AppMotion.duration(context),
+          curve: AppMotion.curve,
+          alignment: Alignment.bottomCenter,
+          child:
+              _supportsRouteKeypad &&
+                  _isRouteKeypadVisible &&
+                  !_isUsingNativeKeyboard
+              ? RouteSearchKeypad(
+                  controller: _controller,
+                  onChanged: _onQueryChanged,
+                  onRequestTextInput: _requestNativeKeyboard,
+                  onCollapse: _collapseRouteKeypad,
+                  availableRouteNames: _availableRouteNames,
+                )
+              : const SizedBox.shrink(),
+        ),
       ),
     );
   }
@@ -1419,9 +1468,14 @@ class _HistorySection extends StatelessWidget {
                 leading: const Icon(Icons.history_rounded),
                 title: Text(entry.routeName),
                 subtitle: Text(
-                  entry.pathName != null && entry.pathName!.isNotEmpty
-                      ? '${entry.provider.label} | ${entry.pathName}'
-                      : entry.provider.label,
+                  [
+                    entry.provider.label,
+                    routeDirectionLabel(
+                      pathName: entry.pathName,
+                      pathId: entry.pathId,
+                      routeName: entry.routeName,
+                    ),
+                  ].where((part) => part.isNotEmpty).join(' | '),
                 ),
                 onTap: () => onSelect(entry),
               ),

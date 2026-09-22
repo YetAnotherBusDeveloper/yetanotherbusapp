@@ -10,6 +10,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:latlong2/latlong.dart';
 
 import '../app/bus_app.dart';
+import '../core/app_motion.dart';
 import '../core/friendly_error.dart';
 import '../core/models.dart';
 import 'bus_map_geometry.dart';
@@ -521,6 +522,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
         now: DateTime.now(),
         refreshSeconds: _refreshSeconds,
         keyOf: (bus) => '${bus.routeId}:${bus.id}',
+        terminalStops: _stopsByPath[pathId] ?? const <StopInfo>[],
       );
       final focusedBusId =
           widget.focusedVehicleRequest != _handledVehicleFocusRequest
@@ -1162,7 +1164,11 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
           if (!isValidLatLng(point)) {
             return null;
           }
-          return _DisplayedBus(state: busState, point: point);
+          return _DisplayedBus(
+            state: busState,
+            point: point,
+            heading: busState.headingAt(now, geometry: geometry),
+          );
         })
         .whereType<_DisplayedBus>()
         .toList();
@@ -1353,6 +1359,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                                 color: bus.state.status.color,
                                 selected: selected,
                                 label: bus.state.bus.id,
+                                heading: bus.heading,
                               ),
                             ),
                           );
@@ -1898,6 +1905,8 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
             markerId: gmaps.MarkerId('bus:${bus.state.bus.id}'),
             consumeTapEvents: true,
             position: toGoogleLatLng(bus.point),
+            rotation: bus.heading,
+            flat: true,
             anchor: icon == null
                 ? const Offset(0.5, 1)
                 : const Offset(0.5, 0.5),
@@ -1975,28 +1984,26 @@ class _StopMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedScale(
-      scale: selected ? 1.08 : 1,
-      duration: const Duration(milliseconds: 180),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white, width: selected ? 2.5 : 1.8),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x33000000),
-              blurRadius: 8,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: EtaBadge(
-            stop: stop,
-            alwaysShowSeconds: alwaysShowSeconds,
-            size: selected ? 36 : 30,
+    return AnimatedContainer(
+      duration: AppMotion.duration(context, AppMotion.quick),
+      curve: AppMotion.curve,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white, width: selected ? 2.5 : 1.8),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
           ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(999),
+        child: EtaBadge(
+          stop: stop,
+          alwaysShowSeconds: alwaysShowSeconds,
+          size: 32,
         ),
       ),
     );
@@ -2363,10 +2370,15 @@ class _CompactInfoCell extends StatelessWidget {
 }
 
 class _DisplayedBus {
-  const _DisplayedBus({required this.state, required this.point});
+  const _DisplayedBus({
+    required this.state,
+    required this.point,
+    required this.heading,
+  });
 
   final AnimatedBusState state;
   final LatLng point;
+  final double heading;
 }
 
 class _DisplayedStop {

@@ -54,9 +54,7 @@ class _AccountScreenState extends State<AccountScreen> {
       // is 429?
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('你已受到速率限制。')),
-        );
+        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
         return;
       }
       messenger.showSnackBar(
@@ -65,10 +63,7 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  Future<void> _startAuthLink(
-    AppController controller,
-    String provider,
-  ) async {
+  Future<void> _startAuthLink(AppController controller, String provider) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final opened = await controller.startAuthLink(provider);
@@ -82,9 +77,7 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('你已受到速率限制。')),
-        );
+        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
         return;
       }
       messenger.showSnackBar(
@@ -106,9 +99,7 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('你已受到速率限制。')),
-        );
+        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
         return;
       }
       messenger.showSnackBar(
@@ -133,13 +124,59 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('你已受到速率限制。')),
-        );
+        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
         return;
       }
       messenger.showSnackBar(
         SnackBar(content: Text('更新同步設定失敗：${friendlyErrorMessage(error)}')),
+      );
+    }
+  }
+
+  Future<void> _toggleRouteHistorySync(
+    AppController controller,
+    bool enabled,
+  ) async {
+    if (enabled) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('同步路線紀錄？'),
+          content: const Text(
+            '開啓後，最近搜尋的路線與智慧推薦使用紀錄會上傳至你的帳號，讓其他裝置也能使用。這不包含定位資料，且可隨時關閉並移除本裝置上傳的紀錄。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('開啓同步'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) {
+        return;
+      }
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await controller.setRouteHistorySyncEnabled(enabled);
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text(enabled ? '已開啓路線紀錄同步。' : '已關閉路線紀錄同步。')),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        SnackBar(content: Text('更新路線紀錄同步失敗：${friendlyErrorMessage(error)}')),
       );
     }
   }
@@ -162,9 +199,7 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('你已受到速率限制。')),
-        );
+        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
         return;
       }
       messenger.showSnackBar(
@@ -302,9 +337,14 @@ class _AccountScreenState extends State<AccountScreen> {
                 const SizedBox(height: 12),
                 _SyncCard(
                   enabled: controller.accountSyncEnabled,
+                  routeHistoryEnabled: controller.routeHistorySyncEnabled,
+                  routeHistoryDeletionPending:
+                      controller.routeHistoryDeletionPending,
                   busy: controller.accountSyncBusy,
                   lastSyncAt: controller.lastAccountSyncAt,
                   onChanged: (value) => _toggleSync(controller, value),
+                  onRouteHistoryChanged: (value) =>
+                      _toggleRouteHistorySync(controller, value),
                   onSyncNow: () => _manualSync(controller),
                 ),
                 const SizedBox(height: 12),
@@ -460,16 +500,22 @@ class _LinkedProvidersCard extends StatelessWidget {
 class _SyncCard extends StatelessWidget {
   const _SyncCard({
     required this.enabled,
+    required this.routeHistoryEnabled,
+    required this.routeHistoryDeletionPending,
     required this.busy,
     required this.lastSyncAt,
     required this.onChanged,
+    required this.onRouteHistoryChanged,
     required this.onSyncNow,
   });
 
   final bool enabled;
+  final bool routeHistoryEnabled;
+  final bool routeHistoryDeletionPending;
   final bool busy;
   final DateTime? lastSyncAt;
   final ValueChanged<bool> onChanged;
+  final ValueChanged<bool> onRouteHistoryChanged;
   final VoidCallback onSyncNow;
 
   @override
@@ -489,18 +535,26 @@ class _SyncCard extends StatelessWidget {
               onChanged: busy ? null : onChanged,
               title: const Text('啓用雲端同步'),
               subtitle: Text(
-                enabled
-                    ? '最後同步時間：${_formatDateTime(lastSyncAt)}'
-                    : '同步已關閉。',
+                enabled ? '最後同步時間：${_formatDateTime(lastSyncAt)}' : '同步已關閉。',
               ),
             ),
-            // const Divider(height: 24),
-            // ListTile(
-            //   contentPadding: EdgeInsets.zero,
-            //   leading: const Icon(Icons.schedule_rounded),
-            //   title: const Text(''),
-            //   subtitle: Text(_formatDateTime(lastSyncAt)),
-            // ),
+            const Divider(height: 24),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: routeHistoryEnabled,
+              onChanged: busy ? null : onRouteHistoryChanged,
+              secondary: const Icon(Icons.history_rounded),
+              title: const Text('同步路線紀錄'),
+              subtitle: Text(
+                routeHistoryDeletionPending
+                    ? '已關閉，正在移除本裝置的雲端路線紀錄。'
+                    : routeHistoryEnabled
+                    ? enabled
+                          ? '最近搜尋與智慧推薦使用紀錄會同步；不包含定位資料。'
+                          : '已允許同步，開啓雲端同步後才會上傳。'
+                    : '選擇性功能，預設關閉。',
+              ),
+            ),
             if (busy) ...[
               const SizedBox(height: 8),
               const LinearProgressIndicator(),
