@@ -32,6 +32,8 @@ String _busIdKey(RouteRealtimeBus bus) => bus.id;
 
 enum BusMotionMode { snappedToRoute, freeFloating }
 
+const double kDefaultBusHeading = 0;
+
 class AnimatedBusState {
   const AnimatedBusState({
     required this.bus,
@@ -86,6 +88,19 @@ class AnimatedBusState {
     );
   }
 
+  double headingAt(DateTime now, {RouteGeometry? geometry}) {
+    if (geometry != null && mode == BusMotionMode.snappedToRoute) {
+      final distance = distanceAlongRouteAt(now, geometry: geometry);
+      final routeHeading = distance == null
+          ? null
+          : geometry.bearingAtDistance(distance);
+      if (routeHeading != null) {
+        return routeHeading;
+      }
+    }
+    return normalizeHeading(azimuth) ?? kDefaultBusHeading;
+  }
+
   double _elapsedSeconds(DateTime now) {
     return math.max(0, now.difference(sampledAt).inMilliseconds / 1000.0);
   }
@@ -131,6 +146,9 @@ Map<String, AnimatedBusState> buildAnimatedBusStates(
       now,
       refreshSeconds: refreshSeconds,
     );
+    final azimuth =
+        normalizeHeading(bus.azimuth) ??
+        previous?.headingAt(sampleTime, geometry: geometry);
     final distanceToRoute =
         projection?.distanceToRouteMeters ?? double.infinity;
 
@@ -162,7 +180,7 @@ Map<String, AnimatedBusState> buildAnimatedBusStates(
         sampledAt: sampleTime,
         rawPoint: rawPoint,
         speedMps: speedMps,
-        azimuth: bus.azimuth,
+        azimuth: azimuth,
         distanceToRouteMeters: distanceToRoute,
       );
       continue;
@@ -185,7 +203,7 @@ Map<String, AnimatedBusState> buildAnimatedBusStates(
       sampledAt: sampleTime,
       rawPoint: basePoint,
       speedMps: speedMps,
-      azimuth: bus.azimuth,
+      azimuth: azimuth,
       distanceToRouteMeters: distanceToRoute,
     );
   }

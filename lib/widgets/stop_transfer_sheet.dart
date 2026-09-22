@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'directional_bus_icon.dart';
+
 import '../core/app_controller.dart';
 import '../core/models.dart';
 import '../core/route_direction_label.dart';
@@ -140,7 +142,9 @@ class _StopTransferSheetState extends State<StopTransferSheet> {
                         group.routes,
                       ))
                         ListTile(
-                          leading: const Icon(Icons.directions_bus_rounded),
+                          leading: DirectionalBusIcon(
+                            pathId: row.result.stop.pathId,
+                          ),
                           title: Text(row.result.route.routeName),
                           subtitle: Text(row.directionLabel),
                           trailing: const Icon(Icons.chevron_right_rounded),

@@ -158,6 +158,7 @@ class AppController extends ChangeNotifier {
         (entry) =>
             '${entry.provider.name}:'
             '${entry.routeKey}:'
+            '${entry.pathId}:'
             '${entry.totalOpens}:'
             '${entry.lastOpenedAtMs}:'
             '${entry.totalSelections}:'
@@ -1338,6 +1339,7 @@ class AppController extends ChangeNotifier {
           (profile) => {
             'provider': profile.provider.name,
             'routeKey': profile.routeKey,
+            if (profile.pathId != null) 'pathId': profile.pathId,
             'routeName': profile.routeName,
             'totalOpens': profile.totalOpens,
             'lastOpenedAtMs': profile.lastOpenedAtMs,
@@ -2532,11 +2534,16 @@ class AppController extends ChangeNotifier {
   Future<void> addHistoryEntry(
     RouteSummary route, {
     required BusProvider provider,
+    int? pathId,
+    String? pathName,
   }) async {
     _history = _history
         .where(
           (entry) =>
-              !(entry.provider == provider && entry.routeKey == route.routeKey),
+              !(entry.provider == provider &&
+                  entry.routeKey == route.routeKey &&
+                  (entry.pathId == pathId ||
+                      (pathId != null && entry.pathId == null))),
         )
         .toList();
     _history.insert(
@@ -2546,7 +2553,10 @@ class AppController extends ChangeNotifier {
         routeKey: route.routeKey,
         routeName: route.routeName,
         routeId: route.routeId,
-        pathName: route.description.trim().isNotEmpty
+        pathId: pathId,
+        pathName: pathName?.trim().isNotEmpty == true
+            ? pathName!.trim()
+            : route.description.trim().isNotEmpty
             ? route.description.trim()
             : null,
         timestampMs: DateTime.now().millisecondsSinceEpoch,
@@ -2604,11 +2614,13 @@ class AppController extends ChangeNotifier {
     _routeUsageProfiles = _buildUpdatedRouteUsageProfiles(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       record: (profile) =>
           profile.recordSelection(timestamp, routeName: routeName),
       create: () => RouteUsageProfile(
         provider: provider,
         routeKey: routeKey,
+        pathId: pathId,
         routeName: routeName.trim(),
         totalOpens: 0,
         lastOpenedAtMs: 0,
@@ -2648,6 +2660,7 @@ class AppController extends ChangeNotifier {
       routeName: routeName,
       timestamp: timestamp,
       selection: true,
+      pathId: pathId,
     );
     await analytics.logRouteSelected(
       provider: provider,
@@ -2749,16 +2762,19 @@ class AppController extends ChangeNotifier {
     RouteSummary route, {
     required BusProvider provider,
     DateTime? openedAt,
+    int? pathId,
   }) async {
     final timestamp = openedAt ?? DateTime.now();
     _routeUsageProfiles = _buildUpdatedRouteUsageProfiles(
       provider: provider,
       routeKey: route.routeKey,
+      pathId: pathId,
       record: (profile) =>
           profile.recordOpen(timestamp, routeName: route.routeName),
       create: () => RouteUsageProfile(
         provider: provider,
         routeKey: route.routeKey,
+        pathId: pathId,
         routeName: route.routeName,
         totalOpens: 1,
         lastOpenedAtMs: timestamp.millisecondsSinceEpoch,
@@ -2772,6 +2788,7 @@ class AppController extends ChangeNotifier {
       routeName: route.routeName,
       timestamp: timestamp,
       selection: false,
+      pathId: pathId,
     );
     await analytics.logRouteVisit(provider: provider, routeKey: route.routeKey);
   }
@@ -2779,6 +2796,7 @@ class AppController extends ChangeNotifier {
   List<RouteUsageProfile> _buildUpdatedRouteUsageProfiles({
     required BusProvider provider,
     required int routeKey,
+    required int? pathId,
     required RouteUsageProfile Function(RouteUsageProfile profile) record,
     required RouteUsageProfile Function() create,
     List<RouteUsageProfile>? source,
@@ -2787,7 +2805,9 @@ class AppController extends ChangeNotifier {
     var found = false;
 
     for (final profile in source ?? _routeUsageProfiles) {
-      if (profile.provider == provider && profile.routeKey == routeKey) {
+      if (profile.provider == provider &&
+          profile.routeKey == routeKey &&
+          profile.pathId == pathId) {
         next.add(record(profile));
         found = true;
       } else {
@@ -3352,7 +3372,10 @@ class AppController extends ChangeNotifier {
             ?.payload ??
         _accountSyncLocalState.preferences.preservedPayload;
     final routeHistory = _stringMap(source?['routeHistory']);
-    if (routeHistory != null && routeHistory['version'] != 1) {
+    final routeHistoryVersion = (routeHistory?['version'] as num?)?.toInt();
+    if (routeHistory != null &&
+        routeHistoryVersion != 1 &&
+        routeHistoryVersion != 2) {
       throw StateError('雲端路線紀錄版本較新，請更新 App 後再同步。');
     }
     final devices = _stringMap(routeHistory?['devices']) ?? <String, dynamic>{};
@@ -3369,7 +3392,7 @@ class AppController extends ChangeNotifier {
     if (devices.isEmpty) {
       payload.remove('routeHistory');
     } else {
-      payload['routeHistory'] = {'version': 1, 'devices': devices};
+      payload['routeHistory'] = {'version': 2, 'devices': devices};
     }
     return payload;
   }
@@ -3437,7 +3460,9 @@ class AppController extends ChangeNotifier {
             .where(
               (item) =>
                   item.provider != entry.provider ||
-                  item.routeKey != entry.routeKey,
+                  item.routeKey != entry.routeKey ||
+                  (item.pathId != entry.pathId &&
+                      !(entry.pathId != null && item.pathId == null)),
             )
             .toList();
     history.insert(0, entry);
@@ -3452,6 +3477,7 @@ class AppController extends ChangeNotifier {
     required String routeName,
     required DateTime timestamp,
     required bool selection,
+    required int? pathId,
   }) async {
     if (!_tracksDeviceRouteHistory) return;
     final current = _profilesFromRouteHistoryDevice(
@@ -3460,12 +3486,14 @@ class AppController extends ChangeNotifier {
     final next = _buildUpdatedRouteUsageProfiles(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       record: (profile) => selection
           ? profile.recordSelection(timestamp, routeName: routeName)
           : profile.recordOpen(timestamp, routeName: routeName),
       create: () => RouteUsageProfile(
         provider: provider,
         routeKey: routeKey,
+        pathId: pathId,
         routeName: routeName.trim(),
         totalOpens: selection ? 0 : 1,
         lastOpenedAtMs: selection ? 0 : timestamp.millisecondsSinceEpoch,
@@ -3513,7 +3541,8 @@ class AppController extends ChangeNotifier {
     Map<String, dynamic>? ownDevicePayloadOverride,
   }) async {
     final routeHistory = _stringMap(payload?['routeHistory']);
-    if (routeHistory?['version'] != 1) return;
+    final routeHistoryVersion = (routeHistory?['version'] as num?)?.toInt();
+    if (routeHistoryVersion != 1 && routeHistoryVersion != 2) return;
     final devices = _stringMap(routeHistory?['devices']);
     if (devices == null) return;
 
@@ -3527,14 +3556,15 @@ class AppController extends ChangeNotifier {
     final profileParts = <String, List<RouteUsageProfile>>{};
     for (final devicePayload in devices.values) {
       for (final entry in _historyFromRouteHistoryDevice(devicePayload)) {
-        final key = '${entry.provider.name}:${entry.routeKey}';
+        final key = '${entry.provider.name}:${entry.routeKey}:${entry.pathId}';
         final existing = historyByRoute[key];
         if (existing == null || entry.timestampMs > existing.timestampMs) {
           historyByRoute[key] = entry;
         }
       }
       for (final profile in _profilesFromRouteHistoryDevice(devicePayload)) {
-        final key = '${profile.provider.name}:${profile.routeKey}';
+        final key =
+            '${profile.provider.name}:${profile.routeKey}:${profile.pathId}';
         (profileParts[key] ??= []).add(profile);
       }
     }
@@ -3580,6 +3610,7 @@ class AppController extends ChangeNotifier {
     return RouteUsageProfile(
       provider: first.provider,
       routeKey: first.routeKey,
+      pathId: first.pathId,
       routeName: routeName,
       totalOpens: totalOpens,
       lastOpenedAtMs: lastOpenedAtMs,

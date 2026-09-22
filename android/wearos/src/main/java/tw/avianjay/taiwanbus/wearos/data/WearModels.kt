@@ -91,6 +91,7 @@ data class RouteSearchResult(
     val routeName: String,
     val description: String,
     val provider: String,
+    val preferredPathId: Int? = null,
 )
 
 @Serializable
@@ -172,6 +173,7 @@ data class WearSmartSuggestionPayload(
 data class WearRouteUsageProfile(
     val provider: String,
     val routeKey: Int,
+    val pathId: Int? = null,
     val routeId: String = "",
     val routeName: String = "",
     val totalOpens: Int = 0,

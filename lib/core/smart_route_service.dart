@@ -17,6 +17,9 @@ class SmartRouteService {
     double bestScore = 0;
 
     for (final profile in profiles) {
+      if (profile.pathId == null) {
+        continue;
+      }
       if (!hasEnoughHistoryForRecommendation(profile, now)) {
         continue;
       }
@@ -37,6 +40,9 @@ class SmartRouteService {
   }) {
     final scored = <MapEntry<RouteUsageProfile, double>>[];
     for (final profile in profiles) {
+      if (profile.pathId == null) {
+        continue;
+      }
       if (!hasEnoughHistoryForRecommendation(profile, now)) {
         continue;
       }
@@ -120,7 +126,8 @@ class SmartRouteService {
         .where(
           (favorite) =>
               favorite.provider == routeProfile.provider &&
-              favorite.routeKey == routeProfile.routeKey,
+              favorite.routeKey == routeProfile.routeKey &&
+              favorite.pathId == routeProfile.pathId,
         )
         .toList();
     if (favoritesForRoute.isEmpty) {
@@ -227,6 +234,9 @@ class SmartRouteService {
     FavoriteStop? matchedFavorite;
     StopInfo? favoriteStop;
     PathInfo? favoritePath;
+    final learnedPath = profile.pathId == null
+        ? null
+        : _findPath(detail, profile.pathId!);
     if (favorite != null) {
       favoritePath = _findPath(detail, favorite.pathId);
       favoriteStop = _findStopInDetail(
@@ -247,6 +257,7 @@ class SmartRouteService {
         score: score,
         reason: reason,
         detail: detail,
+        nearestPath: learnedPath,
         favorite: matchedFavorite,
         favoriteStop: favoriteStop,
         favoritePath: favoritePath,
@@ -254,10 +265,12 @@ class SmartRouteService {
     }
 
     StopInfo? nearestStop;
-    PathInfo? nearestPath;
+    PathInfo? nearestPath = learnedPath;
     double? nearestDistance;
 
-    for (final path in detail.paths) {
+    for (final path in detail.paths.where(
+      (path) => path.pathId == profile.pathId,
+    )) {
       final stops = detail.stopsByPath[path.pathId] ?? const <StopInfo>[];
       for (final stop in stops) {
         if (stop.lat == 0 || stop.lon == 0) {

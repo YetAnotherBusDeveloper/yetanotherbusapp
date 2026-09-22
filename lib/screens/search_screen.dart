@@ -11,6 +11,7 @@ import '../core/app_controller.dart';
 import '../core/friendly_error.dart';
 import '../core/haptic_feedback_service.dart';
 import '../core/models.dart';
+import '../core/route_direction_label.dart';
 import '../core/route_search_ranking.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/cat_state_card.dart';
@@ -1112,7 +1113,22 @@ class _SearchScreenState extends State<SearchScreen> {
               .catchError((_) => const <CancelledDeparture>[]);
     unawaited(() async {
       if (saveHistory && route != null) {
-        await busController.addHistoryEntry(route, provider: provider);
+        String? pathName;
+        if (initialPathId != null) {
+          final topology = await initialTopologyFuture;
+          for (final path in topology?.paths ?? const <PathInfo>[]) {
+            if (path.pathId == initialPathId) {
+              pathName = path.name;
+              break;
+            }
+          }
+        }
+        await busController.addHistoryEntry(
+          route,
+          provider: provider,
+          pathId: initialPathId,
+          pathName: pathName,
+        );
       }
       final autoFavorited = await busController.recordRouteSelection(
         provider: provider,
@@ -1291,6 +1307,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                         routeKey: entry.routeKey,
                                         routeName: entry.routeName,
                                         routeIdHint: entry.routeId,
+                                        initialPathId: entry.pathId,
                                         source: 'search_history',
                                       ),
                                     );
@@ -1451,9 +1468,14 @@ class _HistorySection extends StatelessWidget {
                 leading: const Icon(Icons.history_rounded),
                 title: Text(entry.routeName),
                 subtitle: Text(
-                  entry.pathName != null && entry.pathName!.isNotEmpty
-                      ? '${entry.provider.label} | ${entry.pathName}'
-                      : entry.provider.label,
+                  [
+                    entry.provider.label,
+                    routeDirectionLabel(
+                      pathName: entry.pathName,
+                      pathId: entry.pathId,
+                      routeName: entry.routeName,
+                    ),
+                  ].where((part) => part.isNotEmpty).join(' | '),
                 ),
                 onTap: () => onSelect(entry),
               ),

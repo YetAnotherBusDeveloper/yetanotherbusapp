@@ -801,6 +801,17 @@ class _BusMapScreenState extends State<BusMapScreen>
     );
   }
 
+  double _headingFor(CityBus bus, DateTime now) {
+    final state = _busStates[bus.stateKey];
+    if (state == null) {
+      return normalizeHeading(bus.bus.azimuth) ?? kDefaultBusHeading;
+    }
+    return state.headingAt(
+      now,
+      geometry: bus.groupKey == _selectedGroupKey ? _selectedGeometry : null,
+    );
+  }
+
   Color _colorFor(CityBus bus) =>
       (_busStates[bus.stateKey]?.status ??
               describeBusStatus(bus.bus.statusCode))
@@ -1328,6 +1339,7 @@ class _BusMapScreenState extends State<BusMapScreen>
             color: _colorFor(bus),
             selected: selected,
             label: '${_snapshot!.displayNameFor(bus)} ${bus.bus.id}',
+            heading: _headingFor(bus, now),
           ),
         ),
       ),
@@ -1528,6 +1540,8 @@ class _BusMapScreenState extends State<BusMapScreen>
           // Dimming with alpha rather than a second set of rasterised icons
           // keeps the bitmap cache to one entry per colour.
           alpha: _opacityFor(bus),
+          rotation: _headingFor(bus, now),
+          flat: true,
           anchor: icon == null ? const Offset(0.5, 1) : const Offset(0.5, 0.5),
           icon:
               icon ??

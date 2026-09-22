@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -335,6 +336,85 @@ void main() {
       expect(find.text('台北市 · 往捷運麟光新村站（去程）'), findsOneWidget);
       expect(find.text('台北市 · 往捷運麟光新村站（返程）'), findsOneWidget);
     } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('seed ETAs render before station-group completion finishes', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    final stationResponse = Completer<http.Response>();
+    final client = MockClient((request) async {
+      if (request.url.path.endsWith('/stops/nearby')) {
+        return http.Response(
+          jsonEncode([
+            _nearbyRow(
+              routeId: 'TPEA001',
+              routeName: '307',
+              stopId: 'A-SEED',
+              stopName: '第一站',
+              distance: 10,
+            ),
+          ]),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path.endsWith('/stations/resolve')) {
+        return stationResponse.future;
+      }
+      if (request.url.path.contains('/batchroutes/')) {
+        return http.Response(
+          jsonEncode({
+            'routes': {
+              'TPEA001': {
+                'paths': [
+                  {
+                    'pathid': 0,
+                    'stops': [
+                      {
+                        'stopid': 'A-SEED',
+                        'eta': 120,
+                        'message': '',
+                        'updated_at': 1000,
+                        'buses': <Object?>[],
+                        'etas': <Object?>[],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('{}', 404);
+    });
+    final controller = await _buildController(client);
+    addTearDown(controller.dispose);
+
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AppControllerScope(
+            controller: controller,
+            child: const NearbyScreen(),
+          ),
+        ),
+      );
+      await _pumpUntilFound(tester, find.text('2分'));
+
+      expect(stationResponse.isCompleted, isFalse);
+      expect(find.text('第一站'), findsOneWidget);
+      expect(find.text('2分'), findsOneWidget);
+    } finally {
+      if (!stationResponse.isCompleted) {
+        stationResponse.complete(http.Response('{}', 404));
+      }
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;
     }

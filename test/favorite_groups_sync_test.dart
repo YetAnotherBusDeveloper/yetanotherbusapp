@@ -246,6 +246,8 @@ void main() {
           rtrip: 0,
         ),
         provider: BusProvider.nwt,
+        pathId: 0,
+        pathName: '往市區',
       );
       await controller.setRouteHistorySyncEnabled(true);
       await controller.recordRouteSelection(
@@ -253,6 +255,18 @@ void main() {
         routeKey: 12,
         routeName: '本機路線',
         selectedAt: DateTime.now(),
+        pathId: 0,
+      );
+      await controller.recordRouteSelection(
+        provider: BusProvider.nwt,
+        routeKey: 12,
+        routeName: '本機路線',
+        selectedAt: DateTime.now(),
+        pathId: 1,
+      );
+      expect(
+        controller.routeUsageProfiles.map((profile) => profile.pathId),
+        containsAll(<int?>[0, 1]),
       );
       expect(syncService.preferencePayload, isNull);
 
@@ -261,6 +275,10 @@ void main() {
       final enabledDevices =
           (syncService.preferencePayload!['routeHistory'] as Map)['devices']
               as Map;
+      expect(
+        (syncService.preferencePayload!['routeHistory'] as Map)['version'],
+        2,
+      );
       expect(
         enabledDevices.keys,
         containsAll(['remote-device', 'test-device']),
@@ -290,8 +308,15 @@ void main() {
       final ownProfiles =
           (reenabledDevices['test-device'] as Map)['routeUsageProfiles']
               as List;
-      expect(ownProfiles, hasLength(1));
-      expect((ownProfiles.single as Map)['totalSelections'], 1);
+      expect(ownProfiles, hasLength(2));
+      expect(
+        ownProfiles.map((profile) => (profile as Map)['totalSelections']),
+        everyElement(1),
+      );
+      expect(
+        ownProfiles.map((profile) => (profile as Map)['pathId']),
+        containsAll([0, 1]),
+      );
 
       await controller.setAccountSyncEnabled(false);
       syncService.failPreferenceWrites = true;

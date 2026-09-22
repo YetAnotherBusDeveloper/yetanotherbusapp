@@ -53,7 +53,7 @@ class HomeScreen extends StatelessWidget {
       context: context,
       removeBottom: true,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         children: [
           if (controller.settings.enableSmartRecommendations) ...[
             _SmartRecommendationCard(
@@ -1013,7 +1013,14 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     final leadingIcon = favorite == null
         ? Icons.gps_fixed_rounded
         : Icons.favorite_rounded;
+    final recommendedPath = suggestion.recommendedPath;
+    final direction = routeDirectionLabel(
+      pathName: recommendedPath?.name,
+      pathId: suggestion.profile.pathId,
+      routeName: suggestion.profile.routeName,
+    );
     final metadata = [
+      if (direction.isNotEmpty) '方向：$direction',
       if (destinationLabel != null) '目的地：$destinationLabel',
       if (showDistance) '距離你約 ${formatDistance(suggestion.distanceMeters!)}',
     ];
@@ -1620,6 +1627,7 @@ class _SmartRecommendationShell extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Card(
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -1690,6 +1698,7 @@ class _FeatureCard extends StatelessWidget {
     final showBigIconSubtitle = subtitle.trim().isNotEmpty;
 
     return Card(
+      margin: EdgeInsets.zero,
       child: InkWell(
         borderRadius: BorderRadius.circular(24),
         onTap: onTap,

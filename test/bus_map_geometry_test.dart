@@ -91,6 +91,27 @@ void main() {
       expect(empty.totalLengthMeters, 0);
       expect(empty.pointAtDistance(500), const LatLng(0, 0));
       expect(empty.project(_mid).distanceToRouteMeters, double.infinity);
+      expect(empty.bearingAtDistance(500), isNull);
+    });
+
+    test('uses the outgoing segment bearing at a route vertex', () {
+      final geometry = RouteGeometry.fromPoints(const [
+        RoutePathPoint(lat: 25.0, lon: 121.0),
+        RoutePathPoint(lat: 25.0, lon: 121.01),
+        RoutePathPoint(lat: 25.01, lon: 121.01),
+      ]);
+      final vertexDistance = geometry.cumulativeDistances[1];
+
+      expect(geometry.bearingAtDistance(vertexDistance - 1), closeTo(90, 0.1));
+      expect(geometry.bearingAtDistance(vertexDistance), closeTo(0, 0.1));
+      expect(geometry.bearingAtDistance(double.infinity), closeTo(0, 0.1));
+    });
+
+    test('normalizes finite headings into one turn', () {
+      expect(normalizeHeading(450), 90);
+      expect(normalizeHeading(-90), 270);
+      expect(normalizeHeading(360), 0);
+      expect(normalizeHeading(double.nan), isNull);
     });
   });
 
@@ -143,6 +164,60 @@ void main() {
 
       expect(states['KKA-1234']!.mode, BusMotionMode.freeFloating);
       expect(states['KKA-1234']!.distanceToRouteMeters, double.infinity);
+    });
+
+    test(
+      'a snapped bus points along the route instead of reported azimuth',
+      () {
+        final state = buildAnimatedBusStates(
+          _line(),
+          [_bus(lat: 25.0350, lon: 121.5490, azimuth: 180)],
+          const {},
+          now: now,
+          refreshSeconds: 10,
+        )['KKA-1234']!;
+
+        expect(state.headingAt(now, geometry: _line()), closeTo(0, 0.1));
+      },
+    );
+
+    test('a free-floating bus uses a normalized reported heading', () {
+      final state = buildAnimatedBusStates(
+        null,
+        [_bus(lat: 25.0350, lon: 121.5490, azimuth: 450)],
+        const {},
+        now: now,
+        refreshSeconds: 10,
+      )['KKA-1234']!;
+
+      expect(state.headingAt(now), 90);
+    });
+
+    test('a missing heading keeps the prior heading or defaults north', () {
+      final previous = buildAnimatedBusStates(
+        null,
+        [_bus(lat: 25.0350, lon: 121.5490, azimuth: 275)],
+        const {},
+        now: now,
+        refreshSeconds: 10,
+      );
+      final retained = buildAnimatedBusStates(
+        null,
+        [_bus(lat: 25.0351, lon: 121.5490)],
+        previous,
+        now: now.add(const Duration(seconds: 10)),
+        refreshSeconds: 10,
+      )['KKA-1234']!;
+      final defaulted = buildAnimatedBusStates(
+        null,
+        [_bus(id: 'NEW', lat: 25.0350, lon: 121.5490)],
+        const {},
+        now: now,
+        refreshSeconds: 10,
+      )['NEW']!;
+
+      expect(retained.headingAt(now), 275);
+      expect(defaulted.headingAt(now), kDefaultBusHeading);
     });
 
     test('buses without a usable position are skipped', () {

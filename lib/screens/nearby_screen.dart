@@ -42,6 +42,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
   Map<String, LiveStopMap> _liveMaps = const {};
   bool _loadingEtas = false;
   int _requestGeneration = 0;
+  int _etaLoadsInFlight = 0;
+  int _etaLoadSequence = 0;
+  final Map<String, int> _liveMapSequenceByRoute = {};
 
   @override
   void initState() {
@@ -59,6 +62,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
       _error = null;
       _locationFailure = null;
       _liveMaps = const {};
+      _liveMapSequenceByRoute.clear();
+      _etaLoadsInFlight = 0;
       _loadingEtas = false;
     });
 
@@ -76,9 +81,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
         _results = results;
       });
 
+      unawaited(_loadEtas(results, requestGeneration: requestGeneration));
       // Phase 2: fill every visible stop group, then load any ETAs that were
-      // not already embedded by the station endpoint. Neither blocks the seed
-      // rows from rendering.
+      // not already embedded by the station endpoint. Seed ETA loading runs in
+      // parallel so slow station-group completion cannot delay first arrivals.
       unawaited(
         _completeNearbyStops(
           position: position,
@@ -116,7 +122,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
     }
 
     final controller = AppControllerScope.read(context);
-    setState(() => _loadingEtas = true);
 
     var completedResults = seedResults;
     try {
@@ -133,10 +138,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
     if (!mounted || requestGeneration != _requestGeneration) {
       return;
     }
+    final mergedResults = _preserveEmbeddedEtas(completedResults, _results);
     setState(() {
-      _results = completedResults;
+      _results = mergedResults;
     });
-    await _loadEtas(completedResults, requestGeneration: requestGeneration);
+    await _loadEtas(mergedResults, requestGeneration: requestGeneration);
   }
 
   bool _hasEmbeddedLiveData(StopInfo stop) {
@@ -163,46 +169,96 @@ class _NearbyScreenState extends State<NearbyScreen> {
         .toSet()
         .toList(growable: false);
     if (routeIds.isEmpty) {
-      setState(() => _loadingEtas = false);
       return;
     }
 
+    final loadSequence = ++_etaLoadSequence;
+    _etaLoadsInFlight += 1;
+    setState(() => _loadingEtas = true);
     Map<String, LiveStopMap> liveMaps = const {};
     try {
-      liveMaps = await controller.repository.getBatchLiveStopMaps(routeIds);
-    } catch (_) {}
+      try {
+        liveMaps = await controller.repository.getBatchLiveStopMaps(routeIds);
+      } catch (_) {}
 
-    final missingRouteIds = routeIds
-        .map((routeId) => routeId.trim())
-        .where((routeId) => !liveMaps.containsKey(routeId))
-        .toSet();
-    if (missingRouteIds.isNotEmpty) {
-      final fallbackEntries = await Future.wait(
-        missingRouteIds.map((routeId) async {
-          try {
-            final liveMap = await controller.repository.getLiveStopMap(routeId);
-            return MapEntry(routeId, liveMap);
-          } catch (_) {
-            return null;
+      final missingRouteIds = routeIds
+          .map((routeId) => routeId.trim())
+          .where((routeId) => !liveMaps.containsKey(routeId))
+          .toSet();
+      if (missingRouteIds.isNotEmpty) {
+        final fallbackEntries = await Future.wait(
+          missingRouteIds.map((routeId) async {
+            try {
+              final liveMap = await controller.repository.getLiveStopMap(
+                routeId,
+              );
+              return MapEntry(routeId, liveMap);
+            } catch (_) {
+              return null;
+            }
+          }),
+        );
+        final merged = Map<String, LiveStopMap>.from(liveMaps);
+        for (final entry in fallbackEntries) {
+          if (entry != null) {
+            merged[entry.key] = entry.value;
           }
-        }),
-      );
-      final merged = Map<String, LiveStopMap>.from(liveMaps);
-      for (final entry in fallbackEntries) {
-        if (entry != null) {
-          merged[entry.key] = entry.value;
         }
+        liveMaps = merged;
       }
-      liveMaps = merged;
-    }
 
-    if (!mounted || requestGeneration != _requestGeneration) {
-      return;
+      if (!mounted || requestGeneration != _requestGeneration) {
+        return;
+      }
+      setState(() {
+        final merged = Map<String, LiveStopMap>.from(_liveMaps);
+        for (final entry in liveMaps.entries) {
+          if (loadSequence >= (_liveMapSequenceByRoute[entry.key] ?? 0)) {
+            merged[entry.key] = entry.value;
+            _liveMapSequenceByRoute[entry.key] = loadSequence;
+          }
+        }
+        _liveMaps = merged;
+      });
+    } finally {
+      if (mounted && requestGeneration == _requestGeneration) {
+        _etaLoadsInFlight -= 1;
+        setState(() {
+          _loadingEtas = _etaLoadsInFlight > 0;
+        });
+      }
     }
-    setState(() {
-      _liveMaps = liveMaps;
-      _loadingEtas = false;
-    });
+  }
+
+  List<NearbyStopResult> _preserveEmbeddedEtas(
+    List<NearbyStopResult> completed,
+    List<NearbyStopResult> current,
+  ) {
+    final currentByKey = {
+      for (final item in current) _nearbyResultKey(item): item,
+    };
+    return completed
+        .map((item) {
+          final previous = currentByKey[_nearbyResultKey(item)];
+          if (previous == null ||
+              _hasEmbeddedLiveData(item.stop) ||
+              !_hasEmbeddedLiveData(previous.stop)) {
+            return item;
+          }
+          return NearbyStopResult(
+            route: item.route,
+            stop: previous.stop,
+            distanceMeters: item.distanceMeters,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  String _nearbyResultKey(NearbyStopResult item) {
+    final stopId = item.stop.rawStopId?.trim().isNotEmpty == true
+        ? item.stop.rawStopId!.trim()
+        : item.stop.stopId.toString();
+    return '${item.route.routeId.trim()}:${item.stop.pathId}:$stopId';
   }
 
   StopInfo _liveStop(NearbyStopResult item) {
@@ -216,6 +272,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       msg: payload.msg,
       t: payload.t,
       buses: payload.buses,
+      etas: payload.etas,
     );
   }
 
