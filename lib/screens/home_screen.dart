@@ -17,6 +17,7 @@ import '../core/smart_route_service.dart';
 import '../widgets/eta_badge.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/transit_station_map.dart';
+import '../widgets/weather_app_bar_title.dart';
 import 'adaptive_settings_presenter.dart';
 import 'bus_map_screen.dart';
 import 'database_settings_screen.dart';
@@ -24,6 +25,7 @@ import 'favorites_screen.dart';
 import 'nearby_screen.dart';
 import 'route_detail_navigation.dart';
 import 'search_screen.dart';
+import 'weather_screen.dart';
 import '../widgets/ad_banner_widget.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -317,16 +319,27 @@ class HomeScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: hasBusBackgroundImage ? Colors.transparent : null,
       appBar: AppBar(
-        title: Transform.translate(
-          offset: Offset(0, isDesktop ? -2 : 0),
-          child: SvgPicture.asset(
-            'assets/branding/YABus-black.svg',
-            width: isDesktop ? 144 : 96,
-            height: isDesktop ? 32 : 21,
-            semanticsLabel: 'YABus',
-            colorFilter: ColorFilter.mode(
-              colorScheme.onSurface,
-              BlendMode.srcIn,
+        title: WeatherAppBarTitle(
+          title: 'YABus',
+          titleWidth: isDesktop ? 144 : 96,
+          titleWidget: Transform.translate(
+            offset: Offset(0, isDesktop ? -2 : 0),
+            child: SvgPicture.asset(
+              'assets/branding/YABus-black.svg',
+              width: isDesktop ? 144 : 96,
+              height: isDesktop ? 32 : 21,
+              semanticsLabel: 'YABus',
+              colorFilter: ColorFilter.mode(
+                colorScheme.onSurface,
+                BlendMode.srcIn,
+              ),
+            ),
+          ),
+          // The chip already has a fix; pass it on so the page loads at once.
+          onTap: (latitude, longitude) => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  WeatherScreen(latitude: latitude, longitude: longitude),
             ),
           ),
         ),
