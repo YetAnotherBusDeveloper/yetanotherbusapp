@@ -11,6 +11,13 @@ void main() {
     expect(intent.location, AppRoutes.feedback);
   });
 
+  test('parseAppRoute recognizes the authenticated social route', () {
+    final intent = parseAppRoute('social');
+
+    expect(intent.kind, AppRouteKind.social);
+    expect(intent.location, AppRoutes.social);
+  });
+
   test('normalize maps feedback aliases to the canonical route', () {
     expect(AppRoutes.normalize('feedback'), AppRoutes.feedback);
     expect(AppRoutes.normalize('feedbacks'), AppRoutes.feedback);
@@ -73,15 +80,17 @@ void main() {
     expect(AppRoutes.normalize('map'), AppRoutes.busMap);
     expect(AppRoutes.normalize('bus_map'), AppRoutes.busMap);
     expect(
-      parseAppRoute(
-        'https://busapp.avianjay.sbs/map?city=tpe',
-      ).provider,
+      parseAppRoute('https://busapp.avianjay.sbs/map?city=tpe').provider,
       BusProvider.tpe,
     );
   });
 
   test('busMapPath round-trips through the parser', () {
-    for (final provider in [BusProvider.tpe, BusProvider.txg, BusProvider.inter]) {
+    for (final provider in [
+      BusProvider.tpe,
+      BusProvider.txg,
+      BusProvider.inter,
+    ]) {
       final location = AppRoutes.busMapPath(provider: provider);
 
       expect(parseAppRoute(location).provider, provider);

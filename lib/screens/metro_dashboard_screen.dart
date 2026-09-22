@@ -473,7 +473,10 @@ class _MetroScreenState extends State<MetroScreen> {
     }
     final cleaned = hex.replaceAll('#', '');
     if (cleaned.length == 6) {
-      return Color(int.parse('FF$cleaned', radix: 16));
+      final value = int.tryParse('FF$cleaned', radix: 16);
+      if (value != null) {
+        return Color(value);
+      }
     }
     return Colors.grey;
   }
@@ -544,24 +547,26 @@ class _MetroScreenState extends State<MetroScreen> {
                                 ),
                                 const SizedBox(height: 16),
                               ],
+                            if (_selectedLine != null) ...[
                               _buildSourceBanner(theme),
                               const SizedBox(height: 16),
-                              _MetroPanelButtons(
-                                current: _panel,
-                                onChanged: (panel) =>
-                                    setState(() => _panel = panel),
-                              ),
-                              const SizedBox(height: 16),
-                              AppContentTransition(
-                                state: _panel,
-                                child: switch (_panel) {
-                                  _MetroPanel.live => _buildLivePanel(theme),
-                                  _MetroPanel.map => _buildMapPanel(theme),
-                                },
-                              ),
                             ],
-                          ),
+                            _MetroPanelButtons(
+                              current: _panel,
+                              onChanged: (panel) =>
+                                  setState(() => _panel = panel),
+                            ),
+                            const SizedBox(height: 16),
+                            AppContentTransition(
+                              state: _panel,
+                              child: switch (_panel) {
+                                _MetroPanel.live => _buildLivePanel(theme),
+                                _MetroPanel.map => _buildMapPanel(theme),
+                              },
+                            ),
+                          ],
                         ),
+                ),
                 ),
               ),
             ),
@@ -584,18 +589,20 @@ class _MetroScreenState extends State<MetroScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '捷運系統',
+              '選擇捷運系統',
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
-            // const SizedBox(height: 6),
-            // Text(
-            //   '先切城市，再切路線；同一頁就能看即時到站與站點地圖。',
-            //   style: theme.textTheme.bodySmall?.copyWith(
-            //     color: theme.colorScheme.onSurfaceVariant,
-            //   ),
-            // ),
+            const SizedBox(height: 4),
+            Text(
+              _selectedSystem == null
+                  ? '先選擇城市，再挑選路線。'
+                  : '${_selectedSystem!.city} · ${_selectedSystem!.name}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
             const SizedBox(height: 14),
             Wrap(
               spacing: 10,
@@ -634,11 +641,25 @@ class _MetroScreenState extends State<MetroScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    _selectedLine == null ? '尚未選擇路線' : _selectedLine!.name,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _selectedLine == null ? '選擇路線' : _selectedLine!.name,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _selectedLine == null
+                            ? '選好路線後，可以查看雙向到站資訊或站點地圖。'
+                            : '${_uniqueStations.length} 個站點 · ${_lineDirections.length} 個方向',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 if (_selectedLine != null)
@@ -665,25 +686,21 @@ class _MetroScreenState extends State<MetroScreen> {
                 label: '這個捷運系統目前沒有可用路線。',
               )
             else
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: _lines
-                      .map((line) {
-                        final selected = line.lineId == _selectedLine?.lineId;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 10),
-                          child: _LinePill(
-                            line: line,
-                            selected: selected,
-                            onTap: _loadingSystem
-                                ? null
-                                : () => _loadLineEta(line: line),
-                          ),
-                        );
-                      })
-                      .toList(growable: false),
-                ),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _lines
+                    .map((line) {
+                      final selected = line.lineId == _selectedLine?.lineId;
+                      return _LinePill(
+                        line: line,
+                        selected: selected,
+                        onTap: _loadingSystem
+                            ? null
+                            : () => _loadLineEta(line: line),
+                      );
+                    })
+                    .toList(growable: false),
               ),
             if (_loadingEta) ...[
               const SizedBox(height: 12),
@@ -717,8 +734,10 @@ class _MetroScreenState extends State<MetroScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            Icons.info_outline_rounded,
-            color: theme.colorScheme.onSurfaceVariant,
+            _etaSource == 'liveboard'
+                ? Icons.wifi_tethering_rounded
+                : Icons.schedule_rounded,
+            color: theme.colorScheme.primary,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -791,6 +810,7 @@ class _MetroScreenState extends State<MetroScreen> {
                   ? null
                   : '${_currentHeadway!.minHeadway}-${_currentHeadway!.maxHeadway}分',
             ),
+            initiallyExpanded: true,
           ),
         ),
       ],
@@ -842,13 +862,13 @@ class _MetroScreenState extends State<MetroScreen> {
                     ),
                   ],
                 ),
-                // const SizedBox(height: 8),
-                // Text(
-                //   '點站點會把下方切到該站最近列車；不需要再進第二層畫面。',
-                //   style: theme.textTheme.bodySmall?.copyWith(
-                //     color: theme.colorScheme.onSurfaceVariant,
-                //   ),
-                // ),
+                const SizedBox(height: 8),
+                Text(
+                  '點選站點即可查看最近班次；拖曳地圖可以瀏覽整條路線。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 TransitStationMap(
                   points: points,
@@ -1023,7 +1043,10 @@ class _LinePill extends StatelessWidget {
   Color _parseLineColor(String hex) {
     final cleaned = hex.replaceAll('#', '');
     if (cleaned.length == 6) {
-      return Color(int.parse('FF$cleaned', radix: 16));
+      final value = int.tryParse('FF$cleaned', radix: 16);
+      if (value != null) {
+        return Color(value);
+      }
     }
     return Colors.grey;
   }
@@ -1110,6 +1133,7 @@ class _DirectionSection extends StatelessWidget {
     required this.etaSource,
     required this.stationBuilder,
     required this.onStationTap,
+    required this.initiallyExpanded,
     super.key,
   });
 
@@ -1119,6 +1143,7 @@ class _DirectionSection extends StatelessWidget {
   final String etaSource;
   final Widget Function(MetroStationSequence station) stationBuilder;
   final ValueChanged<String> onStationTap;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -1128,51 +1153,46 @@ class _DirectionSection extends StatelessWidget {
         : '方向 ${direction.direction + 1}';
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: lineColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '往 $destination',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                if (etaSource == 'frequency' && headway != null)
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+        leading: Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: lineColor, shape: BoxShape.circle),
+        ),
+        title: Text(
+          '往 $destination',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        subtitle: Text('${direction.stations.length} 個車站'),
+        trailing: etaSource == 'frequency' && headway != null
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Chip(
                     label: Text(
-                      '班距 ${headway!.minHeadway}-${headway!.maxHeadway} 分',
+                      '${headway!.minHeadway}-${headway!.maxHeadway} 分',
                     ),
                   ),
-              ],
+                  const Icon(Icons.expand_more_rounded),
+                ],
+              )
+            : null,
+        children: direction.stations.map((station) {
+          return InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => onStationTap(station.stationId),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: stationBuilder(station),
             ),
-            const SizedBox(height: 12),
-            ...direction.stations.map((station) {
-              return InkWell(
-                borderRadius: BorderRadius.circular(18),
-                onTap: () => onStationTap(station.stationId),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: stationBuilder(station),
-                ),
-              );
-            }),
-          ],
-        ),
+          );
+        }).toList(growable: false),
       ),
     );
   }
@@ -1243,6 +1263,7 @@ class _MetroStationRow extends StatelessWidget {
                   ],
                 ),
               ),
+              const Icon(Icons.chevron_right_rounded),
             ],
           ),
         ),
