@@ -50,6 +50,9 @@ jobs:
       - name: Test
         run: flutter test
 
+      - name: Test route geometry on Web
+        run: flutter test --platform chrome test/route_path_points_test.dart
+
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest

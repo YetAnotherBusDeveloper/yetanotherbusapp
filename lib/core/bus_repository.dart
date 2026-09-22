@@ -3507,7 +3507,9 @@ class BusRepository {
         result |= (byte & 0x1f) << shift;
         shift += 5;
       } while (byte >= 0x20);
-      final deltaLat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+      // Bitwise NOT produces an unsigned 32-bit value on JavaScript. Use
+      // arithmetic negation so negative deltas stay signed on every platform.
+      final deltaLat = (result & 1) != 0 ? -(result >> 1) - 1 : (result >> 1);
       lat += deltaLat;
 
       shift = 0;
@@ -3520,7 +3522,7 @@ class BusRepository {
         result |= (byte & 0x1f) << shift;
         shift += 5;
       } while (byte >= 0x20);
-      final deltaLon = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+      final deltaLon = (result & 1) != 0 ? -(result >> 1) - 1 : (result >> 1);
       lon += deltaLon;
 
       points.add(RoutePathPoint(lat: lat / 1e5, lon: lon / 1e5));
