@@ -144,8 +144,10 @@ class WeatherAppBarTitle extends StatelessWidget {
     this.titleWidget,
     this.titleWidth,
     this.onTap,
+    this.onOverflow,
     this.serviceOverride,
     this.locationOverride,
+    this.enabledOverride,
     super.key,
   });
 
@@ -160,16 +162,27 @@ class WeatherAppBarTitle extends StatelessWidget {
   /// Tapping the chip opens the full weather page. Null leaves it decorative.
   final WeatherChipTapCallback? onTap;
 
+  /// Called after layout when the title and loaded weather chip do not fit.
+  ///
+  /// The callback is posted after the current frame so a parent can remove a
+  /// lower-priority app-bar action without mutating the tree during layout.
+  final VoidCallback? onOverflow;
+
   @visibleForTesting
   final WeatherService? serviceOverride;
 
   @visibleForTesting
   final PassiveLocationResolver? locationOverride;
 
+  @visibleForTesting
+  final bool? enabledOverride;
+
   @override
   Widget build(BuildContext context) {
-    final controller = AppControllerScope.of(context);
-    if (!controller.settings.showWeatherInAppBar) {
+    final enabled =
+        enabledOverride ??
+        AppControllerScope.of(context).settings.showWeatherInAppBar;
+    if (!enabled) {
       return titleWidget ?? Text(title);
     }
     return _WeatherChipHost(
@@ -177,6 +190,7 @@ class WeatherAppBarTitle extends StatelessWidget {
       titleWidget: titleWidget,
       titleWidth: titleWidth,
       onTap: onTap,
+      onOverflow: onOverflow,
       serviceOverride: serviceOverride,
       locationOverride: locationOverride,
     );
@@ -189,6 +203,7 @@ class _WeatherChipHost extends StatefulWidget {
     this.titleWidget,
     this.titleWidth,
     this.onTap,
+    this.onOverflow,
     this.serviceOverride,
     this.locationOverride,
   });
@@ -197,6 +212,7 @@ class _WeatherChipHost extends StatefulWidget {
   final Widget? titleWidget;
   final double? titleWidth;
   final WeatherChipTapCallback? onTap;
+  final VoidCallback? onOverflow;
   final WeatherService? serviceOverride;
   final PassiveLocationResolver? locationOverride;
 
@@ -212,6 +228,7 @@ class _WeatherChipHostState extends State<_WeatherChipHost>
   Position? _position;
   Timer? _timer;
   bool _loading = false;
+  bool _overflowReported = false;
 
   @override
   void initState() {
@@ -226,6 +243,14 @@ class _WeatherChipHostState extends State<_WeatherChipHost>
     _timer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _WeatherChipHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.onOverflow == null && widget.onOverflow != null) {
+      _overflowReported = false;
+    }
   }
 
   @override
@@ -345,6 +370,15 @@ class _WeatherChipHostState extends State<_WeatherChipHost>
               chipWidth: chipWidth,
             );
         if (!fits) {
+          final onOverflow = widget.onOverflow;
+          if (onOverflow != null && !_overflowReported) {
+            _overflowReported = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                widget.onOverflow?.call();
+              }
+            });
+          }
           return widget.titleWidget ??
               Text(
                 widget.title,
@@ -353,6 +387,7 @@ class _WeatherChipHostState extends State<_WeatherChipHost>
                 overflow: TextOverflow.ellipsis,
               );
         }
+        _overflowReported = false;
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
