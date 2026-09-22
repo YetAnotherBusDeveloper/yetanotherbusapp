@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../core/models.dart';
 import '../widgets/background_image_wrapper.dart';
@@ -368,6 +369,7 @@ class PersonalizationScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              const AdBannerWidget(minimumDensity: 4, isInline: true),
             ],
           ),
         ),
@@ -790,6 +792,7 @@ class _PerPageBackgroundScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              const AdBannerWidget(minimumDensity: 4, isInline: true),
             ],
           ),
         ),

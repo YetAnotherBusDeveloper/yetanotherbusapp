@@ -246,19 +246,19 @@ class _MainTransitShellState extends State<MainTransitShell>
       TransitMode.bus => const HomeScreen(),
       TransitMode.metro => MetroScreen(
         isActive: mode == _currentMode,
-        showAdBanner: !isMobile,
+        adMinimumDensity: isMobile ? 4 : 1,
       ),
       TransitMode.thsr => ThsrScreen(
         isActive: mode == _currentMode,
-        showAdBanner: !isMobile,
+        adMinimumDensity: isMobile ? 4 : 1,
       ),
       TransitMode.tra => TraScreen(
         isActive: mode == _currentMode,
-        showAdBanner: !isMobile,
+        adMinimumDensity: isMobile ? 4 : 1,
       ),
       TransitMode.youbike => YouBikeScreen(
         isActive: mode == _currentMode,
-        showAdBanner: !isMobile,
+        adMinimumDensity: isMobile ? 4 : 1,
       ),
     };
   }

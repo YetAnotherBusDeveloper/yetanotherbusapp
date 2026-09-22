@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../widgets/ad_density_setting.dart';
+import '../widgets/ad_banner_widget.dart';
 import '../core/ad_service.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -280,9 +282,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('顯示天氣'),
-                          subtitle: const Text(
-                            '在首頁標題旁顯示目前氣溫，點一下可開啟完整預報。',
-                          ),
+                          subtitle: const Text('在首頁標題旁顯示目前氣溫，點一下可開啟完整預報。'),
                           value: controller.settings.showWeatherInAppBar,
                           onChanged: controller.updateShowWeatherInAppBar,
                         ),
@@ -628,6 +628,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     value,
                                   ),
                           ),
+                        if (!kIsWeb &&
+                            defaultTargetPlatform == TargetPlatform.android)
+                          const AdDensitySetting(),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('智慧推薦'),
@@ -1020,6 +1023,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+                const AdBannerWidget(minimumDensity: 4, isInline: true),
               ],
             ),
           ),

@@ -2079,6 +2079,12 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateAdDensity(int value) async {
+    _settings = _settings.copyWith(adDensity: value);
+    await _persistSettings();
+    notifyListeners();
+  }
+
   Future<void> downloadCurrentProviderDatabase() async {
     return downloadProviderDatabase(_settings.provider);
   }

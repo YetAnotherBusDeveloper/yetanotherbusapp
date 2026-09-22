@@ -7,8 +7,12 @@ class AdService {
 
   static final AdService instance = AdService._();
 
-  static const String bannerAdUnitId =
-      'ca-app-pub-4517104314307871/7453350731';
+  static const String bannerAdUnitId = kReleaseMode
+      ? 'ca-app-pub-4517104314307871/7453350731'
+      : 'ca-app-pub-3940256099942544/9214589741';
+
+  static bool get isSupported =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   static const String _adToggleLockedKey = 'ad_toggle_locked';
 
@@ -16,12 +20,10 @@ class AdService {
   Future<void>? _initFuture;
 
   /// Whether the ad SDK is initialized and the platform supports ads.
-  bool get isAvailable =>
-      _initialized &&
-      !kIsWeb &&
-      defaultTargetPlatform == TargetPlatform.android;
+  bool get isAvailable => _initialized && isSupported;
 
   Future<void> initialize() {
+    if (_initialized || !isSupported) return Future<void>.value();
     _initFuture ??= _initializeInternal();
     return _initFuture!;
   }

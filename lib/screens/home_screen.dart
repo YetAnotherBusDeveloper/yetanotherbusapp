@@ -83,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         children: [
+          const AdBannerWidget(minimumDensity: 2, isInline: true),
           if (controller.settings.enableSmartRecommendations) ...[
             _SmartRecommendationCard(
               controller: controller,
@@ -97,6 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _buildNearbyFeatureCard(context, compactMode: compactMode),
           const SizedBox(height: 8),
           _buildBusMapFeatureCard(context, compactMode: compactMode),
+          const AdBannerWidget(isInline: true),
         ],
       ),
     );
@@ -110,6 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 32, 12, 32),
       children: [
+        const AdBannerWidget(minimumDensity: 2, isInline: true),
         SizedBox(
           height: 196,
           child: Row(
@@ -157,8 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
             maxSuggestions: 3,
           ),
         ],
-        const SizedBox(height: 16),
-        const AdBannerWidget(),
+        const AdBannerWidget(isInline: true),
       ],
     );
   }

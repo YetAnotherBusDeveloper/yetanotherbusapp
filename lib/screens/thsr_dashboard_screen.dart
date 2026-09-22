@@ -22,11 +22,13 @@ class ThsrScreen extends StatefulWidget {
   const ThsrScreen({
     required this.isActive,
     this.showAdBanner = true,
+    this.adMinimumDensity = 1,
     super.key,
   });
 
   final bool isActive;
   final bool showAdBanner;
+  final int adMinimumDensity;
 
   @override
   State<ThsrScreen> createState() => _ThsrScreenState();
@@ -442,7 +444,11 @@ class _ThsrScreenState extends State<ThsrScreen> {
               ),
             ),
           ),
-          if (widget.showAdBanner) const AdBannerWidget(),
+          if (widget.showAdBanner)
+            AdBannerWidget(
+              minimumDensity: widget.adMinimumDensity,
+              isActive: widget.isActive,
+            ),
         ],
       ),
     );

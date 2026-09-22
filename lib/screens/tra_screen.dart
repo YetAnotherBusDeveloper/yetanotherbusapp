@@ -22,11 +22,13 @@ class TraScreen extends StatefulWidget {
   const TraScreen({
     required this.isActive,
     this.showAdBanner = true,
+    this.adMinimumDensity = 1,
     super.key,
   });
 
   final bool isActive;
   final bool showAdBanner;
+  final int adMinimumDensity;
 
   @override
   State<TraScreen> createState() => _TraScreenState();
@@ -587,7 +589,11 @@ class _TraScreenState extends State<TraScreen> {
               ),
             ),
           ),
-          if (widget.showAdBanner) const AdBannerWidget(),
+          if (widget.showAdBanner)
+            AdBannerWidget(
+              minimumDensity: widget.adMinimumDensity,
+              isActive: widget.isActive,
+            ),
         ],
       ),
     );

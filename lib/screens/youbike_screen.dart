@@ -21,11 +21,13 @@ class YouBikeScreen extends StatefulWidget {
   const YouBikeScreen({
     required this.isActive,
     this.showAdBanner = true,
+    this.adMinimumDensity = 1,
     super.key,
   });
 
   final bool isActive;
   final bool showAdBanner;
+  final int adMinimumDensity;
 
   @override
   State<YouBikeScreen> createState() => _YouBikeScreenState();
@@ -1332,7 +1334,11 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                         useGoogleMapsPointProvider: useGoogleMapsPointProvider,
                       ),
               ),
-              if (widget.showAdBanner) const AdBannerWidget(),
+              if (widget.showAdBanner)
+                AdBannerWidget(
+                  minimumDensity: widget.adMinimumDensity,
+                  isActive: widget.isActive,
+                ),
             ],
           ),
         );

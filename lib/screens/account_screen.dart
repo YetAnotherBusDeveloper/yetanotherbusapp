@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
+import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../core/account_sync_models.dart';
 import '../core/app_controller.dart';
@@ -364,6 +365,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   ),
                 ),
               ],
+              const AdBannerWidget(minimumDensity: 4, isInline: true),
             ],
           ),
         ),

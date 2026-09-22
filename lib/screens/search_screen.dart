@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../core/app_motion.dart';
 import '../widgets/app_content_transition.dart';
@@ -1271,11 +1272,19 @@ class _SearchScreenState extends State<SearchScreen> {
                         ? ListView.builder(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                             itemCount: _results.length,
-                            itemBuilder: (context, index) =>
+                            itemBuilder: (context, index) => Column(
+                              children: [
                                 _buildRouteResultCard(
                                   _results[index],
                                   busController,
                                 ),
+                                if (index == _results.length - 1)
+                                  const AdBannerWidget(
+                                    minimumDensity: 3,
+                                    isInline: true,
+                                  ),
+                              ],
+                            ),
                           )
                         : ListView(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
@@ -1323,6 +1332,12 @@ class _SearchScreenState extends State<SearchScreen> {
                                   message: missingProviders.isEmpty
                                       ? '試試看少打一點，或換成站牌名稱搜尋。'
                                       : '部分站牌搜尋需要本機資料庫，先更新資料庫後再試一次。',
+                                ),
+                              if (resultState == 'history' &&
+                                  busController.history.isNotEmpty)
+                                const AdBannerWidget(
+                                  minimumDensity: 3,
+                                  isInline: true,
                                 ),
                             ],
                           ),

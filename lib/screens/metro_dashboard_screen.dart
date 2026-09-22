@@ -19,11 +19,13 @@ class MetroScreen extends StatefulWidget {
   const MetroScreen({
     required this.isActive,
     this.showAdBanner = true,
+    this.adMinimumDensity = 1,
     super.key,
   });
 
   final bool isActive;
   final bool showAdBanner;
+  final int adMinimumDensity;
 
   @override
   State<MetroScreen> createState() => _MetroScreenState();
@@ -564,7 +566,11 @@ class _MetroScreenState extends State<MetroScreen> {
               ),
             ),
           ),
-          if (widget.showAdBanner) const AdBannerWidget(),
+          if (widget.showAdBanner)
+            AdBannerWidget(
+              minimumDensity: widget.adMinimumDensity,
+              isActive: widget.isActive,
+            ),
         ],
       ),
     );
