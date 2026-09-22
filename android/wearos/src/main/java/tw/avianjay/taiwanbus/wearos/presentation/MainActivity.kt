@@ -341,6 +341,10 @@ private fun WearApp(
             WearDataRepository.fetchRouteDetail(context, route.routeId, route.provider)
         }.onSuccess { detail ->
             routeDetail = detail
+            activePathIndex = route.preferredPathId
+                ?.let { preferred -> detail.paths.indexOfFirst { it.pathId == preferred } }
+                ?.takeIf { it >= 0 }
+                ?: 0
             routeDetailLoading = false
         }.onFailure { error ->
             routeDetail = null
@@ -506,6 +510,7 @@ private fun WearApp(
                                     routeName = suggestion.routeName,
                                     description = suggestion.stopName.ifBlank { suggestion.reason },
                                     provider = suggestion.provider,
+                                    preferredPathId = suggestion.pathId,
                                 )
                                 screen = WearScreen.RouteDetail
                             },

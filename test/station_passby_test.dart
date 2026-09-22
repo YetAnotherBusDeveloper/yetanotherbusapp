@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -147,6 +148,50 @@ void main() {
       isNull,
     );
   });
+
+  test(
+    'station lookups share in-flight work and cache successful data',
+    () async {
+      final response = Completer<http.Response>();
+      var requests = 0;
+      final repository = BusRepository(
+        client: MockClient((_) {
+          requests += 1;
+          return response.future;
+        }),
+      );
+
+      final first = repository.resolveStation(
+        'STOP-B',
+        provider: BusProvider.tpe,
+      );
+      final second = repository.resolveStation(
+        'STOP-B',
+        provider: BusProvider.tpe,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(requests, 1);
+
+      response.complete(
+        http.Response(
+          jsonEncode(_stationPayload()),
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      );
+      expect(
+        (await Future.wait([first, second])).every((item) => item != null),
+        isTrue,
+      );
+
+      final cached = await repository.resolveStation(
+        'STOP-B',
+        provider: BusProvider.tpe,
+      );
+      expect(cached?.stationId, 'TPE-STATION-1');
+      expect(requests, 1);
+    },
+  );
 
   testWidgets('station detail renders routes for every stable side', (
     tester,

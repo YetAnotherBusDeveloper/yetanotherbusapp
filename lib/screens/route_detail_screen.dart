@@ -32,6 +32,7 @@ import '../core/twbusforum.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/cat_state_card.dart';
 import '../widgets/eta_badge.dart';
+import '../widgets/directional_bus_icon.dart';
 import '../widgets/route_bus_map_sheet.dart';
 import '../widgets/ad_banner_widget.dart';
 import '../widgets/app_content_transition.dart';
@@ -449,9 +450,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           final detail = _detail;
           if (detail == null) return;
           unawaited(
-            AppControllerScope.read(
-              context,
-            ).recordRouteVisit(detail.route, provider: widget.provider),
+            AppControllerScope.read(context).recordRouteVisit(
+              detail.route,
+              provider: widget.provider,
+              pathId: _currentPathId,
+            ),
           );
         });
       }
@@ -5461,7 +5464,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     return requiredWidth > availableWidth;
   }
 
-  Widget _buildVehicleMenuItem(BuildContext context, BusVehicle vehicle) {
+  Widget _buildVehicleMenuItem(
+    BuildContext context,
+    BusVehicle vehicle, {
+    required int pathId,
+  }) {
     final theme = Theme.of(context);
     final details = <String>[
       if (vehicle.note.trim().isNotEmpty) vehicle.note.trim(),
@@ -5473,8 +5480,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          vehicle.type == '1'
+        DirectionalBusIcon(
+          pathId: pathId,
+          icon: vehicle.type == '1'
               ? Icons.accessible_rounded
               : Icons.directions_bus_rounded,
           size: 18,
@@ -5542,6 +5550,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         glowColor: statusStyle.glowColor,
         showStackedBuses: statusStyle.showStackedBuses,
         stackCount: stop.buses.length,
+        pathId: stop.pathId,
       );
 
       if (stop.buses.length == 1) {
@@ -5572,7 +5581,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             for (final vehicle in stop.buses)
               PopupMenuItem<BusVehicle>(
                 value: vehicle,
-                child: _buildVehicleMenuItem(context, vehicle),
+                child: _buildVehicleMenuItem(
+                  context,
+                  vehicle,
+                  pathId: stop.pathId,
+                ),
               ),
           ];
         },
@@ -6295,6 +6308,7 @@ class _RouteStatusPill extends StatelessWidget {
     this.glowColor,
     this.showStackedBuses = false,
     this.stackCount,
+    this.pathId,
   });
 
   final IconData icon;
@@ -6305,10 +6319,16 @@ class _RouteStatusPill extends StatelessWidget {
   final Color? glowColor;
   final bool showStackedBuses;
   final int? stackCount;
+  final int? pathId;
 
   Widget _buildIcon() {
     if (!showStackedBuses) {
-      return Icon(icon, size: 18, color: foregroundColor);
+      return DirectionalBusIcon(
+        pathId: pathId,
+        icon: icon,
+        size: 18,
+        color: foregroundColor,
+      );
     }
 
     final count = stackCount ?? 2;
@@ -6320,7 +6340,12 @@ class _RouteStatusPill extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Icon(icon, size: 18, color: foregroundColor),
+          DirectionalBusIcon(
+            pathId: pathId,
+            icon: icon,
+            size: 18,
+            color: foregroundColor,
+          ),
           Positioned(
             right: -2,
             bottom: -2,

@@ -47,6 +47,7 @@ class BusRepository {
   static const _routeFamilyCacheTtl = Duration(minutes: 30);
   static const _searchApiCacheTtl = Duration(seconds: 2);
   static const _realtimeCacheTtl = Duration(seconds: 2);
+  static const _stationPassbyCacheTtl = Duration(seconds: 15);
   static const _routeStopsApiCacheTtl = Duration(minutes: 30);
   static const _routePathGeometryCacheTtl = Duration(minutes: 30);
   static const _routeRealtimeBusesCacheTtl = Duration(seconds: 2);
@@ -76,6 +77,8 @@ class BusRepository {
     _clearAllStaticRouteCaches();
     _realtimeCache.clear();
     _realtimeInFlight.clear();
+    _stationPassbyCache.clear();
+    _stationPassbyInFlight.clear();
     _routeRealtimeBusesCache.clear();
     _routeRealtimeBusesInFlight.clear();
     _routeDetailCache.clear();
@@ -98,6 +101,10 @@ class BusRepository {
       <String, _TimedValue<LiveStopMap>>{};
   final Map<String, Future<LiveStopMap>> _realtimeInFlight =
       <String, Future<LiveStopMap>>{};
+  final Map<String, _TimedValue<StationPassbyData>> _stationPassbyCache =
+      <String, _TimedValue<StationPassbyData>>{};
+  final Map<String, Future<StationPassbyData?>> _stationPassbyInFlight =
+      <String, Future<StationPassbyData?>>{};
   final Map<String, _TimedValue<Map<String, dynamic>>> _routeStopsApiCache =
       <String, _TimedValue<Map<String, dynamic>>>{};
   final Map<String, Future<Map<String, dynamic>>> _routeStopsApiInFlight =
@@ -2609,7 +2616,7 @@ class BusRepository {
     final uri = Uri.parse(
       '$_apiBaseUrl/api/v1/stations/resolve',
     ).replace(queryParameters: {'city': provider.prefix, 'stopid': trimmed});
-    return _loadStationPassby(uri, expectedProvider: provider);
+    return _getStationPassby(uri, expectedProvider: provider);
   }
 
   Future<StationPassbyData?> getStationPassby(
@@ -2623,11 +2630,52 @@ class BusRepository {
     final uri = Uri.parse(
       '$_apiBaseUrl/api/v1/stations/${Uri.encodeComponent(trimmed)}/passby',
     ).replace(queryParameters: {'city': provider.prefix});
-    final station = await _loadStationPassby(uri, expectedProvider: provider);
+    final station = await _getStationPassby(
+      uri,
+      expectedProvider: provider,
+      expectedStationId: trimmed,
+    );
     if (station != null && station.stationId != trimmed) {
       return null;
     }
     return station;
+  }
+
+  Future<StationPassbyData?> _getStationPassby(
+    Uri uri, {
+    required BusProvider expectedProvider,
+    String? expectedStationId,
+  }) async {
+    final cacheKey = uri.toString();
+    final cached = _readFreshCache(
+      _stationPassbyCache,
+      cacheKey,
+      _stationPassbyCacheTtl,
+    );
+    if (cached != null) {
+      return cached;
+    }
+
+    final inFlight = _stationPassbyInFlight[cacheKey];
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final future = _loadStationPassby(uri, expectedProvider: expectedProvider);
+    _stationPassbyInFlight[cacheKey] = future;
+    try {
+      final station = await future;
+      if (station != null &&
+          (expectedStationId == null ||
+              station.stationId == expectedStationId)) {
+        _stationPassbyCache[cacheKey] = _TimedValue(station);
+      }
+      return station;
+    } finally {
+      if (identical(_stationPassbyInFlight[cacheKey], future)) {
+        _stationPassbyInFlight.remove(cacheKey);
+      }
+    }
   }
 
   Future<StationPassbyData?> _loadStationPassby(

@@ -764,6 +764,7 @@ class SearchHistoryEntry {
     required this.routeKey,
     required this.routeName,
     this.routeId,
+    this.pathId,
     this.pathName,
     required this.timestampMs,
   });
@@ -776,6 +777,7 @@ class SearchHistoryEntry {
       routeId: (json['routeId'] as String?)?.trim().isNotEmpty == true
           ? (json['routeId'] as String).trim()
           : null,
+      pathId: (json['pathId'] as num?)?.toInt(),
       pathName: (json['pathName'] as String?)?.trim().isNotEmpty == true
           ? (json['pathName'] as String).trim()
           : null,
@@ -787,6 +789,7 @@ class SearchHistoryEntry {
   final int routeKey;
   final String routeName;
   final String? routeId;
+  final int? pathId;
   final String? pathName;
   final int timestampMs;
 
@@ -796,6 +799,7 @@ class SearchHistoryEntry {
       'routeKey': routeKey,
       'routeName': routeName,
       if (routeId != null) 'routeId': routeId,
+      if (pathId != null) 'pathId': pathId,
       if (pathName != null) 'pathName': pathName,
       'timestampMs': timestampMs,
     };
@@ -1118,7 +1122,9 @@ class FavoriteUsageProfile {
   }
 
   bool matchesRoute(RouteUsageProfile profile) {
-    return provider == profile.provider && routeKey == profile.routeKey;
+    return provider == profile.provider &&
+        routeKey == profile.routeKey &&
+        pathId == profile.pathId;
   }
 
   bool matchesFavorite(FavoriteStop favorite) {
@@ -1152,6 +1158,7 @@ class RouteUsageProfile {
   const RouteUsageProfile({
     required this.provider,
     required this.routeKey,
+    this.pathId,
     required this.routeName,
     required this.totalOpens,
     required this.lastOpenedAtMs,
@@ -1184,6 +1191,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: busProviderFromString(json['provider'] as String? ?? 'tpe'),
       routeKey: (json['routeKey'] as num?)?.toInt() ?? 0,
+      pathId: (json['pathId'] as num?)?.toInt(),
       routeName: json['routeName'] as String? ?? '',
       totalOpens: (json['totalOpens'] as num?)?.toInt() ?? 0,
       lastOpenedAtMs: (json['lastOpenedAtMs'] as num?)?.toInt() ?? 0,
@@ -1196,6 +1204,7 @@ class RouteUsageProfile {
 
   final BusProvider provider;
   final int routeKey;
+  final int? pathId;
   final String routeName;
   final int totalOpens;
   final int lastOpenedAtMs;
@@ -1214,6 +1223,7 @@ class RouteUsageProfile {
     return {
       'provider': provider.name,
       'routeKey': routeKey,
+      if (pathId != null) 'pathId': pathId,
       'routeName': routeName,
       'totalOpens': totalOpens,
       'lastOpenedAtMs': lastOpenedAtMs,
@@ -1305,6 +1315,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       routeName: routeName?.trim().isNotEmpty == true
           ? routeName!.trim()
           : this.routeName,
@@ -1323,6 +1334,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       routeName: routeName?.trim().isNotEmpty == true
           ? routeName!.trim()
           : this.routeName,
@@ -1337,6 +1349,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       routeName: routeName,
       totalOpens: totalOpens,
       lastOpenedAtMs: lastOpenedAtMs,
@@ -1348,6 +1361,7 @@ class RouteUsageProfile {
     return RouteUsageProfile(
       provider: provider,
       routeKey: routeKey,
+      pathId: pathId,
       routeName: routeName,
       totalOpens: totalOpens,
       lastOpenedAtMs: lastOpenedAtMs,

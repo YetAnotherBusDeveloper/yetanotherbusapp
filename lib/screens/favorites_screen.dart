@@ -278,10 +278,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     });
 
     try {
-      final baseItems = shouldResolveStatic
-          ? await controller.resolveFavoriteGroup(groupName)
-          : _items;
-      final stationEntries = await Future.wait(
+      final stationEntriesFuture = Future.wait(
         references.whereType<FavoriteStation>().map((favorite) async {
           try {
             final station = await controller.repository.getStationPassby(
@@ -297,6 +294,20 @@ class _FavoritesScreenState extends State<FavoritesScreen>
           }
         }),
       );
+      unawaited(
+        stationEntriesFuture.then<void>((stationEntries) {
+          if (!mounted || requestId != _refreshRequestId) {
+            return;
+          }
+          setState(() {
+            _stationDataByKey = _resolvedStationData(stationEntries);
+          });
+        }),
+      );
+
+      final baseItems = shouldResolveStatic
+          ? await controller.resolveFavoriteGroup(groupName)
+          : _items;
 
       if (!mounted || requestId != _refreshRequestId) {
         return;
@@ -339,65 +350,17 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         batchLiveMap = const {};
       }
 
-      final detailEntries = await Future.wait(
-        uniqueRoutes.entries.map((entry) async {
-          try {
-            final routeSummary = routeSummariesByKey[entry.key];
-            final routeId = routeIdByRequestKey[entry.key];
-            // If we already have batch realtime data for this route, inject
-            // it into the repository-level cache so that getRouteDetail can
-            // pick it up without making another HTTP request.
-            if (routeId != null) {
-              final liveForRoute = batchLiveMap[routeId];
-              if (liveForRoute != null) {
-                controller.repository.preloadRealtimeCache(
-                  routeId,
-                  liveForRoute,
-                );
-              }
-            }
-            final detail = await controller.getRouteDetail(
-              entry.value.routeKey,
-              provider: entry.value.provider,
-              routeIdHint: entry.value.routeId ?? routeSummary?.routeId,
-              routeNameHint: routeSummary?.routeName,
-            );
-            return MapEntry(entry.key, detail);
-          } catch (_) {
-            return MapEntry<String, RouteDetailData?>(entry.key, null);
-          }
-        }),
-      );
-
       if (!mounted || requestId != _refreshRequestId) {
         return;
       }
 
-      final detailsByRoute = <String, RouteDetailData?>{
-        for (final entry in detailEntries) entry.key: entry.value,
-      };
-      var liveRouteCount = 0;
-      var failedRouteCount = 0;
-      for (final detail in detailsByRoute.values) {
-        if (detail == null) {
-          failedRouteCount += 1;
-        } else if (detail.hasLiveData) {
-          liveRouteCount += 1;
-        }
-      }
-
       final enrichedItems = baseItems.map((item) {
-        final routeKey = _routeRequestKey(item.reference);
-        final detail = detailsByRoute[routeKey];
-        if (detail != null) {
-          final liveStop = _findStopInDetail(detail, item.reference);
-          if (liveStop != null) {
-            return FavoriteResolvedItem(
-              reference: item.reference,
-              route: item.route,
-              stop: liveStop,
-            );
-          }
+        final requestKey = _routeRequestKey(item.reference);
+        final routeId = routeIdByRequestKey[requestKey];
+        final liveMap = routeId == null ? null : batchLiveMap[routeId];
+        final payload = liveMap?['${item.stop.pathId}:${item.stop.stopId}'];
+        if (payload != null) {
+          return _applyLivePayload(item, payload);
         }
 
         final previousItem =
@@ -412,14 +375,24 @@ class _FavoritesScreenState extends State<FavoritesScreen>
 
         return item;
       }).toList();
+      final liveRouteCount = routeIdByRequestKey.values
+          .where(batchLiveMap.containsKey)
+          .toSet()
+          .length;
+      final failedRouteCount = uniqueRoutes.length - liveRouteCount;
 
-      final resolvedStationData = {
-        for (final entry in stationEntries)
-          if (entry.value != null)
-            entry.key: entry.value!
-          else if (_stationDataByKey[entry.key] != null)
-            entry.key: _stationDataByKey[entry.key]!,
-      };
+      setState(() {
+        _loadedGroupName = groupName;
+        _loadedSignature = signature;
+        _items = enrichedItems;
+      });
+
+      final stationEntries = await stationEntriesFuture;
+      if (!mounted || requestId != _refreshRequestId) {
+        return;
+      }
+
+      final resolvedStationData = _resolvedStationData(stationEntries);
       final failedStationCount =
           stationEntries.length - resolvedStationData.length;
       final hasStationLiveData = resolvedStationData.values.any(
@@ -441,9 +414,6 @@ class _FavoritesScreenState extends State<FavoritesScreen>
           : null;
 
       setState(() {
-        _loadedGroupName = groupName;
-        _loadedSignature = signature;
-        _items = enrichedItems;
         _stationDataByKey = resolvedStationData;
         _isLoading = false;
         _error = null;
@@ -510,14 +480,42 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     _pauseRefreshLoop(invalidateRequest: true);
   }
 
-  StopInfo? _findStopInDetail(RouteDetailData detail, FavoriteStop favorite) {
-    final pathStops = detail.stopsByPath[favorite.pathId] ?? const <StopInfo>[];
-    for (final stop in pathStops) {
-      if (stop.stopId == favorite.stopId) {
-        return stop;
-      }
-    }
-    return null;
+  Map<String, StationPassbyData> _resolvedStationData(
+    List<MapEntry<String, StationPassbyData?>> entries,
+  ) {
+    return {
+      for (final entry in entries)
+        if (entry.value != null)
+          entry.key: entry.value!
+        else if (_stationDataByKey[entry.key] != null)
+          entry.key: _stationDataByKey[entry.key]!,
+    };
+  }
+
+  FavoriteResolvedItem _applyLivePayload(
+    FavoriteResolvedItem item,
+    LiveStopPayload payload,
+  ) {
+    final stop = item.stop;
+    return FavoriteResolvedItem(
+      reference: item.reference,
+      route: item.route,
+      stop: StopInfo(
+        routeKey: stop.routeKey,
+        pathId: stop.pathId,
+        stopId: stop.stopId,
+        stopName: stop.stopName,
+        sequence: stop.sequence,
+        lon: stop.lon,
+        lat: stop.lat,
+        rawStopId: stop.rawStopId,
+        sec: payload.sec,
+        msg: payload.msg,
+        t: payload.t,
+        buses: payload.buses,
+        etas: payload.etas,
+      ),
+    );
   }
 
   Future<void> _removeFavoriteItem(

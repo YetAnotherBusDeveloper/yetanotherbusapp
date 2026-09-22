@@ -436,6 +436,11 @@ void main() {
     );
 
     expect(find.byType(BusMapBusMarker), findsNWidgets(2));
+    final eastbound = tester
+        .widgetList<BusMapBusMarker>(find.byType(BusMapBusMarker))
+        .singleWhere((marker) => marker.label == '234 KKA-1234');
+    expect(eastbound.heading, 90);
+    expect(find.byType(BusMapHeadingIndicator), findsNWidgets(2));
     expect(log.count('/cities/TPE/buses'), 1);
   });
 

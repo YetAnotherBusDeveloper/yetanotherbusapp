@@ -1164,7 +1164,11 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
           if (!isValidLatLng(point)) {
             return null;
           }
-          return _DisplayedBus(state: busState, point: point);
+          return _DisplayedBus(
+            state: busState,
+            point: point,
+            heading: busState.headingAt(now, geometry: geometry),
+          );
         })
         .whereType<_DisplayedBus>()
         .toList();
@@ -1355,6 +1359,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                                 color: bus.state.status.color,
                                 selected: selected,
                                 label: bus.state.bus.id,
+                                heading: bus.heading,
                               ),
                             ),
                           );
@@ -1900,6 +1905,8 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
             markerId: gmaps.MarkerId('bus:${bus.state.bus.id}'),
             consumeTapEvents: true,
             position: toGoogleLatLng(bus.point),
+            rotation: bus.heading,
+            flat: true,
             anchor: icon == null
                 ? const Offset(0.5, 1)
                 : const Offset(0.5, 0.5),
@@ -2363,10 +2370,15 @@ class _CompactInfoCell extends StatelessWidget {
 }
 
 class _DisplayedBus {
-  const _DisplayedBus({required this.state, required this.point});
+  const _DisplayedBus({
+    required this.state,
+    required this.point,
+    required this.heading,
+  });
 
   final AnimatedBusState state;
   final LatLng point;
+  final double heading;
 }
 
 class _DisplayedStop {

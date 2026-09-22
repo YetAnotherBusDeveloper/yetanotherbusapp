@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -16,38 +17,83 @@ class BusMapBusMarker extends StatelessWidget {
     required this.color,
     required this.selected,
     required this.label,
+    this.heading = 0,
   });
 
   final Color color;
   final bool selected;
   final String label;
+  final double heading;
 
   @override
   Widget build(BuildContext context) {
     final foreground = color.computeLuminance() > 0.45
         ? Colors.black87
         : Colors.white;
-    return AnimatedContainer(
-      duration: AppMotion.duration(context, AppMotion.quick),
-      curve: AppMotion.curve,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: selected ? 3 : 2),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 10,
-            offset: Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Tooltip(
-        message: label,
-        child: Icon(Icons.directions_bus_rounded, color: foreground, size: 22),
+    return Tooltip(
+      message: label,
+      child: AnimatedContainer(
+        duration: AppMotion.duration(context, AppMotion.quick),
+        curve: AppMotion.curve,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: selected ? 3 : 2),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 10,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(Icons.directions_bus_rounded, color: foreground, size: 22),
+            Align(
+              alignment: Alignment.topCenter,
+              child: BusMapHeadingIndicator(
+                heading: heading,
+                color: foreground,
+                size: selected ? 16 : 14,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+class BusMapHeadingIndicator extends StatelessWidget {
+  const BusMapHeadingIndicator({
+    super.key,
+    required this.heading,
+    required this.color,
+    required this.size,
+  });
+
+  final double heading;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedHeading = normalizeMarkerHeading(heading);
+    return Transform.rotate(
+      angle: normalizedHeading * math.pi / 180,
+      child: Icon(Icons.navigation_rounded, color: color, size: size),
+    );
+  }
+}
+
+double normalizeMarkerHeading(double heading) {
+  if (!heading.isFinite) {
+    return 0;
+  }
+  final normalized = heading % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
 }
 
 class BusMapUserLocationMarker extends StatelessWidget {
@@ -146,6 +192,22 @@ Future<Uint8List> drawGoogleBusIcon(GoogleBusIconRequest request) async {
       ..strokeWidth = request.borderWidth
       ..color = Colors.white,
   );
+
+  final pointer = ui.Path()
+    ..moveTo(center.dx, 0.5)
+    ..lineTo(center.dx + 5, 10)
+    ..lineTo(center.dx, 8)
+    ..lineTo(center.dx - 5, 10)
+    ..close();
+  canvas.drawPath(
+    pointer,
+    ui.Paint()
+      ..style = ui.PaintingStyle.stroke
+      ..strokeJoin = ui.StrokeJoin.round
+      ..strokeWidth = 2.5
+      ..color = Colors.white,
+  );
+  canvas.drawPath(pointer, ui.Paint()..color = foreground);
 
   final busIconPainter = TextPainter(
     text: TextSpan(

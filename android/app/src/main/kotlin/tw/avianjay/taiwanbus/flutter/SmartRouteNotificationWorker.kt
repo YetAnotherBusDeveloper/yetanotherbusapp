@@ -71,6 +71,7 @@ class SmartRouteNotificationWorker(
             val nearestStop = SmartRouteNotificationSupport.findNearestStop(
                 location = currentLocation,
                 routeData = routeData,
+                pathId = candidate.pathId,
             ) ?: return Result.success()
             val liveStop = SmartRouteNotificationSupport.fetchLiveStop(
                 routeId = routeData.routeId,
@@ -176,7 +177,8 @@ private object SmartRouteNotificationSupport {
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
             val routeKey = item.optInt("routeKey", 0)
-            if (routeKey <= 0) {
+            val pathId = if (item.has("pathId")) item.optInt("pathId") else null
+            if (routeKey <= 0 || pathId == null) {
                 continue
             }
             val hourlyOpens = mutableMapOf<Int, Int>()
@@ -206,6 +208,7 @@ private object SmartRouteNotificationSupport {
             result += SmartRouteProfile(
                 provider = item.optString("provider", "twn"),
                 routeKey = routeKey,
+                pathId = pathId,
                 routeName = item.optString("routeName", "").trim(),
                 totalOpens = item.optInt("totalOpens", 0),
                 lastOpenedAtMs = item.optLong("lastOpenedAtMs", 0L),
@@ -344,10 +347,11 @@ private object SmartRouteNotificationSupport {
     fun findNearestStop(
         location: Location,
         routeData: SmartRouteData,
+        pathId: Int,
     ): SmartNearestStop? {
         var bestStop: SmartNearestStop? = null
         for (stop in routeData.stops) {
-            if (stop.lat == 0.0 || stop.lon == 0.0) {
+            if (stop.pathId != pathId || stop.lat == 0.0 || stop.lon == 0.0) {
                 continue
             }
             val results = FloatArray(1)
@@ -750,6 +754,7 @@ private data class SmartRouteSettings(
 private data class SmartRouteProfile(
     val provider: String,
     val routeKey: Int,
+    val pathId: Int,
     val routeName: String,
     val totalOpens: Int,
     val lastOpenedAtMs: Long,
