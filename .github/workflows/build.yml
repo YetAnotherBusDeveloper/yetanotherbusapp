@@ -473,11 +473,12 @@ jobs:
       - name: Prepare iOS build
         run: flutter precache --ios
 
-      - name: Generate iOS archive without codesign
+      # Generate Flutter settings and install pods; let xcodebuild report build errors directly.
+      - name: Configure iOS build without codesign
         env:
           APP_GIT_SHA: ${{ github.sha }}
         run: >
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign --config-only
           --flavor=${{ env.IOS_FLAVOR }}
           --dart-define=APP_GIT_SHA=${{ github.sha }}
           --dart-define=APP_UPDATE_CHANNEL=${{ env.APP_UPDATE_CHANNEL }}
@@ -494,6 +495,7 @@ jobs:
           APP_GIT_SHA: ${{ github.sha }}
         run: |
           xcodebuild \
+            -hideShellScriptEnvironment \
             -workspace ios/YABus.xcworkspace \
             -scheme ${{ env.IOS_FLAVOR }} \
             -configuration Release-${{ env.IOS_FLAVOR }} \
@@ -502,7 +504,7 @@ jobs:
             -archivePath build/ipa/YABus.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_IDENTITY="" \
+            CODE_SIGN_IDENTITY="" \
             archive
 
       - name: Package unsigned IPA
