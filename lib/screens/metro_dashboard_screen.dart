@@ -565,6 +565,7 @@ class _MetroScreenState extends State<MetroScreen> {
                           ],
                         ),
                 ),
+                ),
               ),
             ),
           ),
@@ -1186,6 +1187,7 @@ class _DirectionSection extends StatelessWidget {
             ),
           );
         }).toList(growable: false),
+      ),
     );
   }
 }
