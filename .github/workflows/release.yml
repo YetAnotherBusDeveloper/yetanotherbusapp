@@ -440,9 +440,10 @@ jobs:
           grep '^version:' pubspec.yaml
       - name: Prepare iOS build
         run: flutter precache --ios
-      - name: Generate iOS archive without codesign
+      # Generate Flutter settings and install pods; let xcodebuild report build errors directly.
+      - name: Configure iOS build without codesign
         run: >
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign --config-only
           --flavor=${{ env.IOS_FLAVOR }}
           --dart-define=APP_GIT_SHA=${{ github.sha }}
           --dart-define=APP_UPDATE_CHANNEL=${{ env.APP_UPDATE_CHANNEL }}
@@ -453,19 +454,27 @@ jobs:
           --dart-define=YABUS_GOOGLE_WEB_CLIENT_ID=${{ env.YABUS_GOOGLE_WEB_CLIENT_ID }}
           --dart-define=YABUS_GOOGLE_IOS_CLIENT_ID=${{ env.YABUS_GOOGLE_IOS_CLIENT_ID }}
           --dart-define=APP_NIGHTLY_ARTIFACT=ios-unsigned-ipa
+      - name: Archive YABus.app
+        env:
+          APP_GIT_SHA: ${{ github.sha }}
+        run: |
+          xcodebuild \
+            -hideShellScriptEnvironment \
+            -workspace ios/YABus.xcworkspace \
+            -scheme ${{ env.IOS_FLAVOR }} \
+            -configuration Release-${{ env.IOS_FLAVOR }} \
+            -sdk iphoneos \
+            -destination generic/platform=iOS \
+            -archivePath build/ipa/YABus.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
       - name: Package unsigned IPA
         shell: bash
         run: |
           mkdir -p build/ipa/temp/Payload
-          APP_PATH=$(find build/ios/iphoneos -maxdepth 1 -name "*.app" -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
-            APP_PATH=$(find build/ios/archive -path "*.xcarchive/Products/Applications/*.app" -type d | head -1)
-          fi
-          if [ -z "$APP_PATH" ]; then
-            echo "No built iOS .app bundle found for IPA packaging."
-            exit 1
-          fi
-          cp -R "$APP_PATH" build/ipa/temp/Payload/
+          cp -R build/ipa/YABus.xcarchive/Products/Applications/*.app build/ipa/temp/Payload/
           cd build/ipa/temp
           zip -r Generated_IPA.zip Payload
           mv Generated_IPA.zip ../YABus-${{ inputs.version }}.ipa

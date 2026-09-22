@@ -277,6 +277,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: controller.settings.enableCompactMode,
                           onChanged: controller.updateEnableCompactMode,
                         ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('顯示天氣'),
+                          subtitle: const Text(
+                            '在首頁標題旁顯示目前氣溫，點一下可開啟完整預報。',
+                          ),
+                          value: controller.settings.showWeatherInAppBar,
+                          onChanged: controller.updateShowWeatherInAppBar,
+                        ),
                         if (isAndroid || isIOS) ...[
                           const SizedBox(height: 12),
                           DropdownButtonFormField<MobileMapProvider>(

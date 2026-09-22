@@ -17,6 +17,7 @@ import '../core/smart_route_service.dart';
 import '../widgets/eta_badge.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/transit_station_map.dart';
+import '../widgets/weather_app_bar_title.dart';
 import 'adaptive_settings_presenter.dart';
 import 'bus_map_screen.dart';
 import 'database_settings_screen.dart';
@@ -24,13 +25,40 @@ import 'favorites_screen.dart';
 import 'nearby_screen.dart';
 import 'route_detail_navigation.dart';
 import 'search_screen.dart';
+import 'weather_screen.dart';
 import '../widgets/ad_banner_widget.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   static const _desktopSidebarBreakpoint = 1100.0;
   static const _desktopSidebarWidth = 450.0;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool _hideDatabaseForWeatherOverflow = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = AppControllerScope.of(context);
+    final isDesktop =
+        MediaQuery.sizeOf(context).width >=
+        HomeScreen._desktopSidebarBreakpoint;
+    if (isDesktop || !controller.settings.showWeatherInAppBar) {
+      _hideDatabaseForWeatherOverflow = false;
+    }
+  }
+
+  void _handleWeatherOverflow() {
+    if (_hideDatabaseForWeatherOverflow || !mounted) {
+      return;
+    }
+    setState(() => _hideDatabaseForWeatherOverflow = true);
+  }
 
   Future<void> _openDatabaseSettings(
     BuildContext context,
@@ -309,7 +337,8 @@ class HomeScreen extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDesktop =
-        MediaQuery.sizeOf(context).width >= _desktopSidebarBreakpoint;
+        MediaQuery.sizeOf(context).width >=
+        HomeScreen._desktopSidebarBreakpoint;
     final hasBusBackgroundImage = hasBackgroundImageForPage(
       controller.settings,
       pageKey: 'bus',
@@ -317,25 +346,42 @@ class HomeScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: hasBusBackgroundImage ? Colors.transparent : null,
       appBar: AppBar(
-        title: Transform.translate(
-          offset: Offset(0, isDesktop ? -2 : 0),
-          child: SvgPicture.asset(
-            'assets/branding/YABus-black.svg',
-            width: isDesktop ? 144 : 96,
-            height: isDesktop ? 32 : 21,
-            semanticsLabel: 'YABus',
-            colorFilter: ColorFilter.mode(
-              colorScheme.onSurface,
-              BlendMode.srcIn,
+        title: WeatherAppBarTitle(
+          title: 'YABus',
+          titleWidth: isDesktop ? 144 : 96,
+          titleWidget: Transform.translate(
+            offset: Offset(0, isDesktop ? -2 : 0),
+            child: SvgPicture.asset(
+              'assets/branding/YABus-black.svg',
+              width: isDesktop ? 144 : 96,
+              height: isDesktop ? 32 : 21,
+              semanticsLabel: 'YABus',
+              colorFilter: ColorFilter.mode(
+                colorScheme.onSurface,
+                BlendMode.srcIn,
+              ),
             ),
           ),
+          // The chip already has a fix; pass it on so the page loads at once.
+          onTap: (latitude, longitude) => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  WeatherScreen(latitude: latitude, longitude: longitude),
+            ),
+          ),
+          // Keep the database shortcut when everything fits. On a narrow
+          // mobile app bar, let weather claim that space after it has real
+          // data and can prove the complete title would overflow.
+          onOverflow: !kIsWeb && !isDesktop && !_hideDatabaseForWeatherOverflow
+              ? _handleWeatherOverflow
+              : null,
         ),
         titleSpacing: 24,
         automaticallyImplyLeading: false,
         actionsPadding: const EdgeInsets.only(right: 16),
         actions: [
           if (kIsWeb) const _WebPwaInstallButton(),
-          if (!kIsWeb)
+          if (!kIsWeb && (isDesktop || !_hideDatabaseForWeatherOverflow))
             IconButton(
               tooltip: '資料庫與下載',
               onPressed: () => _openDatabaseSettings(context, controller),
@@ -379,7 +425,7 @@ class HomeScreen extends StatelessWidget {
       body: LayoutBuilder(
         builder: (context, constraints) {
           final isWideLayout =
-              constraints.maxWidth >= _desktopSidebarBreakpoint;
+              constraints.maxWidth >= HomeScreen._desktopSidebarBreakpoint;
           final compactMode = _useCompactHomeMode(
             controller.settings,
             constraints.maxWidth,
@@ -404,7 +450,7 @@ class HomeScreen extends StatelessWidget {
                         ),
                       ),
                       SizedBox(
-                        width: _desktopSidebarWidth,
+                        width: HomeScreen._desktopSidebarWidth,
                         child: _buildDesktopSidebar(context, controller),
                       ),
                     ],
