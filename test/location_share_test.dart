@@ -88,4 +88,15 @@ void main() {
     expect(text, contains(List.filled(120, 'a').join()));
     expect(text, isNot(contains(List.filled(121, 'a').join())));
   });
+
+  test('social update preserves emoji grapheme at the character limit', () {
+    const familyEmoji = '👨‍👩‍👧‍👦';
+    final note = '${List.filled(119, 'a').join()}$familyEmoji';
+
+    final normalized = SocialShareMessage.normalizeNote(note);
+
+    expect(normalized, note);
+    expect(normalized, endsWith(familyEmoji));
+    expect(normalized.runes, isNot(contains(0xFFFD)));
+  });
 }

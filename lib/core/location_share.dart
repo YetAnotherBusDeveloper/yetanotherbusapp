@@ -1,3 +1,4 @@
+import 'package:characters/characters.dart';
 import 'package:geolocator/geolocator.dart';
 
 /// Controls how much coordinate detail is included in a shared map link.
@@ -93,10 +94,10 @@ class SocialShareMessage {
 
   static String normalizeNote(String note) {
     final normalized = note.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (normalized.length <= noteMaxLength) {
+    if (normalized.characters.length <= noteMaxLength) {
       return normalized;
     }
-    return normalized.substring(0, noteMaxLength).trimRight();
+    return normalized.characters.take(noteMaxLength).toString().trimRight();
   }
 
   static String compose({
