@@ -102,6 +102,7 @@ RouteDetailData _detail({
   String? nameEn,
   DateTime? updatedAt,
   List<String> family = const [],
+  bool withBus = false,
 }) => RouteDetailData(
   route: RouteSummary(
     sourceProvider: 'TPE',
@@ -149,6 +150,17 @@ RouteDetailData _detail({
             t: eta == null
                 ? null
                 : (updatedAt ?? DateTime.now()).toIso8601String(),
+            buses: withBus && path == 1 && i == 1
+                ? const [
+                    BusVehicle(
+                      id: 'TEST-001',
+                      type: '0',
+                      note: '',
+                      full: false,
+                      carOnStop: false,
+                    ),
+                  ]
+                : const [],
           ),
       ],
   },
@@ -292,6 +304,29 @@ void main() {
     },
     locale: const Locale('en'),
   );
+
+  _screenTest('keeps stop status controls aligned to the trailing edge', (
+    tester,
+    repository,
+  ) async {
+    tester.view.physicalSize = const Size(466, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    repository.topologyRequests.single.complete(_detail(withBus: true));
+    await _frames(tester, 10);
+
+    final tile = find.byKey(const ValueKey('route-detail-stop-1-1'));
+    final status = find.byKey(
+      const ValueKey('route-detail-trailing-status-1-1'),
+    );
+    expect(tile, findsOneWidget);
+    expect(status, findsOneWidget);
+    final tileRect = tester.getRect(tile);
+    final statusRect = tester.getRect(status);
+    expect(statusRect.right, closeTo(tileRect.right - 8, 0.1));
+  });
 
   _screenTest('fades in route stops immediately once data is ready', (
     tester,

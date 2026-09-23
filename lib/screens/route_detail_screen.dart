@@ -5732,6 +5732,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     required bool isNearest,
     required bool isDestination,
   }) {
+    if (isNearest) {
+      return _RouteStatusPill(
+        key: const ValueKey('route-detail-nearest-stop-status'),
+        icon: Icons.gps_fixed_rounded,
+        backgroundColor: const Color(0xFF4CAF50),
+        foregroundColor: Colors.white,
+      );
+    }
+
     if (isDestination) {
       return _RouteStatusPill(
         icon: Icons.flag_rounded,
@@ -5749,6 +5758,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       );
       final primaryVehicle = stop.buses.first;
       final pill = _RouteStatusPill(
+        key: ValueKey(
+          'route-detail-trailing-status-${stop.pathId}-${stop.stopId}',
+        ),
         icon: statusStyle.icon,
         label: null,
         backgroundColor: statusStyle.backgroundColor,
@@ -5818,6 +5830,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final hasAlert = _stopHasAlert(stop);
 
     return Material(
+      key: ValueKey('route-detail-stop-${stop.pathId}-${stop.stopId}'),
       color: isHighlighted
           ? theme.colorScheme.secondaryContainer.withValues(alpha: 0.45)
           : isDestination
@@ -5830,163 +5843,165 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           _playSelectionHaptic();
           unawaited(_openStopActionsWithShortcut(stop));
         },
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              EtaBadge(
-                stop: stop,
-                alwaysShowSeconds: alwaysShowSeconds,
-                size: 58,
-                isLoading: !_hasCompletedInitialRealtime,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        final trailingStatus = isNearest
-                            ? null
-                            : _buildTrailingStatus(
+        child: SizedBox(
+          width: double.infinity,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                EtaBadge(
+                  stop: stop,
+                  alwaysShowSeconds: alwaysShowSeconds,
+                  size: 58,
+                  isLoading: !_hasCompletedInitialRealtime,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final trailingStatus = _buildTrailingStatus(
+                            context,
+                            theme,
+                            stop,
+                            isNearest: isNearest,
+                            isDestination: isDestination,
+                          );
+                          final vehicleStatusStyle = stop.buses.isEmpty
+                              ? null
+                              : _vehicleStatusStyle(
+                                  theme,
+                                  stop,
+                                  isNearest: isNearest,
+                                );
+                          final trailingStatusWidth = switch ((
+                            isNearest,
+                            isDestination,
+                            stop.buses.isNotEmpty,
+                          )) {
+                            (true, _, _) => _estimateRouteStatusPillWidth(
+                              context,
+                              icon: Icons.gps_fixed_rounded,
+                            ),
+                            (false, true, _) => _estimateRouteStatusPillWidth(
+                              context,
+                              icon: Icons.flag_rounded,
+                              label: l10n.routeDetailDestinationStop,
+                            ),
+                            (false, false, true) =>
+                              _estimateRouteStatusPillWidth(
                                 context,
-                                theme,
-                                stop,
-                                isNearest: false,
-                                isDestination: isDestination,
-                              );
-                        final vehicleStatusStyle = stop.buses.isEmpty
-                            ? null
-                            : _vehicleStatusStyle(
-                                theme,
-                                stop,
-                                isNearest: isNearest,
-                              );
-                        final trailingStatusWidth = switch ((
-                          isNearest,
-                          isDestination,
-                          stop.buses.isNotEmpty,
-                        )) {
-                          (true, _, _) => 0.0,
-                          (false, true, _) => _estimateRouteStatusPillWidth(
-                            context,
-                            icon: Icons.flag_rounded,
-                            label: l10n.routeDetailDestinationStop,
-                          ),
-                          (false, false, true) => _estimateRouteStatusPillWidth(
-                            context,
-                            icon: vehicleStatusStyle!.icon,
-                            label: null,
-                            showStackedBuses:
-                                vehicleStatusStyle.showStackedBuses,
-                          ),
-                          _ => 0.0,
-                        };
-                        final stopNameMaxWidth = math.max(
-                          0.0,
-                          constraints.maxWidth -
-                              trailingStatusWidth -
-                              (trailingStatus == null ? 0.0 : 8.0) -
-                              (hasAlert ? 16.0 : 0.0) -
-                              4.0,
-                        );
-                        final stopNameWidth = math.min(
-                          _measureMaxLineWidth(
-                            context,
-                            stopName,
-                            stopNameStyle,
-                          ),
-                          math.min(stopNameMaxWidth, constraints.maxWidth),
-                        );
-                        final dividerLeftOffset =
-                            stopNameWidth +
-                            6.0 +
-                            (isNearest ? 24.0 + 6.0 : 0.0) +
-                            (hasAlert ? 16.0 + 6.0 : 0.0);
-                        final dividerRightOffset = trailingStatus == null
-                            ? 0.0
-                            : trailingStatusWidth + 8.0;
-                        final showDivider =
-                            constraints.maxWidth -
-                                dividerLeftOffset -
-                                dividerRightOffset >=
-                            24.0;
-
-                        return Stack(
-                          alignment: Alignment.centerLeft,
-                          children: [
-                            if (showDivider)
-                              Positioned(
-                                left: dividerLeftOffset,
-                                right: dividerRightOffset,
-                                child: Container(
-                                  height: 1,
-                                  color: theme.colorScheme.outlineVariant,
-                                ),
+                                icon: vehicleStatusStyle!.icon,
+                                label: null,
+                                showStackedBuses:
+                                    vehicleStatusStyle.showStackedBuses,
                               ),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
+                            _ => 0.0,
+                          };
+                          final stopNameMaxWidth = math.max(
+                            0.0,
+                            constraints.maxWidth -
+                                trailingStatusWidth -
+                                (trailingStatus == null ? 0.0 : 8.0) -
+                                (hasAlert ? 16.0 : 0.0) -
+                                4.0,
+                          );
+                          final stopNameWidth = math.min(
+                            _measureMaxLineWidth(
+                              context,
+                              stopName,
+                              stopNameStyle,
+                            ),
+                            math.min(stopNameMaxWidth, constraints.maxWidth),
+                          );
+                          final dividerLeftOffset =
+                              stopNameWidth +
+                              16.0 +
+                              (hasAlert ? 16.0 + 6.0 : 0.0);
+                          final dividerRightOffset = trailingStatus == null
+                              ? 0.0
+                              : trailingStatusWidth + 8.0;
+                          final showDivider =
+                              constraints.maxWidth -
+                                  dividerLeftOffset -
+                                  dividerRightOffset >=
+                              24.0;
+
+                          return SizedBox(
+                            width: constraints.maxWidth,
+                            child: Stack(
+                              alignment: Alignment.centerLeft,
                               children: [
-                                Flexible(
-                                  fit: FlexFit.loose,
-                                  child: SizedBox(
-                                    width: stopNameWidth,
-                                    child: TransitStationName(
-                                      name: stop.transitName,
-                                      primaryStyle: stopNameStyle,
-                                    ),
-                                  ),
-                                ),
-                                if (isNearest) ...[
-                                  const SizedBox(width: 6),
-                                  Semantics(
-                                    label: l10n.busMapYourLocation,
-                                    child: const Icon(
-                                      Icons.gps_fixed_rounded,
-                                      key: ValueKey(
-                                        'route-detail-nearest-stop-indicator',
-                                      ),
-                                      size: 24,
-                                      color: Color(0xFF4CAF50),
-                                    ),
-                                  ),
-                                ],
-                                if (hasAlert) ...[
-                                  const SizedBox(width: 6),
-                                  GestureDetector(
-                                    onTap: _showAlertsDialog,
+                                if (showDivider)
+                                  Positioned(
+                                    left: dividerLeftOffset,
+                                    right: dividerRightOffset,
                                     child: Container(
-                                      width: 10,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        color: _alertColorForStop(stop),
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: theme.colorScheme.surface,
-                                          width: 1,
+                                      height: 1,
+                                      color: theme.colorScheme.outlineVariant,
+                                    ),
+                                  ),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    minHeight: 40,
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
+                                    children: [
+                                      Flexible(
+                                        fit: FlexFit.loose,
+                                        child: SizedBox(
+                                          width: stopNameWidth,
+                                          child: TransitStationName(
+                                            name: stop.transitName,
+                                            primaryStyle: stopNameStyle,
+                                          ),
                                         ),
                                       ),
-                                    ),
+                                      if (hasAlert) ...[
+                                        const SizedBox(width: 6),
+                                        GestureDetector(
+                                          onTap: _showAlertsDialog,
+                                          child: Container(
+                                            width: 10,
+                                            height: 10,
+                                            decoration: BoxDecoration(
+                                              color: _alertColorForStop(stop),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color:
+                                                    theme.colorScheme.surface,
+                                                width: 1,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
-                                ],
-                                const Spacer(),
-                                if (trailingStatus != null) ...[
-                                  const SizedBox(width: 8),
-                                  trailingStatus,
-                                ],
+                                ),
+                                if (trailingStatus != null)
+                                  Positioned(
+                                    top: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    child: trailingStatus,
+                                  ),
                               ],
                             ),
-                          ],
-                        );
-                      },
-                    ),
-                  ],
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -6547,6 +6562,7 @@ class _VehicleStatusStyle {
 
 class _RouteStatusPill extends StatelessWidget {
   const _RouteStatusPill({
+    super.key,
     required this.icon,
     this.label,
     required this.backgroundColor,
