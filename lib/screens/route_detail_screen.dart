@@ -5732,12 +5732,26 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     required bool isNearest,
     required bool isDestination,
   }) {
+    final vehicleStatus = _buildVehicleTrailingStatus(
+      context,
+      theme,
+      stop,
+      isNearest: isNearest,
+    );
+
     if (isNearest) {
-      return _RouteStatusPill(
+      final locationStatus = _RouteStatusPill(
         key: const ValueKey('route-detail-nearest-stop-status'),
         icon: Icons.gps_fixed_rounded,
         backgroundColor: const Color(0xFF4CAF50),
         foregroundColor: Colors.white,
+      );
+      if (vehicleStatus == null) {
+        return locationStatus;
+      }
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [vehicleStatus, const SizedBox(width: 8), locationStatus],
       );
     }
 
@@ -5750,6 +5764,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       );
     }
 
+    return vehicleStatus;
+  }
+
+  Widget? _buildVehicleTrailingStatus(
+    BuildContext context,
+    ThemeData theme,
+    StopInfo stop, {
+    required bool isNearest,
+  }) {
     if (stop.buses.isNotEmpty) {
       final statusStyle = _vehicleStatusStyle(
         theme,
@@ -5883,7 +5906,19 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                             isDestination,
                             stop.buses.isNotEmpty,
                           )) {
-                            (true, _, _) => _estimateRouteStatusPillWidth(
+                            (true, _, true) =>
+                              _estimateRouteStatusPillWidth(
+                                    context,
+                                    icon: vehicleStatusStyle!.icon,
+                                    showStackedBuses:
+                                        vehicleStatusStyle.showStackedBuses,
+                                  ) +
+                                  8.0 +
+                                  _estimateRouteStatusPillWidth(
+                                    context,
+                                    icon: Icons.gps_fixed_rounded,
+                                  ),
+                            (true, _, false) => _estimateRouteStatusPillWidth(
                               context,
                               icon: Icons.gps_fixed_rounded,
                             ),
