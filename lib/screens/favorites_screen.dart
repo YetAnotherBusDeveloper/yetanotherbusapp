@@ -1086,7 +1086,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
           footer: const AdBannerWidget(minimumDensity: 2, isInline: true),
           buildDefaultDragHandles: false,
           proxyDecorator: _buildDragProxy,
-          onReorderItem: (oldIndex, newIndex) =>
+          // CI still targets the Flutter API where this callback is required.
+          // ignore: deprecated_member_use
+          onReorder: (oldIndex, newIndex) =>
               _handleReorder(controller, currentGroupName, oldIndex, newIndex),
           itemBuilder: (context, index) {
             final reference = references[index];
