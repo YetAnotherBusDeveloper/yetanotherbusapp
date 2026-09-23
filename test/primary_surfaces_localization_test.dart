@@ -145,32 +145,38 @@ void main() {
     testWidgets(
       'transfer errors localize at narrow width in ${language.locale}',
       (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.windows;
         final controller = await _createController();
         addTearDown(controller.dispose);
-        await _pumpSurface(
-          tester,
-          controller: controller,
-          locale: language.locale,
-          child: StopTransferSheet(
+        try {
+          await _pumpSurface(
+            tester,
             controller: controller,
-            provider: BusProvider.tpe,
-            currentRouteId: 'TPE1',
-            stop: const StopInfo(
-              routeKey: 1,
-              pathId: 0,
-              stopId: 1,
-              stopName: '測試站',
-              stopNameEn: 'Test Stop',
-              sequence: 1,
-              lat: 0,
-              lon: 0,
+            locale: language.locale,
+            child: StopTransferSheet(
+              controller: controller,
+              provider: BusProvider.tpe,
+              currentRouteId: 'TPE1',
+              stop: const StopInfo(
+                routeKey: 1,
+                pathId: 0,
+                stopId: 1,
+                stopName: '測試站',
+                stopNameEn: 'Test Stop',
+                sequence: 1,
+                lat: 0,
+                lon: 0,
+              ),
             ),
-          ),
-        );
-        await tester.pump();
+          );
+          await tester.pump();
 
-        expect(find.text(language.transferMissing), findsOneWidget);
-        expect(tester.takeException(), isNull);
+          expect(find.text(language.transferMissing), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          debugDefaultTargetPlatformOverride = null;
+        }
       },
     );
   }

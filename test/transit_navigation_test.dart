@@ -82,19 +82,20 @@ void main() {
     expect(tester.getBottomLeft(navigation).dy, 476);
     expect(tester.getBottomLeft(navigationSafeArea).dy, 500);
     expect(
-      find.ancestor(of: navigation, matching: find.byType(ListView)),
+      find.ancestor(
+        of: navigation,
+        matching: find.byType(SingleChildScrollView),
+      ),
       findsNothing,
     );
 
     final navigationTop = tester.getTopLeft(navigation);
+    final pageScrollView = find.byType(SingleChildScrollView).first;
     final scrollable = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byType(ListView).first,
-        matching: find.byType(Scrollable),
-      ),
+      find.descendant(of: pageScrollView, matching: find.byType(Scrollable)),
     );
     final initialScrollOffset = scrollable.position.pixels;
-    await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+    await tester.drag(pageScrollView, const Offset(0, -300));
     await tester.pump();
     expect(scrollable.position.pixels, greaterThan(initialScrollOffset));
     expect(tester.getTopLeft(navigation), navigationTop);
@@ -182,10 +183,16 @@ void main() {
     for (final card in cards) {
       expect(tester.widget<Card>(card).margin, EdgeInsets.zero);
     }
+    final scrollView = find.byType(SingleChildScrollView);
     expect(
-      tester.widget<ListView>(find.byType(ListView)).padding,
+      tester.widget<SingleChildScrollView>(scrollView).padding,
       const EdgeInsets.fromLTRB(16, 8, 16, 8),
     );
+    final cardGroupCenter =
+        (tester.getTopLeft(cards.first).dy +
+            tester.getBottomLeft(cards.last).dy) /
+        2;
+    expect(cardGroupCenter, closeTo(tester.getCenter(scrollView).dy, 0.01));
   });
 
   for (final layout in [

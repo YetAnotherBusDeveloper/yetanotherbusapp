@@ -298,8 +298,9 @@ void main() {
       expect(find.text('市政府'), findsOneWidget);
       expect(find.text('307'), findsNWidgets(2));
 
-      expect(find.text('台北市 · 往撫遠街'), findsOneWidget);
-      expect(find.text('台北市 · 往捷運松山站'), findsOneWidget);
+      expect(find.text('台北市'), findsNWidgets(2));
+      expect(find.text('往撫遠街'), findsOneWidget);
+      expect(find.text('往捷運松山站'), findsOneWidget);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;
@@ -318,8 +319,9 @@ void main() {
       );
 
       expect(find.text('307'), findsNWidgets(2));
-      expect(find.text('台北市 · 去程'), findsOneWidget);
-      expect(find.text('台北市 · 返程'), findsOneWidget);
+      expect(find.text('台北市'), findsNWidgets(2));
+      expect(find.text('去程'), findsOneWidget);
+      expect(find.text('返程'), findsOneWidget);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;
@@ -337,8 +339,9 @@ void main() {
         inboundPathName: '往捷運麟光新村站',
       );
 
-      expect(find.text('台北市 · 往捷運麟光新村站（去程）'), findsOneWidget);
-      expect(find.text('台北市 · 往捷運麟光新村站（返程）'), findsOneWidget);
+      expect(find.text('台北市'), findsNWidgets(2));
+      expect(find.text('往捷運麟光新村站（去程）'), findsOneWidget);
+      expect(find.text('往捷運麟光新村站（返程）'), findsOneWidget);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;

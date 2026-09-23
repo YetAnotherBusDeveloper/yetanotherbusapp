@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taiwanbus_flutter/core/transit_repository.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/widgets/rail_station_picker.dart';
 import 'package:taiwanbus_flutter/widgets/transit_panels.dart';
 
 Future<void> _pump(WidgetTester tester, Widget child, {Brightness? brightness}) {
   return tester.pumpWidget(
     MaterialApp(
+      locale: const Locale('zh', 'TW'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF0B7285),

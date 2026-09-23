@@ -1151,6 +1151,10 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     int oldIndex,
     int newIndex,
   ) {
+    // Flutter reports a downward insertion boundary before removing the item.
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
     if (newIndex == oldIndex) {
       return;
     }

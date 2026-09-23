@@ -275,9 +275,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('City Hall\n市政府'), findsOneWidget);
-      expect(find.text('BL1 / 藍1'), findsOneWidget);
-      expect(find.text('Nangang / 往南港'), findsOneWidget);
+      expect(find.text('市政府'), findsOneWidget);
+      expect(find.text('City Hall'), findsOneWidget);
+      expect(find.text('藍1'), findsOneWidget);
+      expect(find.text('BL1'), findsOneWidget);
+      expect(find.text('往南港'), findsOneWidget);
+      expect(find.text('Nangang'), findsOneWidget);
       expect(tester.takeException(), isNull);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());

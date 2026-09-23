@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taiwanbus_flutter/core/transit_repository.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/metro_dashboard_screen.dart';
 
 MetroStationSequence _station(String id, String name, int sequence) {
@@ -32,6 +33,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh', 'TW'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: StatefulBuilder(
             builder: (context, setState) => MetroDirectionSelector(
@@ -46,15 +50,15 @@ void main() {
       ),
     );
 
-    expect(find.text('往淡水'), findsOneWidget);
-    expect(find.text('往象山'), findsOneWidget);
+    expect(find.text('往 淡水'), findsOneWidget);
+    expect(find.text('往 象山'), findsOneWidget);
     expect(find.textContaining('去程'), findsNothing);
     expect(find.textContaining('返程'), findsNothing);
     expect(find.text('行駛方向'), findsOneWidget);
     expect(find.byType(SegmentedButton<int>), findsNothing);
     expect(find.byType(FilledButton), findsNWidgets(2));
 
-    await tester.tap(find.text('往象山'));
+    await tester.tap(find.text('往 象山'));
     await tester.pump();
 
     expect(selectedDirection, 1);

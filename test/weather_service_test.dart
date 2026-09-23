@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:taiwanbus_flutter/core/auth_token_store.dart';
 import 'package:taiwanbus_flutter/core/cwa_geo_index.dart';
 import 'package:taiwanbus_flutter/core/weather_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/weather_screen.dart';
 import 'package:taiwanbus_flutter/widgets/weather_app_bar_title.dart';
 
@@ -979,6 +980,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('zh', 'TW'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: WeatherScreen(
             latitude: _taipeiLat,
             longitude: _taipeiLon,
@@ -1044,6 +1048,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('zh', 'TW'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: WeatherScreen(
             latitude: _taipeiLat,
             longitude: _taipeiLon,
