@@ -1181,13 +1181,15 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     }
 
     final now = DateTime.now();
-    final displayBuses = _busStates.values
-        .map((busState) {
+    final displayBuses = _busStates.entries
+        .map((entry) {
+          final busState = entry.value;
           final point = busState.positionAt(now, geometry: geometry);
           if (!isValidLatLng(point)) {
             return null;
           }
           return _DisplayedBus(
+            stateId: entry.key,
             state: busState,
             point: point,
             heading: busState.headingAt(now, geometry: geometry),
@@ -1209,7 +1211,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     _DisplayedBus? selectedDisplayBus;
     if (selectedBus != null) {
       for (final bus in displayBuses) {
-        if (bus.state.bus.id == selectedBus.bus.id) {
+        if (bus.stateId == _selectedBusId) {
           selectedDisplayBus = bus;
           break;
         }
@@ -1357,7 +1359,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                     if (_showBuses)
                       MarkerLayer(
                         markers: displayBuses.map((bus) {
-                          final selected = _selectedBusId == bus.state.bus.id;
+                          final selected = _selectedBusId == bus.stateId;
                           return Marker(
                             point: bus.point,
                             width: selected ? 64 : 56,
@@ -1365,9 +1367,9 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                             child: GestureDetector(
                               onTap: () {
                                 final nextSelectedBusId =
-                                    _selectedBusId == bus.state.bus.id
+                                    _selectedBusId == bus.stateId
                                     ? null
-                                    : bus.state.bus.id;
+                                    : bus.stateId;
                                 setState(() {
                                   _selectedBusId = nextSelectedBusId;
                                   _selectedStopId = null;
@@ -1693,10 +1695,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     final requests = <GoogleBusIconRequest>[];
 
     for (final bus in displayBuses) {
-      for (final selected in <bool>[
-        false,
-        _selectedBusId == bus.state.bus.id,
-      ]) {
+      for (final selected in <bool>[false, _selectedBusId == bus.stateId]) {
         final key = googleBusIconKey(
           color: bus.state.status.color,
           selected: selected,
@@ -1928,7 +1927,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
 
     if (_showBuses) {
       for (final bus in displayBuses) {
-        final selected = _selectedBusId == bus.state.bus.id;
+        final selected = _selectedBusId == bus.stateId;
         final iconKey = googleBusIconKey(
           color: bus.state.status.color,
           selected: selected,
@@ -1961,9 +1960,9 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
             ),
             zIndexInt: selected ? 5 : 2,
             onTap: () {
-              final nextSelectedBusId = _selectedBusId == bus.state.bus.id
+              final nextSelectedBusId = _selectedBusId == bus.stateId
                   ? null
-                  : bus.state.bus.id;
+                  : bus.stateId;
               setState(() {
                 _selectedBusId = nextSelectedBusId;
                 _selectedStopId = null;
@@ -2434,11 +2433,13 @@ class _CompactInfoCell extends StatelessWidget {
 
 class _DisplayedBus {
   const _DisplayedBus({
+    required this.stateId,
     required this.state,
     required this.point,
     required this.heading,
   });
 
+  final String stateId;
   final AnimatedBusState state;
   final LatLng point;
   final double heading;
