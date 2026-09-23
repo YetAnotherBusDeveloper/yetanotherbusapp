@@ -26,14 +26,9 @@ class NearbyScreen extends StatefulWidget {
 }
 
 class _NearbyStopGroup {
-  const _NearbyStopGroup({
-    required this.stopName,
-    required this.distanceMeters,
-    required this.routes,
-  });
+  const _NearbyStopGroup({required this.stopName, required this.routes});
 
   final String stopName;
-  final double distanceMeters;
   final List<NearbyRouteRow> routes;
 }
 
@@ -337,14 +332,12 @@ class _NearbyScreenState extends State<NearbyScreen> {
   /// available.
   List<_NearbyStopGroup> _buildGroups(String locale) {
     final groupOrder = <String>[];
-    final groupDistances = <String, double>{};
     final groupRoutes = <String, List<NearbyStopResult>>{};
 
     for (final item in _results) {
       final name = item.stop.stopName;
       if (!groupRoutes.containsKey(name)) {
         groupOrder.add(name);
-        groupDistances[name] = item.distanceMeters;
         groupRoutes[name] = [];
       }
       groupRoutes[name]!.add(item);
@@ -354,7 +347,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
       for (final name in groupOrder)
         _NearbyStopGroup(
           stopName: name,
-          distanceMeters: groupDistances[name]!,
           // Sort first: the labeller only appends a direction ordinal when two
           // rows would otherwise read alike, so it has to see the final order.
           routes: labelNearbyRouteDirections(
@@ -428,6 +420,13 @@ class _NearbyScreenState extends State<NearbyScreen> {
                       ),
                   ],
                 ),
+              ),
+              const SizedBox(width: 8),
+              Chip(
+                avatar: const Icon(Icons.directions_walk_rounded, size: 16),
+                label: Text(formatDistance(item.distanceMeters)),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
               ),
               Icon(
                 Icons.chevron_right_rounded,
@@ -580,12 +579,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                               16,
                                             ),
                                           ),
-                                          child: Text(
-                                            formatDistance(
-                                              group.distanceMeters,
-                                            ),
-                                            textAlign: TextAlign.center,
-                                            style: theme.textTheme.labelMedium,
+                                          child: Icon(
+                                            Icons.directions_bus_rounded,
+                                            color: theme
+                                                .colorScheme
+                                                .onPrimaryContainer,
                                           ),
                                         ),
                                         const SizedBox(width: 14),
