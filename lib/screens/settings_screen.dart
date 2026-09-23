@@ -1148,17 +1148,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
-                              width: 56,
-                              height: 56,
+                              width:85,
+                              height: 85,
                               decoration: BoxDecoration(
                                 color: theme.colorScheme.primaryContainer,
-                                borderRadius: BorderRadius.circular(18),
+                                borderRadius: BorderRadius.circular(22),
                               ),
                               alignment: Alignment.center,
                               child: SvgPicture.asset(
                                 'assets/branding/icon.svg',
-                                width: 30,
-                                height: 30,
+                                width: 45,
+                                height: 45,
                                 semanticsLabel: 'YABus',
                                 colorFilter: ColorFilter.mode(
                                   theme.colorScheme.onPrimaryContainer,

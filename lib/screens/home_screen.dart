@@ -992,8 +992,8 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     );
   }
 
-  /// ETA is the leading element when available. Route, stop and secondary
-  /// details stay in one vertical text block so narrow phones do not overflow.
+  /// Keep ETA beside the primary route details and place metadata below so the
+  /// square badge does not leave an awkward empty column.
   Widget _buildSmartTileRow({
     required BuildContext context,
     required IconData leadingIcon,
@@ -1005,69 +1005,73 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        etaBadge ??
-            Container(
-              width: 56,
-              height: 56,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Icon(leadingIcon, color: colorScheme.onPrimaryContainer),
-            ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            etaBadge ??
+                Container(
+                  width: 56,
+                  height: 56,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Icon(
+                    leadingIcon,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (stopName != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  stopName,
-                  style: theme.textTheme.bodyMedium,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-              if (metadata.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                for (final line in metadata)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 3),
-                    child: Text(
-                      line,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (stopName != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      stopName,
+                      style: theme.textTheme.bodyMedium,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-              ],
-            ],
-          ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ],
         ),
-        const SizedBox(width: 8),
-        Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: Icon(
-            Icons.chevron_right_rounded,
-            color: colorScheme.onSurfaceVariant,
+        if (metadata.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.only(left: 5),
+            child: Text(
+              metadata.join(' · '),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -1263,9 +1267,14 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
           stateKey = 'loading';
           state = _SmartRecommendationShell(
             title: l10n.smartRecommendationsTitle,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 18),
-              child: LinearProgressIndicator(minHeight: 4),
+            child: const SizedBox(
+              height: 130,
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 28,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
+              ),
             ),
           );
         } else if (snapshot.hasError) {

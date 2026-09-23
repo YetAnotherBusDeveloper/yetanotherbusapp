@@ -4805,12 +4805,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       context: context,
       builder: (context) {
         final l10n = AppLocalizations.of(context);
+        final theme = Theme.of(context);
         return SimpleDialog(
-          title: Text(
-            stop.transitName.stationDisplayForLocale(
-              Localizations.localeOf(context).toLanguageTag(),
-              separator: '\n',
-            ),
+          title: TransitStationName(
+            name: stop.transitName,
+            primaryStyle: theme.textTheme.titleLarge,
           ),
           children: [
             SimpleDialogOption(
@@ -5658,6 +5657,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         text: TextSpan(text: line, style: style),
         maxLines: 1,
         textDirection: textDirection,
+        textScaler: MediaQuery.textScalerOf(context),
       )..layout();
       maxWidth = math.max(maxWidth, painter.width);
     }
@@ -5849,7 +5849,18 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       color: theme.colorScheme.primary,
       height: 1.2,
     );
-    final stopName = _displayStopName(context, stop);
+    final locale = Localizations.localeOf(context).toLanguageTag();
+    final stopNamePrimary = stop.transitName.chinesePrimary;
+    final stopNameSecondary = stop.transitName.foreignSecondaryForLocale(
+      locale,
+    );
+    final stopNameSecondaryStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontSize: stopNameStyle?.fontSize == null
+          ? null
+          : (stopNameStyle!.fontSize! * 0.72).clamp(11.0, 14.0),
+      height: 1.15,
+    );
     final hasAlert = _stopHasAlert(stop);
 
     return Material(
@@ -5946,10 +5957,19 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                                 4.0,
                           );
                           final stopNameWidth = math.min(
-                            _measureMaxLineWidth(
-                              context,
-                              stopName,
-                              stopNameStyle,
+                            math.max(
+                              _measureMaxLineWidth(
+                                context,
+                                stopNamePrimary,
+                                stopNameStyle,
+                              ),
+                              stopNameSecondary == null
+                                  ? 0.0
+                                  : _measureMaxLineWidth(
+                                      context,
+                                      stopNameSecondary,
+                                      stopNameSecondaryStyle,
+                                    ),
                             ),
                             math.min(stopNameMaxWidth, constraints.maxWidth),
                           );
@@ -5995,6 +6015,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                                           child: TransitStationName(
                                             name: stop.transitName,
                                             primaryStyle: stopNameStyle,
+                                            secondaryStyle:
+                                                stopNameSecondaryStyle,
                                           ),
                                         ),
                                       ),
