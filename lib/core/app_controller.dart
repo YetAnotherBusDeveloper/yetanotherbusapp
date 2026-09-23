@@ -128,12 +128,12 @@ class AppController extends ChangeNotifier {
   String? _lastWearSmartSignature;
   int _lastWearSmartPushAtMs = 0;
   StreamSubscription<Map<String, Object?>>? _wearEventSubscription;
-  final ValueNotifier<int> _themeRevision = ValueNotifier<int>(0);
-  late _ThemeSettings _lastThemeSettings = _ThemeSettings.from(_settings);
+  final ValueNotifier<int> _rootRevision = ValueNotifier<int>(0);
+  late _RootSettings _lastRootSettings = _RootSettings.from(_settings);
   bool _postFrameInitializationStarted = false;
 
   AppSettings get settings => _settings;
-  ValueListenable<int> get themeRevision => _themeRevision;
+  ValueListenable<int> get rootRevision => _rootRevision;
   AuthSession? get authSession => _authSession;
   AuthAccount? get authAccount => _authAccount;
   AccountSyncSummary? get accountSyncSummary => _accountSyncSummary;
@@ -1719,6 +1719,21 @@ class AppController extends ChangeNotifier {
     await _persistSettings();
     await analytics.logThemeModeChanged(themeMode);
     notifyListeners();
+  }
+
+  Future<void> updateLanguage(AppLanguage language) async {
+    if (_settings.language == language) return;
+    _settings = _settings.copyWith(language: language);
+    notifyListeners();
+    await _persistSettings(scheduleSync: false);
+  }
+
+  Future<void> updateInterfaceScale(double scale) async {
+    final next = _settings.copyWith(interfaceScale: scale);
+    if (_settings.interfaceScale == next.interfaceScale) return;
+    _settings = next;
+    notifyListeners();
+    await _persistSettings(scheduleSync: false);
   }
 
   Future<void> updateMobileMapProvider(MobileMapProvider provider) async {
@@ -3744,24 +3759,26 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _cancelScheduledAccountSync();
     _wearEventSubscription?.cancel();
-    _themeRevision.dispose();
+    _rootRevision.dispose();
     super.dispose();
   }
 
   @override
   void notifyListeners() {
-    final nextThemeSettings = _ThemeSettings.from(_settings);
-    if (nextThemeSettings != _lastThemeSettings) {
-      _lastThemeSettings = nextThemeSettings;
-      _themeRevision.value += 1;
+    final nextRootSettings = _RootSettings.from(_settings);
+    if (nextRootSettings != _lastRootSettings) {
+      _lastRootSettings = nextRootSettings;
+      _rootRevision.value += 1;
     }
     super.notifyListeners();
   }
 }
 
-class _ThemeSettings {
-  const _ThemeSettings({
+class _RootSettings {
+  const _RootSettings({
     required this.themeMode,
+    required this.language,
+    required this.interfaceScale,
     required this.useAmoledDark,
     required this.colorSource,
     required this.seedColor,
@@ -3769,9 +3786,11 @@ class _ThemeSettings {
     required this.backgroundImagePaths,
   });
 
-  factory _ThemeSettings.from(AppSettings settings) {
-    return _ThemeSettings(
+  factory _RootSettings.from(AppSettings settings) {
+    return _RootSettings(
       themeMode: settings.themeMode,
+      language: settings.language,
+      interfaceScale: settings.interfaceScale,
       useAmoledDark: settings.useAmoledDark,
       colorSource: settings.colorSource,
       seedColor: settings.seedColor,
@@ -3783,6 +3802,8 @@ class _ThemeSettings {
   }
 
   final ThemeMode themeMode;
+  final AppLanguage language;
+  final double interfaceScale;
   final bool useAmoledDark;
   final AppColorSource colorSource;
   final Color? seedColor;
@@ -3791,8 +3812,10 @@ class _ThemeSettings {
 
   @override
   bool operator ==(Object other) {
-    return other is _ThemeSettings &&
+    return other is _RootSettings &&
         other.themeMode == themeMode &&
+        other.language == language &&
+        other.interfaceScale == interfaceScale &&
         other.useAmoledDark == useAmoledDark &&
         other.colorSource == colorSource &&
         other.seedColor == seedColor &&
@@ -3803,6 +3826,8 @@ class _ThemeSettings {
   @override
   int get hashCode => Object.hash(
     themeMode,
+    language,
+    interfaceScale,
     useAmoledDark,
     colorSource,
     seedColor,

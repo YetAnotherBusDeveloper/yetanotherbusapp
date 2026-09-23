@@ -21,6 +21,7 @@ import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/bus_map_screen.dart';
 import 'package:taiwanbus_flutter/widgets/bus_map_markers.dart';
 
@@ -66,6 +67,7 @@ const _snapshotBody = {
   'families': {
     'TPE10231': {
       'name': '民權幹線',
+      'name_en': 'Minquan Main Line',
       'stops_routeid': 'TPE10231',
       'geometry_routeid': 'TPE10231',
       'routeids': ['TPE10231', 'TPE162593'],
@@ -188,9 +190,13 @@ Future<void> _pumpMap(
   AppController controller, {
   double zoom = 15,
   double textScale = 1.0,
+  Locale locale = const Locale('zh', 'TW'),
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      locale: locale,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       navigatorObservers: [appRouteObserver],
       home: MediaQuery(
         data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
@@ -423,6 +429,70 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
 
+  testWidgets('rotates the heading indicator without rotating the bus icon', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SizedBox.square(
+            dimension: 64,
+            child: BusMapBusMarker(
+              color: Colors.blue,
+              selected: true,
+              label: 'test bus',
+              heading: 90,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.ancestor(
+        of: find.byIcon(Icons.directions_bus_rounded),
+        matching: find.byType(Transform),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.ancestor(
+        of: find.byIcon(Icons.navigation_rounded),
+        matching: find.byType(Transform),
+      ),
+      findsOneWidget,
+    );
+    final busCenter = tester.getCenter(
+      find.byIcon(Icons.directions_bus_rounded),
+    );
+    final arrowCenter = tester.getCenter(find.byIcon(Icons.navigation_rounded));
+    expect(arrowCenter.dx, greaterThan(busCenter.dx + 20));
+    expect((arrowCenter.dy - busCenter.dy).abs(), lessThan(1));
+  });
+
+  test('Google bus icon headings use bounded cache buckets', () {
+    String key(double heading) => googleBusIconKey(
+      color: Colors.blue,
+      selected: false,
+      pixelRatio: 2,
+      heading: heading,
+    );
+
+    expect(key(1), key(7));
+    expect(key(7), isNot(key(8)));
+    expect(key(-2), key(358));
+    expect(
+      GoogleBusIconRequest(
+        key: 'test',
+        color: Colors.blue,
+        selected: false,
+        pixelRatio: 2,
+        heading: 358,
+      ).heading,
+      0,
+    );
+  });
+
   _mapTest('draws every bus the city feed returned', (
     tester,
     log,
@@ -442,6 +512,35 @@ void main() {
     expect(eastbound.heading, 90);
     expect(find.byType(BusMapHeadingIndicator), findsNWidgets(2));
     expect(log.count('/cities/TPE/buses'), 1);
+  });
+
+  _mapTest('localizes map controls in English at narrow width', (
+    tester,
+    log,
+    controller,
+  ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await _pumpMap(tester, controller, locale: const Locale('en'));
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+      reason: 'bus markers never rendered',
+    );
+
+    expect(find.byTooltip('Filter routes'), findsOneWidget);
+    expect(find.byTooltip('My location'), findsOneWidget);
+    expect(find.textContaining('Live bus map'), findsOneWidget);
+    expect(
+      tester
+          .widgetList<BusMapBusMarker>(find.byType(BusMapBusMarker))
+          .map((marker) => marker.label),
+      contains('Minquan Main Line / 民權幹線 EAL-0562'),
+    );
+    expect(tester.takeException(), isNull);
   });
 
   _mapTest('requests location on open and lets the rider retry', (

@@ -19,24 +19,24 @@ import '../core/app_launch_service.dart';
 import '../core/app_route_observer.dart';
 import '../core/app_routes.dart';
 import '../core/bus_repository.dart';
-import '../core/friendly_error.dart';
 import '../core/desktop_discord_presence_service.dart';
 import '../core/live_activity_service.dart';
 import '../core/models.dart';
 import '../core/route_detail_launch_bridge.dart';
-import '../core/route_direction_label.dart';
 import '../core/samsung_live_notification_prompt_service.dart';
 import '../core/stop_route_merge.dart';
 import '../core/trip_monitor_notifications.dart';
 import '../core/twbusforum.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/cat_state_card.dart';
 import '../widgets/eta_badge.dart';
-import '../widgets/directional_bus_icon.dart';
 import '../widgets/route_bus_map_sheet.dart';
 import '../widgets/ad_banner_widget.dart';
 import '../widgets/app_content_transition.dart';
 import '../widgets/stop_transfer_sheet.dart';
+import '../widgets/transit_station_name.dart';
 import 'favorite_groups_screen.dart';
 
 class RouteDetailScreen extends StatefulWidget {
@@ -86,6 +86,15 @@ class _RouteDetailLoadResult {
   final StackTrace? stackTrace;
 }
 
+enum _RouteDetailStatus {
+  refreshing,
+  loadingRoute,
+  loadingRealtime,
+  realtimeUnavailable,
+  loadFailed,
+  loadingFamily,
+}
+
 class _RouteDetailScreenState extends State<RouteDetailScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver, RouteAware {
   static const double _wideLayoutBreakpoint = 1080;
@@ -104,7 +113,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   bool _isFamilyLoading = false;
   bool _supplementaryNoticesLoading = false;
   String? _error;
-  String? _statusMessage;
+  _RouteDetailStatus? _status;
   RouteDetailData? _detail;
   Timer? _countdownTimer;
   late final AnimationController _countdownProgressController;
@@ -354,6 +363,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
     final requestId = ++_refreshRequestId;
     final controller = AppControllerScope.read(context);
+    final l10n = AppLocalizations.of(context);
     final previousDetail = _detail;
 
     if (setLoadingState) {
@@ -361,13 +371,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         _isLoading = true;
         _isFamilyLoading = false;
         _error = null;
-        _statusMessage = '正在更新';
+        _status = _RouteDetailStatus.refreshing;
       });
     } else {
       _isLoading = true;
       _isFamilyLoading = false;
       _error = null;
-      _statusMessage = '正在載入路線資料';
+      _status = _RouteDetailStatus.loadingRoute;
     }
 
     final primaryDetailFuture = controller
@@ -402,7 +412,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           setState(() {
             _detail = topology;
             _isLoading = false;
-            _statusMessage = '正在載入即時到站資訊';
+            _status = _RouteDetailStatus.loadingRealtime;
           });
           _scheduleInitialStopsReveal();
           _updateDesktopPresence();
@@ -439,7 +449,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         _isLoading = false;
         _hasCompletedInitialRealtime = true;
         _error = null;
-        _statusMessage = fetchedDetail.hasLiveData ? null : '即時資訊暫時無法取得';
+        _status = fetchedDetail.hasLiveData
+            ? null
+            : _RouteDetailStatus.realtimeUnavailable;
       });
       _scheduleInitialStopsReveal();
       _updateDesktopPresence();
@@ -486,8 +498,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         _isLoading = false;
         _hasCompletedInitialRealtime = true;
         _isFamilyLoading = false;
-        _error = friendlyErrorMessage(error);
-        _statusMessage = _detail == null ? '讀取失敗' : '即時資訊暫時無法取得';
+        _error = localizedFriendlyError(l10n, error);
+        _status = _detail == null
+            ? _RouteDetailStatus.loadFailed
+            : _RouteDetailStatus.realtimeUnavailable;
       });
       _updateDesktopPresence();
       _startCountdown(controller.settings.busErrorUpdateTime);
@@ -503,7 +517,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
     setState(() {
       _isFamilyLoading = true;
-      _statusMessage = '正在載入同路線班次';
+      _status = _RouteDetailStatus.loadingFamily;
     });
     try {
       final enriched = await AppControllerScope.read(
@@ -519,7 +533,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       setState(() {
         _detail = enriched;
         _isFamilyLoading = false;
-        _statusMessage = enriched.hasLiveData ? null : '即時資訊暫時無法取得';
+        _status = enriched.hasLiveData
+            ? null
+            : _RouteDetailStatus.realtimeUnavailable;
       });
       _updateDesktopPresence();
       _recalculateNearestStops();
@@ -529,7 +545,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       }
       setState(() {
         _isFamilyLoading = false;
-        _statusMessage = selected.hasLiveData ? null : '即時資訊暫時無法取得';
+        _status = selected.hasLiveData
+            ? null
+            : _RouteDetailStatus.realtimeUnavailable;
       });
     }
   }
@@ -669,8 +687,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       final dialogFuture = _showSupplementaryDialog<void>(
         builder: (dialogContext) {
           final theme = Theme.of(dialogContext);
+          final l10n = AppLocalizations.of(dialogContext);
           return AlertDialog(
-            title: const Text('今日取消發車資訊'),
+            title: Text(l10n.routeDetailCancelledToday),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -678,16 +697,21 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                 children: [
                   for (final direction in directions) ...[
                     Text(
-                      '${_taichungCancelledDestinationLabel(detail, direction)}：',
+                      l10n.routeDetailDirectionHeading(
+                        _taichungCancelledDestinationLabel(detail, direction),
+                      ),
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      departuresByDirection[direction]!
-                          .map((departure) => departure.departureTime)
-                          .join('、'),
+                      localizedList(
+                        l10n,
+                        departuresByDirection[direction]!.map(
+                          (departure) => departure.departureTime,
+                        ),
+                      ),
                       style: theme.textTheme.titleMedium?.copyWith(
                         color: theme.colorScheme.error,
                         fontWeight: FontWeight.w700,
@@ -702,7 +726,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('知道了'),
+                child: Text(l10n.commonAcknowledge),
               ),
             ],
           );
@@ -727,13 +751,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   ) {
     final pathId = direction - 1;
     String? pathName;
+    final locale = Localizations.localeOf(context).toLanguageTag();
     for (final path in detail.paths) {
       if (path.pathId == pathId) {
-        pathName = path.name;
+        pathName = path.transitName.stationDisplayForLocale(locale);
         break;
       }
     }
-    return routeDirectionLabel(
+    return localizedRouteDirection(
+      AppLocalizations.of(context),
       pathName: pathName,
       pathId: pathId,
       routeName: detail.route.routeName,
@@ -784,6 +810,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _showSupplementaryDialog<void>(
         builder: (context) {
           final theme = Theme.of(context);
+          final l10n = AppLocalizations.of(context);
           return AlertDialog(
             title: Row(
               children: [
@@ -793,7 +820,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                   size: 22,
                 ),
                 const SizedBox(width: 8),
-                const Expanded(child: Text('營運通知')),
+                Expanded(child: Text(l10n.routeDetailOperationsNotice)),
               ],
             ),
             content: SizedBox(
@@ -811,7 +838,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('關閉'),
+                child: Text(l10n.commonClose),
               ),
             ],
           );
@@ -1125,7 +1152,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     unawaited(
       desktopDiscordPresenceService.updateScreen(
         settings: controller.settings,
-        screenLabel: '查看路線',
+        screenLabel: AppLocalizations.of(context).routeDetailViewRoutePresence,
         provider: widget.provider,
         routeName: _detail?.route.routeName,
         stateLabel: _buildDesktopDiscordArrivalStatus(controller.settings),
@@ -1620,6 +1647,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                 routeId: routeId,
                 routeIdHint: widget.routeIdHint,
                 routeName: detail.route.routeName,
+                routeNameEn: detail.route.routeNameEn,
                 paths: detail.paths,
                 stopsByPath: detail.stopsByPath,
                 familyRouteIds: detail.familyRouteIds,
@@ -1735,17 +1763,18 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       final enable = await showDialog<bool>(
         context: context,
         builder: (context) {
+          final l10n = AppLocalizations.of(context);
           return AlertDialog(
-            title: const Text('啓用背景乘車提醒？'),
-            content: const Text('YABus 可以在你把 app 丟到背景後繼續追蹤這條路線，並在接近目的地下車前提醒你。'),
+            title: Text(l10n.routeDetailBackgroundPromptTitle),
+            content: Text(l10n.routeDetailBackgroundPromptMessage),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('暫時不要'),
+                child: Text(l10n.commonNotNow),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('啓用'),
+                child: Text(l10n.commonEnable),
               ),
             ],
           );
@@ -1764,7 +1793,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             await TripMonitorNotifications.requestPermission();
         if (mounted && !notificationGranted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('背景乘車提醒需要通知權限，否則提醒可能不會跳出。')),
+            SnackBar(
+              content: Text(
+                AppLocalizations.of(
+                  context,
+                ).routeDetailBackgroundNotificationPermission,
+              ),
+            ),
           );
         }
         await _configureBackgroundTripMonitorIfNeeded(
@@ -1776,14 +1811,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           await showDialog<void>(
             context: context,
             builder: (context) {
+              final l10n = AppLocalizations.of(context);
               return AlertDialog(
-                title: const Text('提示'),
-                content: const Column(
+                title: Text(l10n.routeDetailOppoPromptTitle),
+                content: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('你的系統可能支援流體雲功能，但你需要在 YABus 的通知設定裡啓用他。'),
-                    SizedBox(height: 8),
-                    Image(
+                    Text(l10n.routeDetailOppoPromptMessage),
+                    const SizedBox(height: 8),
+                    const Image(
                       image: AssetImage('assets/oppo_enable_live_alert.jpg'),
                     ),
                   ],
@@ -1794,11 +1830,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                       Navigator.of(context).pop();
                       AndroidTripMonitor.openNotificationChannelSettings();
                     },
-                    child: const Text('前往設定'),
+                    child: Text(l10n.commonOpenSettings),
                   ),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('好的'),
+                    child: Text(l10n.commonOkay),
                   ),
                 ],
               );
@@ -1839,36 +1875,30 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       final openSettings = await showDialog<bool>(
         context: context,
         builder: (context) {
+          final l10n = AppLocalizations.of(context);
           return AlertDialog(
-            title: const Text('Samsung Now Bar 顯示設定'),
-            content: const SingleChildScrollView(
+            title: Text(l10n.routeDetailSamsungPromptTitle),
+            content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('如果背景乘車資訊沒有出現在 Now Bar，請啓用 Samsung 的即時通知測試選項。'),
-                  SizedBox(height: 12),
-                  Text(
-                    '尚未啓用開發人員選項：\n'
-                    '設定 → 關於手機 → 軟體資訊 → 連點「版本號碼」7 次',
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    '接著前往：\n'
-                    '設定 → 開發人員選項 → 捲到最底部 → '
-                    'More settings → Live notifications for all apps',
-                  ),
+                  Text(l10n.routeDetailSamsungPromptMessage),
+                  const SizedBox(height: 12),
+                  Text(l10n.routeDetailSamsungDeveloperSteps),
+                  const SizedBox(height: 12),
+                  Text(l10n.routeDetailSamsungLiveSteps),
                 ],
               ),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('知道了'),
+                child: Text(l10n.commonAcknowledge),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('前往設定'),
+                child: Text(l10n.commonOpenSettings),
               ),
             ],
           );
@@ -1883,7 +1913,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           await AndroidTripMonitor.openSamsungLiveNotificationSettings();
       if (!didOpen && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('無法開啓系統設定，請依照提示中的路徑手動前往。')),
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context).routeDetailOpenSettingsFailed,
+            ),
+          ),
         );
       }
     } finally {
@@ -1992,9 +2026,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         _backgroundTripMonitorPaused = true;
       });
       if (showFeedback && mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('已暫時停止背景乘車提醒')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context).routeDetailTripPaused),
+          ),
+        );
       }
       return;
     }
@@ -2010,9 +2046,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     });
     await _configureBackgroundTripMonitorIfNeeded();
     if (showFeedback && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已恢復背景乘車提醒')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context).routeDetailTripResumed),
+        ),
+      );
     }
   }
 
@@ -2070,7 +2108,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           await _stopLiveActivity();
           if (forcePermissionCheck && mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('要使用背景乘車提醒，請先開啓定位服務。')),
+              SnackBar(
+                content: Text(
+                  AppLocalizations.of(
+                    context,
+                  ).routeDetailLocationServiceRequired,
+                ),
+              ),
             );
           }
           return;
@@ -2089,7 +2133,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           }
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('要使用背景乘車提醒，必須先允許定位權限。')),
+              SnackBar(
+                content: Text(
+                  AppLocalizations.of(
+                    context,
+                  ).routeDetailLocationPermissionRequired,
+                ),
+              ),
             );
           }
           return;
@@ -2126,7 +2176,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           _backgroundTripMonitorReady = false;
           if (forcePermissionCheck && mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('要使用乘車到站提醒，必須先允許通知權限。')),
+              SnackBar(
+                content: Text(
+                  AppLocalizations.of(
+                    context,
+                  ).routeDetailNotificationPermissionRequired,
+                ),
+              ),
             );
           }
           return;
@@ -2150,9 +2206,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           return;
         }
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('要使用背景乘車提醒，必須先允許定位權限。')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                AppLocalizations.of(
+                  context,
+                ).routeDetailLocationPermissionRequired,
+              ),
+            ),
+          );
         }
         return;
       }
@@ -2183,8 +2245,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         }
         if (!updatedHasAlwaysPermission && mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('未啓用「一律允許」定位，背景乘車提醒會改用最後一次定位與公車到站資訊繼續運作。'),
+            SnackBar(
+              content: Text(
+                AppLocalizations.of(
+                  context,
+                ).routeDetailBackgroundLocationFallback,
+              ),
             ),
           );
         }
@@ -2237,23 +2303,25 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   Future<bool?> _showBackgroundLocationExplainer() {
+    final l10n = AppLocalizations.of(context);
     final contentText = _isIOS
-        ? '要在把 app 丟到背景後持續更新下車提醒和靈動島，iPhone 需要將定位權限設為「永遠」。'
-        : '要在把 app 丟到背景後繼續提醒，Android 需要將定位權限設為「永遠允許」。';
+        ? l10n.routeDetailBackgroundLocationIos
+        : l10n.routeDetailBackgroundLocationAndroid;
     return showDialog<bool>(
       context: context,
       builder: (context) {
+        final l10n = AppLocalizations.of(context);
         return AlertDialog(
-          title: const Text('允許背景定位'),
+          title: Text(l10n.routeDetailBackgroundLocationTitle),
           content: Text(contentText),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('稍後再說'),
+              child: Text(l10n.commonLater),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('前往設定'),
+              child: Text(l10n.commonOpenSettings),
             ),
           ],
         );
@@ -2265,17 +2333,18 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     return showDialog<bool>(
       context: context,
       builder: (context) {
+        final l10n = AppLocalizations.of(context);
         return AlertDialog(
-          title: const Text('要把定位權限改為一律允許嗎？'),
-          content: const Text('YABus 需要一律允許才可以在背景偵測你是否上車或到站。'),
+          title: Text(l10n.routeDetailAlwaysLocationTitle),
+          content: Text(l10n.routeDetailAlwaysLocationMessage),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('先不用'),
+              child: Text(l10n.commonNotNow),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('去開啓'),
+              child: Text(l10n.routeDetailEnableAction),
             ),
           ],
         );
@@ -2294,8 +2363,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
     if (!hasAlwaysPermission && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('未啓用「一律允許」定位，背景乘車提醒會改用最後一次定位與公車到站資訊繼續運作。'),
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).routeDetailBackgroundLocationFallback,
+          ),
         ),
       );
     }
@@ -2316,17 +2387,18 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final shouldPick = await showDialog<bool>(
       context: context,
       builder: (context) {
+        final l10n = AppLocalizations.of(context);
         return AlertDialog(
-          title: const Text('要設定下車提醒嗎？'),
-          content: const Text('選一個你要下車的站牌，YABus 會在快到站時提醒你。'),
+          title: Text(l10n.routeDetailDestinationPromptTitle),
+          content: Text(l10n.routeDetailDestinationPromptMessage),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('稍後再說'),
+              child: Text(l10n.commonLater),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('選擇站牌'),
+              child: Text(l10n.commonChooseStop),
             ),
           ],
         );
@@ -2378,13 +2450,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                       final stop = pathStops[index];
                       final isBlocked =
                           blockedStopId != null && stop.stopId == blockedStopId;
-                      final subtitleParts = <String>['第 ${index + 1} 站'];
+                      final subtitleParts = <String>[
+                        AppLocalizations.of(context).stopSequence(index + 1),
+                      ];
                       if (isBlocked && blockedReason != null) {
                         subtitleParts.add(blockedReason);
                       }
                       return ListTile(
                         enabled: !isBlocked,
-                        title: Text(stop.stopName),
+                        title: TransitStationName(name: stop.transitName),
                         subtitle: Text(subtitleParts.join(' · ')),
                         trailing: isBlocked
                             ? const Icon(Icons.block_rounded)
@@ -2408,11 +2482,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
   Future<void> _pickBoardingStop() async {
     final pickedStop = await _pickTripMonitorStop(
-      title: '設定上車站',
+      title: AppLocalizations.of(context).routeDetailSetBoardingStop,
       selectedStopId: _boardingStopId,
       selectedIcon: Icons.directions_bus_rounded,
       blockedStopId: _destinationStopId,
-      blockedReason: '這個站已設為下車站',
+      blockedReason: AppLocalizations.of(context).routeDetailBlockedDestination,
     );
     if (!mounted || pickedStop == null) {
       return;
@@ -2423,20 +2497,24 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
   Future<void> _pickDestinationStop() async {
     final pickedStop = await _pickTripMonitorStop(
-      title: '設定下車提醒',
+      title: AppLocalizations.of(context).routeDetailSetDestinationAlert,
       selectedStopId: _destinationStopId,
       selectedIcon: Icons.flag_rounded,
       blockedStopId: _resolvedBoardingStop()?.stopId,
-      blockedReason: '這個站已設為上車站',
+      blockedReason: AppLocalizations.of(context).routeDetailBlockedBoarding,
     );
     if (!mounted || pickedStop == null) {
       return;
     }
 
     if (pickedStop.stopId == _resolvedBoardingStop()?.stopId) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('上車站不能同時設為下車站。')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).routeDetailSameBoardingDestination,
+          ),
+        ),
+      );
       return;
     }
     await _setDestinationStop(pickedStop);
@@ -2456,9 +2534,16 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
     _playSuccessHaptic();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已將 ${stop.stopName} 設為上車站。')));
+    final stopName = stop.transitName.stationDisplayForLocale(
+      Localizations.localeOf(context).toLanguageTag(),
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppLocalizations.of(context).routeDetailBoardingStopSet(stopName),
+        ),
+      ),
+    );
   }
 
   Future<void> _setDestinationStop(StopInfo stop) async {
@@ -2478,9 +2563,16 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
     _playSuccessHaptic();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已將 ${stop.stopName} 設為下車提醒。')));
+    final stopName = stop.transitName.stationDisplayForLocale(
+      Localizations.localeOf(context).toLanguageTag(),
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppLocalizations.of(context).routeDetailDestinationSet(stopName),
+        ),
+      ),
+    );
   }
 
   Future<void> _clearBoardingStop() async {
@@ -2502,8 +2594,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
     _playSelectionHaptic();
     final message = fallbackBoardingStop == null
-        ? '已清除手動上車站，之後拿到定位會再自動判斷。'
-        : '已改回使用目前位置判斷上車站。';
+        ? AppLocalizations.of(context).routeDetailManualBoardingCleared
+        : AppLocalizations.of(context).routeDetailUsingCurrentLocation;
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
@@ -2843,13 +2935,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
 
     final message = stop.msg?.trim() ?? '';
+    final l10n = AppLocalizations.of(context);
     if (message.isNotEmpty) {
       return switch (message) {
-        '即將進站' => '公車即將到站',
-        '進站中' => '公車進站中',
-        '末班駛離' => '公車末班已駛離',
-        '今日未營運' => '今日未營運',
-        _ => '公車$message',
+        '即將進站' => l10n.routeDetailBusApproaching,
+        '進站中' => l10n.etaArriving,
+        '末班駛離' => l10n.routeDetailEtaLastBusPassed,
+        _ => message,
       };
     }
 
@@ -2858,13 +2950,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return null;
     }
     if (seconds <= 0) {
-      return '公車進站中';
+      return l10n.etaArriving;
     }
     if (seconds < 60) {
-      return '公車即將到站';
+      return l10n.routeDetailBusApproaching;
     }
 
-    return '公車還有 ${seconds ~/ 60} 分到站';
+    return l10n.routeDetailEtaApproxMinutes(seconds ~/ 60);
   }
 
   void _maybeScrollToCurrentLocation() {
@@ -2912,9 +3004,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     PathInfo pathInfo,
     LiveActivityDisplayState displayState,
   ) async {
+    final locale = Localizations.localeOf(context).toLanguageTag();
     final didStart = await LiveActivityService.startLiveActivity(
-      routeName: _detail?.route.routeName ?? '',
-      pathName: pathInfo.name,
+      routeName: _detail?.route.transitName.displayForLocale(locale) ?? '',
+      pathName: pathInfo.transitName.displayForLocale(locale),
       routeKey: widget.routeKey,
       provider: widget.provider.name,
       pathId: pathInfo.pathId,
@@ -3013,20 +3106,21 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   String _displayEtaText(StopInfo stop, {String? vehicleId}) {
+    final l10n = AppLocalizations.of(context);
     final message =
         effectiveStopEtaMessageForVehicle(stop, vehicleId)?.trim() ?? '';
     if (message.isNotEmpty) {
       if (message.contains('進站') || message.contains('到站')) {
-        return '進站中';
+        return l10n.etaArriving;
       }
       if (message.contains('即將')) {
-        return '即將進站';
+        return l10n.routeDetailBusApproaching;
       }
       if (message.contains('未發車')) {
-        return '未發車';
+        return l10n.routeDetailEtaNotDeparted;
       }
       if (message.contains('末班')) {
-        return '末班已過';
+        return l10n.routeDetailEtaLastBusPassed;
       }
       return message;
     }
@@ -3036,17 +3130,21 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return '--';
     }
     if (seconds <= 0) {
-      return '進站中';
+      return l10n.etaArriving;
     }
     if (seconds < 60) {
-      return '$seconds 秒';
+      return l10n.etaSeconds(seconds);
     }
-    return '${seconds ~/ 60} 分';
+    return l10n.etaMinutes(seconds ~/ 60);
   }
 
   bool _isImmediateEtaText(String? etaText) {
     final value = etaText?.trim() ?? '';
-    return value.contains('進站') || value.contains('即將');
+    final l10n = AppLocalizations.of(context);
+    return value == l10n.etaArriving ||
+        value == l10n.routeDetailBusApproaching ||
+        value.contains('進站') ||
+        value.contains('即將');
   }
 
   bool _isBusApproachingStop(StopInfo stop) {
@@ -3147,7 +3245,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
   String _pathStatusPrefix(String pathName) {
     final trimmed = pathName.trim();
-    return trimmed.isEmpty ? '背景乘車提醒進行中' : trimmed;
+    return trimmed.isEmpty
+        ? AppLocalizations.of(context).routeDetailTripActive
+        : trimmed;
   }
 
   String? _buildBusDistanceSummary(int? stopsAway) {
@@ -3155,9 +3255,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return null;
     }
     if (stopsAway == 0) {
-      return '公車即將進站';
+      return AppLocalizations.of(context).routeDetailBusApproaching;
     }
-    return '公車還有 $stopsAway 站';
+    return AppLocalizations.of(context).routeDetailBusStopsAway(stopsAway);
   }
 
   // ignore: unused_element
@@ -3169,7 +3269,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }) {
     final parts = <String>[
       _pathStatusPrefix(pathName),
-      '最近站牌 ${nearestStop.stopName}',
+      AppLocalizations.of(
+        context,
+      ).routeDetailNearestStopValue(_displayStopName(context, nearestStop)),
     ];
     if (nearestEtaText != '--') {
       parts.add(nearestEtaText);
@@ -3189,12 +3291,18 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }) {
     final parts = <String>[
       _pathStatusPrefix(pathName),
-      '尚未上車',
-      '上車站 ${boardingStop.stopName}',
+      AppLocalizations.of(context).routeDetailNotBoarded,
+      AppLocalizations.of(
+        context,
+      ).routeDetailBoardingStopValue(_displayStopName(context, boardingStop)),
     ];
     if (destinationStop != null &&
         destinationStop.stopId != boardingStop.stopId) {
-      parts.add('目的地 ${destinationStop.stopName}');
+      parts.add(
+        AppLocalizations.of(context).routeDetailDestinationValue(
+          _displayStopName(context, destinationStop),
+        ),
+      );
     }
     final busDistanceSummary = _buildBusDistanceSummary(busStopsUntilBoarding);
     if (busDistanceSummary != null) {
@@ -3268,10 +3376,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
     return (
       previousStopName: stopIndex > 0
-          ? pathStops[stopIndex - 1].stopName
+          ? _displayStopName(context, pathStops[stopIndex - 1])
           : null,
       nextStopName: stopIndex + 1 < pathStops.length
-          ? pathStops[stopIndex + 1].stopName
+          ? _displayStopName(context, pathStops[stopIndex + 1])
           : null,
     );
   }
@@ -3289,7 +3397,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
     final stopNames = <String>[
       for (var index = startIndex; index < endIndex; index++)
-        pathStops[index].stopName,
+        _displayStopName(context, pathStops[index]),
     ];
     final resolvedHighlightedIndex =
         highlightedIndex != null &&
@@ -3372,12 +3480,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       );
       return LiveActivityDisplayState(
         stopId: pathStops.first.stopId,
-        stopName: '等待目前位置',
+        stopName: AppLocalizations.of(context).routeDetailWaitingForLocation,
         lineStopNames: stopLine.stopNames,
         lineCurrentStopIndex: stopLine.currentStopIndex,
         lineHighlightedStopIndex: stopLine.highlightedStopIndex,
-        modeLabel: '定位中',
-        statusText: _pathStatusPrefix(pathInfo.name),
+        modeLabel: AppLocalizations.of(context).routeDetailLocating,
+        statusText: _pathStatusPrefix(_displayPathName(context, pathInfo)),
       );
     }
 
@@ -3426,15 +3534,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         );
         return LiveActivityDisplayState(
           stopId: boardingStop.stopId,
-          stopName: boardingStop.stopName,
+          stopName: _displayStopName(context, boardingStop),
           previousStopName: adjacentStops.previousStopName,
           nextStopName: adjacentStops.nextStopName,
           lineStopNames: stopLine.stopNames,
           lineCurrentStopIndex: stopLine.currentStopIndex,
           lineHighlightedStopIndex: stopLine.highlightedStopIndex,
-          modeLabel: '等待上車',
+          modeLabel: AppLocalizations.of(context).routeDetailWaitingToBoard,
           statusText: _buildWaitingBoardingText(
-            pathName: pathInfo.name,
+            pathName: _displayPathName(context, pathInfo),
             boardingStop: boardingStop,
             busStopsUntilBoarding: busStopsUntilBoarding,
           ),
@@ -3462,14 +3570,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       final adjacentStops = _adjacentStopNames(pathStops, nearestStop.stopId);
       return LiveActivityDisplayState(
         stopId: nearestStop.stopId,
-        stopName: nearestStop.stopName,
+        stopName: _displayStopName(context, nearestStop),
         previousStopName: adjacentStops.previousStopName,
         nextStopName: adjacentStops.nextStopName,
         lineStopNames: stopLine.stopNames,
         lineCurrentStopIndex: stopLine.currentStopIndex,
         lineHighlightedStopIndex: stopLine.highlightedStopIndex,
-        modeLabel: '最近站牌',
-        statusText: '尚未設定下車站',
+        modeLabel: AppLocalizations.of(context).routeDetailNearestStop,
+        statusText: AppLocalizations.of(context).routeDetailDestinationNotSet,
         etaSeconds: effectiveStopEtaSeconds(nearestStop),
         etaMessage: nearestStop.msg,
         vehicleId: _vehicleIdForStop(nearestStop),
@@ -3518,15 +3626,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       final adjacentStops = _adjacentStopNames(pathStops, boardingStop.stopId);
       return LiveActivityDisplayState(
         stopId: boardingStop.stopId,
-        stopName: boardingStop.stopName,
+        stopName: _displayStopName(context, boardingStop),
         previousStopName: adjacentStops.previousStopName,
         nextStopName: adjacentStops.nextStopName,
         lineStopNames: stopLine.stopNames,
         lineCurrentStopIndex: stopLine.currentStopIndex,
         lineHighlightedStopIndex: stopLine.highlightedStopIndex,
-        modeLabel: '尚未上車',
+        modeLabel: AppLocalizations.of(context).routeDetailNotBoarded,
         statusText: _buildWaitingBoardingText(
-          pathName: pathInfo.name,
+          pathName: _displayPathName(context, pathInfo),
           boardingStop: boardingStop,
           destinationStop: destinationStop,
           busStopsUntilBoarding: busStopsUntilBoarding,
@@ -3577,27 +3685,33 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       vehicleId: etaVehicleId,
     );
     final onboardStatusParts = <String>[
-      '已上車',
-      '目的地 ${destinationStop.stopName}',
+      AppLocalizations.of(context).routeDetailBoarded,
+      AppLocalizations.of(
+        context,
+      ).routeDetailDestinationValue(_displayStopName(context, destinationStop)),
     ];
     if (destinationEtaText != '--') {
       onboardStatusParts.add(destinationEtaText);
     }
-    onboardStatusParts.add('最近站牌 ${nearestStop.stopName}');
+    onboardStatusParts.add(
+      AppLocalizations.of(
+        context,
+      ).routeDetailNearestStopValue(_displayStopName(context, nearestStop)),
+    );
     if (nearestEtaText != '--') {
       onboardStatusParts.add(nearestEtaText);
     }
 
     return LiveActivityDisplayState(
       stopId: destinationStop.stopId,
-      stopName: destinationStop.stopName,
-      alertStopName: destinationStop.stopName,
+      stopName: _displayStopName(context, destinationStop),
+      alertStopName: _displayStopName(context, destinationStop),
       previousStopName: adjacentStops.previousStopName,
       nextStopName: adjacentStops.nextStopName,
       lineStopNames: stopLine.stopNames,
       lineCurrentStopIndex: stopLine.currentStopIndex,
       lineHighlightedStopIndex: stopLine.highlightedStopIndex,
-      modeLabel: '已上車',
+      modeLabel: AppLocalizations.of(context).routeDetailBoarded,
       statusText: onboardStatusParts.join(' · '),
       etaSeconds: effectiveStopEtaSecondsForVehicle(
         destinationStop,
@@ -3776,7 +3890,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       setState(() {
         _detail = displayDetail;
         _error = null;
-        _statusMessage = fetchedDetail.hasLiveData ? null : '即時資訊暫時無法取得';
+        _status = fetchedDetail.hasLiveData
+            ? null
+            : _RouteDetailStatus.realtimeUnavailable;
       });
       _recalculateNearestStops();
       await _syncLiveActivityForBackgroundMonitor(
@@ -3795,22 +3911,28 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final action = await showDialog<_StopAction>(
       context: context,
       builder: (context) {
+        final l10n = AppLocalizations.of(context);
         return SimpleDialog(
-          title: Text(stop.stopName),
+          title: Text(
+            stop.transitName.stationDisplayForLocale(
+              Localizations.localeOf(context).toLanguageTag(),
+              separator: '\n',
+            ),
+          ),
           children: [
             SimpleDialogOption(
               onPressed: () =>
                   Navigator.of(context).pop(_StopAction.favoriteBoarding),
-              child: const Text('收藏此站牌'),
+              child: Text(l10n.routeDetailFavoriteStop),
             ),
             SimpleDialogOption(
               onPressed: () =>
                   Navigator.of(context).pop(_StopAction.favoriteStation),
-              child: const Text('收藏整站'),
+              child: Text(l10n.routeDetailFavoriteStation),
             ),
             SimpleDialogOption(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
+              child: Text(l10n.commonCancel),
             ),
           ],
         );
@@ -3858,9 +3980,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return null;
     }
     if (controller.favoriteGroups.containsKey(draft.name)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已有相同名稱的收藏群組。')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).routeDetailFavoriteGroupDuplicate,
+          ),
+        ),
+      );
       return null;
     }
     await controller.addFavoriteGroup(draft.name, kind: draft.kind);
@@ -3892,23 +4018,37 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     } on FavoriteGroupFullException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('我的最愛已達上限 ${error.maxStops} 項，無法再加入')),
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(
+              context,
+            ).routeDetailFavoriteLimit(error.maxStops),
+          ),
+        ),
       );
       return;
     }
     if (!mounted) return;
     _playSuccessHaptic();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已將路線加入 $groupName')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppLocalizations.of(context).routeDetailRouteAdded(groupName),
+        ),
+      ),
+    );
   }
 
   Future<void> _handleStationFavorite(StopInfo stop) async {
     final rawStopId = stop.rawStopId?.trim() ?? '';
     if (rawStopId.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('這個站牌缺少可解析的識別碼，無法對應到整站。')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).routeDetailStationIdMissing,
+          ),
+        ),
+      );
       return;
     }
     final controller = AppControllerScope.read(context);
@@ -3920,9 +4060,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(error))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            localizedFriendlyError(AppLocalizations.of(context), error),
+          ),
+        ),
+      );
       return;
     }
     if (!mounted) return;
@@ -3932,9 +4076,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       // Offer the boarding-point favorite, which never depends on that data.
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('伺服器還沒同步這一站的整站資料。'),
+          content: Text(
+            AppLocalizations.of(context).routeDetailStationNotSynced,
+          ),
           action: SnackBarAction(
-            label: '收藏此站牌',
+            label: AppLocalizations.of(context).routeDetailFavoriteStop,
             onPressed: () => unawaited(_handleFavorite(stop)),
           ),
         ),
@@ -3957,14 +4103,26 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     } on FavoriteGroupFullException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('我的最愛已達上限 ${error.maxStops} 項，無法再加入')),
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(
+              context,
+            ).routeDetailFavoriteLimit(error.maxStops),
+          ),
+        ),
       );
       return;
     }
     if (!mounted) return;
     _playSuccessHaptic();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已將${station.stationName}加入 $groupName')),
+      SnackBar(
+        content: Text(
+          AppLocalizations.of(
+            context,
+          ).routeDetailStationAdded(station.stationName, groupName),
+        ),
+      ),
     );
   }
 
@@ -3995,9 +4153,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('我的最愛已達上限 ${e.maxStops} 站，無法再加入')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).routeDetailFavoriteLimit(e.maxStops),
+          ),
+        ),
+      );
       return;
     }
     if (!mounted) {
@@ -4033,8 +4195,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
     final message = assignedDestinationName == null
-        ? '已加入 $selectedGroup'
-        : '已加入 $selectedGroup，目的地：$assignedDestinationName';
+        ? AppLocalizations.of(context).routeDetailFavoriteAdded(selectedGroup)
+        : AppLocalizations.of(context).routeDetailFavoriteAddedWithDestination(
+            selectedGroup,
+            assignedDestinationName,
+          );
     _playSuccessHaptic();
     ScaffoldMessenger.of(
       context,
@@ -4050,17 +4215,18 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final shouldAssign = await showDialog<bool>(
       context: context,
       builder: (context) {
+        final l10n = AppLocalizations.of(context);
         return AlertDialog(
-          title: const Text('設定最愛目的地？'),
-          content: const Text('下次從最愛或小工具開啓時，會自動幫你套用下車提醒。'),
+          title: Text(l10n.routeDetailFavoriteDestinationTitle),
+          content: Text(l10n.routeDetailFavoriteDestinationMessage),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('先不用'),
+              child: Text(l10n.commonNotNow),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('設定目的地'),
+              child: Text(l10n.routeDetailSetDestinationAlert),
             ),
           ],
         );
@@ -4077,9 +4243,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
     final pathStops = detail.stopsByPath[pathId] ?? const <StopInfo>[];
     if (pathStops.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('這個方向目前沒有可選擇的站牌。')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).routeDetailNoSelectableStops,
+          ),
+        ),
+      );
       return null;
     }
 
@@ -4097,8 +4267,17 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
               itemBuilder: (context, index) {
                 final destinationStop = pathStops[index];
                 return ListTile(
-                  title: Text(destinationStop.stopName),
-                  subtitle: Text('第 ${index + 1} 站'),
+                  title: Text(
+                    destinationStop.transitName.stationDisplayForLocale(
+                      Localizations.localeOf(context).toLanguageTag(),
+                      separator: '\n',
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    AppLocalizations.of(context).stopSequence(index + 1),
+                  ),
                   onTap: () => Navigator.of(context).pop(destinationStop),
                 );
               },
@@ -4125,7 +4304,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(didPin ? '已送出主畫面捷徑要求。' : '這台裝置不支援主畫面捷徑。')),
+      SnackBar(
+        content: Text(
+          didPin
+              ? AppLocalizations.of(context).routeDetailShortcutRequested
+              : AppLocalizations.of(context).shortcutUnsupported,
+        ),
+      ),
     );
   }
 
@@ -4145,7 +4330,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(didPin ? '已送出路線捷徑要求。' : '這台裝置不支援主畫面捷徑。')),
+      SnackBar(
+        content: Text(
+          didPin
+              ? AppLocalizations.of(context).routeDetailRouteShortcutRequested
+              : AppLocalizations.of(context).shortcutUnsupported,
+        ),
+      ),
     );
   }
 
@@ -4155,9 +4346,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已清除下車提醒。')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).routeDetailDestinationCleared,
+          ),
+        ),
+      );
       return;
     }
 
@@ -4187,9 +4382,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     if (!mounted || didLaunch) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('無法開啓 Google Maps。')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(AppLocalizations.of(context).routeDetailGoogleMapsFailed),
+      ),
+    );
   }
 
   bool _canShowRelatedStopRoutesAction(StopInfo stop) {
@@ -4398,10 +4595,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   /// so it has the same ambiguity the nearby list had — hence the pathId, which
   /// gives 去程/返程 to fall back on when the path name is missing.
   String _relatedRouteDirectionText(StopRouteSearchResult result) {
-    return routeDirectionLabel(
-      pathName: result.route.description,
+    return localizedRouteDirectionForRoute(
+      AppLocalizations.of(context),
+      route: result.route,
       pathId: result.matchedStop.pathId,
-      routeName: result.route.routeName,
     );
   }
 
@@ -4472,6 +4669,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   String _relatedStopStatusText(StopInfo stop, {bool isLoadingEta = false}) {
+    final l10n = AppLocalizations.of(context);
     final message = stop.msg?.trim() ?? '';
     if (message.isNotEmpty) {
       return message;
@@ -4479,22 +4677,24 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
     final seconds = stop.sec;
     if (seconds == null) {
-      return isLoadingEta ? '讀取即時資料中…' : '無即時資料';
+      return isLoadingEta
+          ? l10n.routeDetailRealtimeLoading
+          : l10n.routeDetailNoRealtime;
     }
     if (seconds <= 0) {
-      return '進站中';
+      return l10n.etaArriving;
     }
     if (seconds < 60) {
-      return '$seconds 秒';
+      return l10n.etaSeconds(seconds);
     }
 
     final minutes = seconds ~/ 60;
     final leftoverSeconds = seconds % 60;
     if (AppControllerScope.read(context).settings.alwaysShowSeconds &&
         leftoverSeconds > 0) {
-      return '約 $minutes 分 $leftoverSeconds 秒';
+      return l10n.routeDetailEtaApproxMinutesSeconds(minutes, leftoverSeconds);
     }
-    return '約 $minutes 分鐘';
+    return l10n.routeDetailEtaApproxMinutes(minutes);
   }
 
   Future<void> _openRelatedRouteDetail(StopRouteSearchResult result) async {
@@ -4515,10 +4715,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             ? autoFavorited.stopName!.trim()
             : autoFavorited.routeName?.trim().isNotEmpty == true
             ? autoFavorited.routeName!.trim()
-            : '這個站牌';
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('常搭這班車？已自動把「$label」加入常用最愛。')));
+            : AppLocalizations.of(context).autoFavoriteFallback;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context).autoFavoriteAdded(label),
+            ),
+          ),
+        );
       }
     }());
 
@@ -4542,13 +4746,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
 
-    final stopName = stop.stopName.trim();
     final selectedRoute = await showModalBottomSheet<StopRouteSearchResult>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (context) => _RelatedStopRoutesSheet(
-        stopName: stopName,
+        stop: stop,
         loadRoutes: () => _loadRelatedStopRoutes(stop),
         fetchLiveMaps: _fetchRelatedStopLiveMaps,
         buildInitialItems: _buildInitialRelatedStopRouteEtas,
@@ -4601,56 +4804,66 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final action = await showDialog<_StopAction>(
       context: context,
       builder: (context) {
+        final l10n = AppLocalizations.of(context);
         return SimpleDialog(
-          title: Text(stop.stopName),
+          title: Text(
+            stop.transitName.stationDisplayForLocale(
+              Localizations.localeOf(context).toLanguageTag(),
+              separator: '\n',
+            ),
+          ),
           children: [
             SimpleDialogOption(
               onPressed: () =>
                   Navigator.of(context).pop(_StopAction.favoriteBoarding),
-              child: const Text('收藏此站牌'),
+              child: Text(l10n.routeDetailFavoriteStop),
             ),
             SimpleDialogOption(
               onPressed: () =>
                   Navigator.of(context).pop(_StopAction.favoriteStation),
-              child: const Text('收藏整站'),
+              child: Text(l10n.routeDetailFavoriteStation),
             ),
             if (showDestinationAction)
               SimpleDialogOption(
                 onPressed: () =>
                     Navigator.of(context).pop(_StopAction.destination),
-                child: Text(_isDestinationStop(stop) ? '清除下車提醒' : '設為下車提醒'),
+                child: Text(
+                  _isDestinationStop(stop)
+                      ? l10n.routeDetailClearDestinationAlert
+                      : l10n.stopActionSetDestination,
+                ),
               ),
             SimpleDialogOption(
               onPressed: () => Navigator.of(context).pop(_StopAction.schedule),
-              child: const Text('本站發車/到站時刻'),
+              child: Text(l10n.stopActionSchedule),
             ),
             if (showRelatedRoutesAction)
               SimpleDialogOption(
                 onPressed: () =>
                     Navigator.of(context).pop(_StopAction.relatedRoutes),
-                child: const Text('站牌經過路線'),
+                child: Text(l10n.stopActionRelatedRoutes),
               ),
             if (showTransfersAction)
               SimpleDialogOption(
                 onPressed: () =>
                     Navigator.of(context).pop(_StopAction.transfers),
-                child: const Text('附近轉乘方式'),
+                child: Text(l10n.stopActionTransfers),
               ),
             if (showGoogleMapsAction)
               SimpleDialogOption(
                 onPressed: () =>
                     Navigator.of(context).pop(_StopAction.googleMaps),
-                child: const Text('在 Google Maps 開啓'),
+                child: Text(l10n.stopActionOpenGoogleMaps),
               ),
             if (showShortcutAction)
               SimpleDialogOption(
                 onPressed: () =>
                     Navigator.of(context).pop(_StopAction.shortcut),
-                child: const Text('新增到主畫面'),
+                child: Text(l10n.commonAddToHomeScreen),
               ),
             SimpleDialogOption(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
+              child: Text(l10n.commonCancel),
             ),
           ],
         );
@@ -4690,6 +4903,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         return _StopScheduleSheet(
           routeId: detail.route.routeId,
           routeName: detail.route.routeName,
+          routeDisplayName: detail.route.transitName.displayForLocale(
+            Localizations.localeOf(sheetContext).toLanguageTag(),
+          ),
           provider: widget.provider,
           stop: stop,
           repository: AppControllerScope.read(context).repository,
@@ -4700,17 +4916,26 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
   Widget _buildBackgroundTripMonitorDrawer(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final resolvedBoardingStop = _resolvedBoardingStop();
     final hasManualBoardingStop = _boardingStopId != null;
-    final boardingName = resolvedBoardingStop?.stopName.trim();
+    final boardingName = resolvedBoardingStop == null
+        ? null
+        : _displayStopName(context, resolvedBoardingStop).trim();
     final boardingSubtitle = boardingName != null && boardingName.isNotEmpty
-        ? '目前站點：$boardingName'
-        : '沒定位時也可以手動選一個站牌當上車站。';
-    final destinationName = _destinationStopName?.trim();
+        ? l10n.routeDetailCurrentStop(boardingName)
+        : l10n.routeDetailBoardingStopHint;
+    final resolvedDestinationStop = _findStopById(
+      _currentPathStops,
+      _destinationStopId,
+    );
+    final destinationName = resolvedDestinationStop == null
+        ? _destinationStopName?.trim()
+        : _displayStopName(context, resolvedDestinationStop).trim();
     final destinationSubtitle =
         destinationName != null && destinationName.isNotEmpty
-        ? '目前站點：$destinationName'
-        : '選擇一個站牌作為下車提醒。';
+        ? l10n.routeDetailCurrentStop(destinationName)
+        : l10n.routeDetailDestinationHint;
 
     return Drawer(
       width: math.min(MediaQuery.sizeOf(context).width * 0.88, 360),
@@ -4724,14 +4949,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                 children: [
                   Expanded(
                     child: Text(
-                      '背景乘車提醒',
+                      l10n.routeDetailBackgroundDrawerTitle,
                       style: theme.textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
                   IconButton(
-                    tooltip: '關閉',
+                    tooltip: l10n.commonClose,
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.close_rounded),
                   ),
@@ -4741,7 +4966,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
               child: Text(
-                '把背景追蹤與下車提醒控制集中在這裡。',
+                l10n.routeDetailBackgroundDrawerMessage,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -4755,12 +4980,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                     : Icons.pause_circle_outline_rounded,
               ),
               title: Text(
-                _backgroundTripMonitorPaused ? '恢復背景乘車提醒' : '暫時停止背景乘車提醒',
+                _backgroundTripMonitorPaused
+                    ? l10n.routeDetailResumeBackground
+                    : l10n.routeDetailPauseBackground,
               ),
               subtitle: Text(
                 _backgroundTripMonitorPaused
-                    ? '重新開始背景追蹤與提醒。'
-                    : '保留設定，但先停止背景追蹤與提醒。',
+                    ? l10n.routeDetailResumeBackgroundMessage
+                    : l10n.routeDetailPauseBackgroundMessage,
               ),
               onTap: () {
                 Navigator.of(context).pop();
@@ -4778,7 +5005,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                     ? Icons.directions_bus_outlined
                     : Icons.directions_bus_rounded,
               ),
-              title: Text(resolvedBoardingStop == null ? '設定上車站' : '變更上車站'),
+              title: Text(
+                resolvedBoardingStop == null
+                    ? l10n.routeDetailSetBoardingStop
+                    : l10n.routeDetailChangeBoardingStop,
+              ),
               subtitle: Text(boardingSubtitle),
               onTap: () {
                 Navigator.of(context).pop();
@@ -4790,13 +5021,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                 leading: const Icon(Icons.my_location_rounded),
                 title: Text(
                   _currentBoardingCandidateStop() == null
-                      ? '清除手動上車站'
-                      : '改回目前位置',
+                      ? l10n.routeDetailClearManualBoarding
+                      : l10n.routeDetailReturnToCurrentLocation,
                 ),
                 subtitle: Text(
                   _currentBoardingCandidateStop() == null
-                      ? '先保留背景提醒，之後拿到定位再自動判斷上車站。'
-                      : '重新跟著目前最近的站牌自動判斷上車站。',
+                      ? l10n.routeDetailClearManualBoardingHint
+                      : l10n.routeDetailCurrentLocationHint,
                 ),
                 onTap: () {
                   Navigator.of(context).pop();
@@ -4809,7 +5040,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                     ? Icons.flag_outlined
                     : Icons.flag_rounded,
               ),
-              title: Text(_destinationStopId == null ? '設定下車提醒' : '清除下車提醒'),
+              title: Text(
+                _destinationStopId == null
+                    ? l10n.routeDetailSetDestinationAlert
+                    : l10n.routeDetailClearDestinationAlert,
+              ),
               subtitle: Text(destinationSubtitle),
               onTap: () {
                 Navigator.of(context).pop();
@@ -4830,8 +5065,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     return showDialog<String>(
       context: context,
       builder: (context) {
+        final l10n = AppLocalizations.of(context);
         return SimpleDialog(
-          title: const Text('選擇最愛群組'),
+          title: Text(l10n.routeDetailSelectFavoriteGroup),
           children: [
             ...groups.map(
               (group) => SimpleDialogOption(
@@ -4842,7 +5078,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             const Divider(height: 1),
             SimpleDialogOption(
               onPressed: () => Navigator.of(context).pop('__new__'),
-              child: const Text('新增群組'),
+              child: Text(l10n.routeDetailNewGroup),
             ),
           ],
         );
@@ -4855,9 +5091,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     if (!mounted || didLaunch) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('無法開啓 TWBusforum。')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(AppLocalizations.of(context).routeDetailForumFailed),
+      ),
+    );
   }
 
   Future<void> _handleVehicleAction(
@@ -4887,7 +5125,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   String _vehicleSourceLabel(BusVehicle vehicle) {
-    return isBackfillBusSource(vehicle.source) ? '回灌補點' : '即時定位';
+    final l10n = AppLocalizations.of(context);
+    return isBackfillBusSource(vehicle.source)
+        ? l10n.routeDetailVehicleBackfill
+        : l10n.routeDetailVehicleRealtime;
   }
 
   Future<void> _showVehicleDetails(
@@ -4896,6 +5137,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     required bool isNearest,
   }) async {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final statusStyle = _vehicleStatusStyleForVehicle(
       theme,
       stop,
@@ -4905,25 +5147,41 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final etaSeconds = effectiveStopEtaSecondsForVehicle(stop, vehicle.id);
     final etaMessage = effectiveStopEtaMessageForVehicle(stop, vehicle.id);
     final detailRows = <({String label, String value})>[
-      (label: '來源', value: _vehicleSourceLabel(vehicle)),
       (
-        label: '本站 ETA',
+        label: l10n.routeDetailVehicleSource,
+        value: _vehicleSourceLabel(vehicle),
+      ),
+      (
+        label: l10n.routeDetailVehicleEta,
         value: etaMessage?.trim().isNotEmpty == true
             ? etaMessage!.trim()
             : etaSeconds == null
             ? '--'
             : etaSeconds <= 0
-            ? '進站中'
+            ? l10n.etaArriving
             : etaSeconds < 60
-            ? '$etaSeconds 秒'
-            : '${etaSeconds ~/ 60} 分',
+            ? l10n.etaSeconds(etaSeconds)
+            : l10n.etaMinutes(etaSeconds ~/ 60),
       ),
       if (vehicle.note.trim().isNotEmpty)
-        (label: '備註', value: vehicle.note.trim()),
-      if (vehicle.full) (label: '車況', value: '客滿'),
-      if (vehicle.carOnStop) (label: '到站', value: '目前在站'),
-      if (_isElectricVehicle(vehicle)) (label: '車型', value: '電動公車'),
-      if (vehicle.type == '1') (label: '設備', value: '低地板 / 無障礙'),
+        (label: l10n.routeDetailVehicleNotes, value: vehicle.note.trim()),
+      if (vehicle.full)
+        (
+          label: l10n.routeDetailVehicleCondition,
+          value: l10n.routeDetailVehicleFull,
+        ),
+      if (vehicle.carOnStop)
+        (label: l10n.routeMapArrival, value: l10n.routeDetailVehicleAtStop),
+      if (_isElectricVehicle(vehicle))
+        (
+          label: l10n.routeDetailVehicleType,
+          value: l10n.routeDetailVehicleElectric,
+        ),
+      if (vehicle.type == '1')
+        (
+          label: l10n.routeDetailVehicleEquipment,
+          value: l10n.routeDetailVehicleAccessible,
+        ),
     ];
 
     await showModalBottomSheet<void>(
@@ -4960,11 +5218,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                             ),
                           ),
                           const SizedBox(height: 2),
-                          Text(
-                            stop.stopName,
-                            style: bottomTheme.textTheme.bodyMedium?.copyWith(
-                              color: bottomTheme.colorScheme.onSurfaceVariant,
-                            ),
+                          TransitStationName(
+                            name: stop.transitName,
+                            primaryStyle: bottomTheme.textTheme.bodyMedium
+                                ?.copyWith(
+                                  color:
+                                      bottomTheme.colorScheme.onSurfaceVariant,
+                                ),
                           ),
                         ],
                       ),
@@ -5007,7 +5267,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                       unawaited(_showVehicleOnMap(stop, vehicle));
                     },
                     icon: const Icon(Icons.map_rounded),
-                    label: const Text('在地圖中查看'),
+                    label: Text(l10n.routeDetailViewOnMap),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -5025,7 +5285,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                       );
                     },
                     icon: const Icon(Icons.open_in_new_rounded),
-                    label: const Text('搜尋 TWBusforum'),
+                    label: Text(l10n.routeDetailSearchForum),
                   ),
                 ),
               ],
@@ -5036,8 +5296,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     );
   }
 
-  String _displayStopName(StopInfo stop) {
-    return stop.stopName;
+  String _displayStopName(BuildContext context, StopInfo stop) {
+    return stop.transitName.stationDisplayForLocale(
+      Localizations.localeOf(context).toLanguageTag(),
+    );
   }
 
   bool _isElectricVehicle(BusVehicle vehicle) {
@@ -5096,12 +5358,16 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   String _vehicleStatusTooltip(StopInfo stop) {
-    final ids = stop.buses.map((vehicle) => vehicle.id).join('、');
+    final l10n = AppLocalizations.of(context);
+    final ids = localizedList(l10n, stop.buses.map((vehicle) => vehicle.id));
     final flags = <String>[
-      if (stop.buses.any((vehicle) => vehicle.carOnStop)) '進站中',
-      if (stop.buses.any((vehicle) => vehicle.full)) '客滿',
-      if (stop.buses.any(_isElectricVehicle)) '電動車',
-      if (stop.buses.any((vehicle) => vehicle.type == '1')) '無障礙',
+      if (stop.buses.any((vehicle) => vehicle.carOnStop)) l10n.etaArriving,
+      if (stop.buses.any((vehicle) => vehicle.full))
+        l10n.routeDetailVehicleFullShort,
+      if (stop.buses.any(_isElectricVehicle))
+        l10n.routeDetailVehicleElectricShort,
+      if (stop.buses.any((vehicle) => vehicle.type == '1'))
+        l10n.routeDetailVehicleAccessibleShort,
     ];
     if (flags.isEmpty) {
       return ids;
@@ -5418,71 +5684,21 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     return horizontalPadding + iconWidth + gap + labelWidth;
   }
 
-  bool _shouldUseCompactVehicleStatus(
-    BuildContext context,
-    ThemeData theme,
-    StopInfo stop, {
-    required bool isNearest,
-    required double availableWidth,
-  }) {
-    if (stop.buses.isEmpty) {
-      return false;
-    }
-
-    final stopNameWidth = _measureMaxLineWidth(
-      context,
-      _displayStopName(stop),
-      theme.textTheme.headlineSmall?.copyWith(
-        fontSize: 18,
-        fontWeight: FontWeight.w600,
-        color: theme.colorScheme.primary,
-        height: 1.2,
-      ),
-    );
-    final statusStyle = _vehicleStatusStyle(theme, stop, isNearest: isNearest);
-    final fullPillWidth = _estimateRouteStatusPillWidth(
-      context,
-      icon: statusStyle.icon,
-      label: null,
-      showStackedBuses: statusStyle.showStackedBuses,
-    );
-    final hasAlert = _stopHasAlert(stop);
-    final alertWidth = hasAlert ? 16.0 : 0.0;
-    final alertSpacing = hasAlert ? 6.0 : 0.0;
-    const dividerSpacing = 8.0;
-    const dividerMinWidth = 96.0;
-    const trailingSpacing = 8.0;
-
-    final requiredWidth =
-        stopNameWidth +
-        alertSpacing +
-        alertWidth +
-        dividerSpacing +
-        dividerMinWidth +
-        trailingSpacing +
-        fullPillWidth;
-    return requiredWidth > availableWidth;
-  }
-
-  Widget _buildVehicleMenuItem(
-    BuildContext context,
-    BusVehicle vehicle, {
-    required int pathId,
-  }) {
+  Widget _buildVehicleMenuItem(BuildContext context, BusVehicle vehicle) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final details = <String>[
       if (vehicle.note.trim().isNotEmpty) vehicle.note.trim(),
-      if (vehicle.full) '滿載',
-      if (vehicle.carOnStop) '進站中',
-      '搜尋 TWBusforum',
+      if (vehicle.full) l10n.routeDetailVehicleFull,
+      if (vehicle.carOnStop) l10n.etaArriving,
+      l10n.routeDetailSearchForum,
     ];
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        DirectionalBusIcon(
-          pathId: pathId,
-          icon: vehicle.type == '1'
+        Icon(
+          vehicle.type == '1'
               ? Icons.accessible_rounded
               : Icons.directions_bus_rounded,
           size: 18,
@@ -5516,19 +5732,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     required bool isNearest,
     required bool isDestination,
   }) {
-    if (isNearest) {
-      return const _RouteStatusPill(
-        icon: Icons.gps_fixed_rounded,
-        label: '你的位置',
-        backgroundColor: Color(0xFF4CAF50),
-        foregroundColor: Colors.white,
-      );
-    }
-
     if (isDestination) {
       return _RouteStatusPill(
         icon: Icons.flag_rounded,
-        label: '下車站',
+        label: AppLocalizations.of(context).routeDetailDestinationStop,
         backgroundColor: theme.colorScheme.tertiaryContainer,
         foregroundColor: theme.colorScheme.onTertiaryContainer,
       );
@@ -5550,7 +5757,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         glowColor: statusStyle.glowColor,
         showStackedBuses: statusStyle.showStackedBuses,
         stackCount: stop.buses.length,
-        pathId: stop.pathId,
       );
 
       if (stop.buses.length == 1) {
@@ -5581,11 +5787,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             for (final vehicle in stop.buses)
               PopupMenuItem<BusVehicle>(
                 value: vehicle,
-                child: _buildVehicleMenuItem(
-                  context,
-                  vehicle,
-                  pathId: stop.pathId,
-                ),
+                child: _buildVehicleMenuItem(context, vehicle),
               ),
           ];
         },
@@ -5605,13 +5807,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     required bool isNearest,
     required bool isDestination,
   }) {
+    final l10n = AppLocalizations.of(context);
     final stopNameStyle = theme.textTheme.headlineSmall?.copyWith(
       fontSize: 18,
       fontWeight: FontWeight.w600,
       color: theme.colorScheme.primary,
       height: 1.2,
     );
-    final stopName = _displayStopName(stop);
+    final stopName = _displayStopName(context, stop);
     final hasAlert = _stopHasAlert(stop);
 
     return Material(
@@ -5646,22 +5849,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                   children: [
                     LayoutBuilder(
                       builder: (context, constraints) {
-                        final useCompactVehicleStatus =
-                            stop.buses.isNotEmpty &&
-                            _shouldUseCompactVehicleStatus(
-                              context,
-                              theme,
-                              stop,
-                              isNearest: isNearest,
-                              availableWidth: constraints.maxWidth,
-                            );
-                        final trailingStatus = _buildTrailingStatus(
-                          context,
-                          theme,
-                          stop,
-                          isNearest: isNearest,
-                          isDestination: isDestination,
-                        );
+                        final trailingStatus = isNearest
+                            ? null
+                            : _buildTrailingStatus(
+                                context,
+                                theme,
+                                stop,
+                                isNearest: false,
+                                isDestination: isDestination,
+                              );
                         final vehicleStatusStyle = stop.buses.isEmpty
                             ? null
                             : _vehicleStatusStyle(
@@ -5674,15 +5870,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                           isDestination,
                           stop.buses.isNotEmpty,
                         )) {
-                          (true, _, _) => _estimateRouteStatusPillWidth(
-                            context,
-                            icon: Icons.gps_fixed_rounded,
-                            label: '你的位置',
-                          ),
+                          (true, _, _) => 0.0,
                           (false, true, _) => _estimateRouteStatusPillWidth(
                             context,
                             icon: Icons.flag_rounded,
-                            label: '下車站',
+                            label: l10n.routeDetailDestinationStop,
                           ),
                           (false, false, true) => _estimateRouteStatusPillWidth(
                             context,
@@ -5693,20 +5885,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                           ),
                           _ => 0.0,
                         };
-                        final minimumDividerWidth = trailingStatus == null
-                            ? 48.0
-                            : useCompactVehicleStatus
-                            ? 36.0
-                            : 28.0;
                         final stopNameMaxWidth = math.max(
-                          96.0,
+                          0.0,
                           constraints.maxWidth -
-                              minimumDividerWidth -
                               trailingStatusWidth -
                               (trailingStatus == null ? 0.0 : 8.0) -
                               (hasAlert ? 16.0 : 0.0) -
-                              (hasAlert ? 6.0 : 0.0) -
-                              6.0,
+                              4.0,
                         );
                         final stopNameWidth = math.min(
                           _measureMaxLineWidth(
@@ -5717,7 +5902,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                           math.min(stopNameMaxWidth, constraints.maxWidth),
                         );
                         final dividerLeftOffset =
-                            stopNameWidth + 6.0 + (hasAlert ? 16.0 + 6.0 : 0.0);
+                            stopNameWidth +
+                            6.0 +
+                            (isNearest ? 24.0 + 6.0 : 0.0) +
+                            (hasAlert ? 16.0 + 6.0 : 0.0);
                         final dividerRightOffset = trailingStatus == null
                             ? 0.0
                             : trailingStatusWidth + 8.0;
@@ -5742,15 +5930,30 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                SizedBox(
-                                  width: stopNameWidth,
-                                  child: Text(
-                                    stopName,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: stopNameStyle,
+                                Flexible(
+                                  fit: FlexFit.loose,
+                                  child: SizedBox(
+                                    width: stopNameWidth,
+                                    child: TransitStationName(
+                                      name: stop.transitName,
+                                      primaryStyle: stopNameStyle,
+                                    ),
                                   ),
                                 ),
+                                if (isNearest) ...[
+                                  const SizedBox(width: 6),
+                                  Semantics(
+                                    label: l10n.busMapYourLocation,
+                                    child: const Icon(
+                                      Icons.gps_fixed_rounded,
+                                      key: ValueKey(
+                                        'route-detail-nearest-stop-indicator',
+                                      ),
+                                      size: 24,
+                                      color: Color(0xFF4CAF50),
+                                    ),
+                                  ),
+                                ],
                                 if (hasAlert) ...[
                                   const SizedBox(width: 6),
                                   GestureDetector(
@@ -5796,6 +5999,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     AppController controller,
     RouteDetailData detail,
   ) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       children: [
         if (_tabController != null)
@@ -5803,20 +6007,31 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             controller: _tabController,
             isScrollable: true,
             tabAlignment: TabAlignment.center,
-            tabs: detail.paths.map((path) => Tab(text: path.name)).toList(),
+            tabs: detail.paths
+                .map(
+                  (path) => Tab(
+                    child: TransitStationName(
+                      name: path.transitName,
+                      primaryStyle: theme.textTheme.labelLarge,
+                      textAlign: TextAlign.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                    ),
+                  ),
+                )
+                .toList(),
           ),
         Expanded(
           child: FadeTransition(
             key: const ValueKey('route-stops-fade'),
             opacity: _initialStopsOpacity,
             child: _tabController == null
-                ? const Center(
+                ? Center(
                     child: Padding(
-                      padding: EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(24),
                       child: CatStateCard(
                         mood: CatStateMood.sad,
-                        title: '這條路線還沒有方向資料',
-                        message: '貓貓翻不到去程或返程，稍後再試試看。',
+                        title: l10n.routeDetailNoDirectionsTitle,
+                        message: l10n.routeDetailNoDirectionsMessage,
                       ),
                     ),
                   )
@@ -5826,13 +6041,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                       final pathStops =
                           detail.stopsByPath[path.pathId] ?? const <StopInfo>[];
                       if (pathStops.isEmpty) {
-                        return const Center(
+                        return Center(
                           child: Padding(
-                            padding: EdgeInsets.all(24),
+                            padding: const EdgeInsets.all(24),
                             child: CatStateCard(
                               mood: CatStateMood.sad,
-                              title: '這個方向沒有站牌',
-                              message: '可能是資料還沒同步完成，等一下再更新。',
+                              title: l10n.routeDetailNoStopsTitle,
+                              message: l10n.routeDetailNoStopsMessage,
                             ),
                           ),
                         );
@@ -5883,9 +6098,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final routeId = detail.route.routeId.trim();
     final currentPathId = _currentPathId;
     if (routeId.isEmpty || currentPathId == null) {
-      return const ColoredBox(
+      return ColoredBox(
         color: Colors.transparent,
-        child: Center(child: Text('目前沒有可顯示的地圖資料')),
+        child: Center(
+          child: Text(AppLocalizations.of(context).routeDetailNoMapData),
+        ),
       );
     }
 
@@ -5895,6 +6112,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       routeId: routeId,
       routeIdHint: widget.routeIdHint,
       routeName: detail.route.routeName,
+      routeNameEn: detail.route.routeNameEn,
       paths: detail.paths,
       stopsByPath: detail.stopsByPath,
       familyRouteIds: detail.familyRouteIds,
@@ -5911,6 +6129,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   Widget _buildInitialLoadingBody(BuildContext context, ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final placeholderColor = theme.colorScheme.surfaceContainerHighest;
     final hasInitialNotices =
         _alerts.isNotEmpty || _initialCancelledDepartures.isNotEmpty;
@@ -5930,9 +6149,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                         _buildInitialNoticeCard(
                           theme: theme,
                           icon: Icons.campaign_rounded,
-                          title: '路線公告',
+                          title: l10n.routeDetailRouteNotice,
                           message: _alerts.first.title.trim().isEmpty
-                              ? '目前有營運資訊更新'
+                              ? l10n.routeDetailNoticeUpdate
                               : _alerts.first.title.trim(),
                           additionalCount: _alerts.length - 1,
                         ),
@@ -5943,11 +6162,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                         _buildInitialNoticeCard(
                           theme: theme,
                           icon: Icons.event_busy_rounded,
-                          title: '今日取消發車',
-                          message: _initialCancelledDepartures
-                              .take(8)
-                              .map((departure) => departure.departureTime)
-                              .join('、'),
+                          title: l10n.routeDetailCancelledDepartures,
+                          message: localizedList(
+                            l10n,
+                            _initialCancelledDepartures
+                                .take(8)
+                                .map((departure) => departure.departureTime),
+                          ),
                           additionalCount:
                               _initialCancelledDepartures.length - 8,
                         ),
@@ -6025,7 +6246,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                 ),
                 Text(
                   additionalCount > 0
-                      ? '$message（另有 $additionalCount 則）'
+                      ? AppLocalizations.of(
+                          context,
+                        ).routeDetailAdditionalNotices(message, additionalCount)
                       : message,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -6041,11 +6264,29 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     );
   }
 
+  String _displayPathName(BuildContext context, PathInfo path) {
+    return path.transitName.stationDisplayForLocale(
+      Localizations.localeOf(context).toLanguageTag(),
+    );
+  }
+
+  String? _localizedStatus(AppLocalizations l10n) => switch (_status) {
+    _RouteDetailStatus.refreshing => l10n.routeDetailStatusRefreshing,
+    _RouteDetailStatus.loadingRoute => l10n.routeDetailStatusLoadingRoute,
+    _RouteDetailStatus.loadingRealtime => l10n.routeDetailStatusLoadingRealtime,
+    _RouteDetailStatus.realtimeUnavailable =>
+      l10n.routeDetailStatusRealtimeUnavailable,
+    _RouteDetailStatus.loadFailed => l10n.routeDetailStatusLoadFailed,
+    _RouteDetailStatus.loadingFamily => l10n.routeDetailStatusLoadingFamily,
+    null => null,
+  };
+
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final detail = _detail;
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final settings = controller.settings;
     final isAmoled =
         settings.useAmoledDark && settings.themeMode != ThemeMode.light;
@@ -6088,8 +6329,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             : null,
         appBar: AppBar(
           title: Text(
-            detail?.route.routeName ?? widget.routeNameHint ?? '公車資訊',
-            maxLines: 1,
+            detail?.route.transitName.displayForLocale(
+                  Localizations.localeOf(context).toLanguageTag(),
+                ) ??
+                widget.routeNameHint ??
+                l10n.routeDetailTitle,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
           actions: [
@@ -6105,8 +6350,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                   unawaited(_openBusMapSheet());
                 },
                 tooltip: isWideLayout
-                    ? (showInlineMap ? '隱藏地圖' : '顯示地圖')
-                    : '公車地圖',
+                    ? (showInlineMap
+                          ? l10n.routeDetailHideMap
+                          : l10n.routeDetailShowMap)
+                    : l10n.routeMapTitle,
                 icon: Icon(
                   showInlineMap ? Icons.map_rounded : Icons.map_outlined,
                 ),
@@ -6116,12 +6363,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                 onPressed: () => unawaited(
                   _scrollToStop(currentPathId, currentNearestStopId),
                 ),
+                tooltip: l10n.routeDetailJumpToNearestStop,
                 icon: const Icon(Icons.gps_fixed_rounded),
               ),
             if (canOpenBackgroundTripMonitorDrawer)
               IconButton(
                 onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-                tooltip: '背景乘車提醒',
+                tooltip: l10n.routeDetailBackgroundDrawerTitle,
                 icon: Icon(
                   _backgroundTripMonitorPaused
                       ? Icons.notifications_paused_outlined
@@ -6145,7 +6393,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                       }
                       _showRouteInfoDialog(detail);
                     },
-              tooltip: '同路線時刻表',
+              tooltip: l10n.routeDetailScheduleTooltip,
               icon: _alerts.isNotEmpty && !_alertsRead
                   ? const Badge(
                       smallSize: 8,
@@ -6184,10 +6432,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                     valueListenable: _remainingSeconds,
                     builder: (context, remainingSeconds, child) {
                       return Text(
-                        _statusMessage ??
+                        _localizedStatus(l10n) ??
                             (remainingSeconds > 0
-                                ? '$remainingSeconds 秒後更新'
-                                : '正在更新'),
+                                ? l10n.routeMapRefreshCountdown(
+                                    remainingSeconds,
+                                  )
+                                : l10n.routeDetailStatusRefreshing),
                         style: theme.textTheme.labelLarge?.copyWith(
                           color: theme.colorScheme.onSurface,
                           fontWeight: FontWeight.w600,
@@ -6208,9 +6458,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                   padding: const EdgeInsets.all(24),
                   child: CatStateCard(
                     mood: CatStateMood.cry,
-                    title: '公車資訊被貓貓壓住了',
-                    message: _error ?? '目前無法載入公車資訊，稍後再更新一次。',
-                    actionLabel: '重新載入',
+                    title: l10n.routeDetailErrorTitle,
+                    message: _error ?? l10n.routeDetailErrorMessage,
+                    actionLabel: l10n.commonReload,
                     onAction: () => unawaited(_refresh()),
                   ),
                 ),
@@ -6305,7 +6555,6 @@ class _RouteStatusPill extends StatelessWidget {
     this.glowColor,
     this.showStackedBuses = false,
     this.stackCount,
-    this.pathId,
   });
 
   final IconData icon;
@@ -6316,16 +6565,10 @@ class _RouteStatusPill extends StatelessWidget {
   final Color? glowColor;
   final bool showStackedBuses;
   final int? stackCount;
-  final int? pathId;
 
   Widget _buildIcon() {
     if (!showStackedBuses) {
-      return DirectionalBusIcon(
-        pathId: pathId,
-        icon: icon,
-        size: 18,
-        color: foregroundColor,
-      );
+      return Icon(icon, size: 18, color: foregroundColor);
     }
 
     final count = stackCount ?? 2;
@@ -6337,12 +6580,7 @@ class _RouteStatusPill extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          DirectionalBusIcon(
-            pathId: pathId,
-            icon: icon,
-            size: 18,
-            color: foregroundColor,
-          ),
+          Icon(icon, size: 18, color: foregroundColor),
           Positioned(
             right: -2,
             bottom: -2,
@@ -6492,7 +6730,7 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = friendlyErrorMessage(e);
+        _error = localizedFriendlyError(AppLocalizations.of(context), e);
       });
     }
   }
@@ -6533,20 +6771,31 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final route = widget.detail.route;
 
     return AlertDialog(
-      title: Text(route.routeName),
+      title: Text(
+        route.transitName.displayForLocale(
+          Localizations.localeOf(context).toLanguageTag(),
+        ),
+      ),
       content: SizedBox(
         width: double.maxFinite,
         child: ListView(
           shrinkWrap: true,
           children: [
-            if (route.description.isNotEmpty) ...[
-              Text(route.description, style: theme.textTheme.bodyMedium),
+            if (route.description.isNotEmpty ||
+                (route.pathNameEn?.trim().isNotEmpty ?? false)) ...[
+              Text(
+                route.transitPathName.stationDisplayForLocale(
+                  Localizations.localeOf(context).toLanguageTag(),
+                ),
+                style: theme.textTheme.bodyMedium,
+              ),
               const SizedBox(height: 12),
             ],
-            Text('路線動作', style: theme.textTheme.titleSmall),
+            Text(l10n.routeInfoActions, style: theme.textTheme.titleSmall),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -6555,7 +6804,7 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
                 OutlinedButton.icon(
                   onPressed: () => _runRouteAction(widget.onFavoriteRoute),
                   icon: const Icon(Icons.favorite_border_rounded, size: 18),
-                  label: const Text('收藏路線'),
+                  label: Text(l10n.routeInfoFavoriteRoute),
                 ),
                 if (widget.onPinRoute case final onPinRoute?)
                   OutlinedButton.icon(
@@ -6564,7 +6813,7 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
                       Icons.add_to_home_screen_rounded,
                       size: 18,
                     ),
-                    label: const Text('新增到主畫面'),
+                    label: Text(l10n.commonAddToHomeScreen),
                   ),
               ],
             ),
@@ -6579,7 +6828,7 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    '營運通知',
+                    l10n.routeDetailOperationsNotice,
                     style: theme.textTheme.titleSmall?.copyWith(
                       color: theme.colorScheme.error,
                     ),
@@ -6601,14 +6850,17 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
-                    '載入失敗：$_error',
+                    l10n.routeInfoLoadFailed(_error!),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.error,
                     ),
                   ),
                 ),
               if (_operators != null && _operators!.isNotEmpty) ...[
-                Text('營運業者', style: theme.textTheme.titleSmall),
+                Text(
+                  l10n.routeInfoOperators,
+                  style: theme.textTheme.titleSmall,
+                ),
                 const SizedBox(height: 4),
                 for (final op in _operators!) _buildOperatorTile(op, theme),
                 const Divider(height: 20),
@@ -6616,7 +6868,10 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
               if (_schedules != null) ...[
                 Row(
                   children: [
-                    Text('同路線時刻表', style: theme.textTheme.titleSmall),
+                    Text(
+                      l10n.routeInfoFamilySchedule,
+                      style: theme.textTheme.titleSmall,
+                    ),
                     const Spacer(),
                     TextButton.icon(
                       onPressed: _pickScheduleDate,
@@ -6632,7 +6887,7 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
                 const SizedBox(height: 4),
                 if (_schedules!.length > 1) ...[
                   Text(
-                    '相關路線',
+                    l10n.routeInfoRelatedRoutes,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -6643,14 +6898,18 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
                     runSpacing: 4,
                     children: [
                       ChoiceChip(
-                        label: const Text('全部'),
+                        label: Text(l10n.commonAll),
                         selected: _selectedScheduleRouteId == null,
                         onSelected: (_) =>
                             setState(() => _selectedScheduleRouteId = null),
                       ),
                       for (final schedule in _schedules!)
                         ChoiceChip(
-                          label: Text(schedule.route.routeName),
+                          label: Text(
+                            schedule.route.transitName.displayForLocale(
+                              Localizations.localeOf(context).toLanguageTag(),
+                            ),
+                          ),
                           selected:
                               _selectedScheduleRouteId ==
                               schedule.route.routeId,
@@ -6673,11 +6932,11 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
         TextButton.icon(
           onPressed: _shareRouteLink,
           icon: const Icon(Icons.share, size: 18),
-          label: const Text('分享連結'),
+          label: Text(l10n.routeInfoShareLink),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('關閉'),
+          child: Text(l10n.commonClose),
         ),
       ],
     );
@@ -6707,12 +6966,15 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
   Future<void> _shareRouteLink() async {
     final route = widget.detail.route;
     final url = _buildShareUrl();
-    final shareText = '${route.routeName}\n$url';
+    final routeName = route.transitName.displayForLocale(
+      Localizations.localeOf(context).toLanguageTag(),
+    );
+    final shareText = '$routeName\n$url';
 
     var shared = false;
     try {
       final result = await SharePlus.instance.share(
-        ShareParams(text: shareText, subject: route.routeName),
+        ShareParams(text: shareText, subject: routeName),
       );
       shared = result.status != ShareResultStatus.unavailable;
     } catch (e) {
@@ -6723,9 +6985,11 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
     if (!shared) {
       await Clipboard.setData(ClipboardData(text: url));
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已複製連結')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context).routeInfoLinkCopied),
+        ),
+      );
     }
   }
 
@@ -6824,29 +7088,27 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
             ),
           ),
           if (op.phone != null && op.phone!.isNotEmpty)
-            Text('電話：${op.phone}', style: theme.textTheme.bodySmall),
+            Text(
+              AppLocalizations.of(context).routeInfoPhone(op.phone!),
+              style: theme.textTheme.bodySmall,
+            ),
           if (op.url != null && op.url!.isNotEmpty)
-            Text('網站：${op.url}', style: theme.textTheme.bodySmall),
+            Text(
+              AppLocalizations.of(context).routeInfoWebsite(op.url!),
+              style: theme.textTheme.bodySmall,
+            ),
         ],
       ),
     );
   }
 
-  static const List<String> _weekdayLabels = <String>[
-    '一',
-    '二',
-    '三',
-    '四',
-    '五',
-    '六',
-    '日',
-  ];
-
   String _formatSelectedDateLabel() {
     final d = _selectedDate;
-    final weekday = _weekdayLabels[d.weekday - 1];
-    final holidaySuffix = _isHoliday(d) ? '・假日' : '';
-    return '${d.month}/${d.day}（$weekday$holidaySuffix）';
+    return localizedScheduleDate(
+      AppLocalizations.of(context),
+      d,
+      isHoliday: _isHoliday(d),
+    );
   }
 
   /// Determines whether [date] is a holiday (non-working day).
@@ -6877,7 +7139,7 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
       initialDate: _selectedDate,
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 1, 12, 31),
-      helpText: '選擇日期',
+      helpText: AppLocalizations.of(context).scheduleChooseDate,
     );
     if (picked == null || !mounted) return;
     setState(() => _selectedDate = picked);
@@ -6935,7 +7197,9 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(
-            hasAnyScheduleEntries ? '這天沒有發車資訊' : '目前沒有時刻表資料',
+            hasAnyScheduleEntries
+                ? AppLocalizations.of(context).scheduleNoServiceDay
+                : AppLocalizations.of(context).scheduleUnavailable,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -6951,7 +7215,9 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
           Padding(
             padding: const EdgeInsets.only(top: 6, bottom: 2),
             child: Text(
-              schedule.route.routeName,
+              schedule.route.transitName.displayForLocale(
+                Localizations.localeOf(context).toLanguageTag(),
+              ),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.primary,
                 fontWeight: FontWeight.w700,
@@ -7062,7 +7328,7 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
             Padding(
               padding: const EdgeInsets.only(left: 4),
               child: Text(
-                '無發車時間資料',
+                AppLocalizations.of(context).scheduleNoDepartureTimes,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -7074,14 +7340,7 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
   }
 
   String _directionLabel(int direction) {
-    switch (direction) {
-      case 0:
-        return '去程';
-      case 1:
-        return '返程';
-      default:
-        return '方向 $direction';
-    }
+    return localizedDirectionOrdinal(AppLocalizations.of(context), direction);
   }
 
   /// Normalizes a departure time string to HH:MM (drops seconds if present).
@@ -7107,6 +7366,7 @@ class _StopScheduleSheet extends StatefulWidget {
   const _StopScheduleSheet({
     required this.routeId,
     required this.routeName,
+    required this.routeDisplayName,
     required this.provider,
     required this.stop,
     required this.repository,
@@ -7114,6 +7374,7 @@ class _StopScheduleSheet extends StatefulWidget {
 
   final String routeId;
   final String routeName;
+  final String routeDisplayName;
   final BusProvider provider;
   final StopInfo stop;
   final BusRepository repository;
@@ -7131,16 +7392,6 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
 
   final Map<String, bool> _holidayMap = <String, bool>{};
   final Set<int> _loadedHolidayYears = <int>{};
-
-  static const List<String> _weekdayLabels = <String>[
-    '一',
-    '二',
-    '三',
-    '四',
-    '五',
-    '六',
-    '日',
-  ];
 
   @override
   void initState() {
@@ -7165,7 +7416,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = friendlyErrorMessage(e);
+        _error = localizedFriendlyError(AppLocalizations.of(context), e);
       });
     }
   }
@@ -7224,9 +7475,11 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
 
   String _formatSelectedDateLabel() {
     final d = _selectedDate;
-    final weekday = _weekdayLabels[d.weekday - 1];
-    final holidaySuffix = _isHoliday(d) ? '・假日' : '';
-    return '${d.month}/${d.day}（$weekday$holidaySuffix）';
+    return localizedScheduleDate(
+      AppLocalizations.of(context),
+      d,
+      isHoliday: _isHoliday(d),
+    );
   }
 
   Future<void> _pickDate() async {
@@ -7236,7 +7489,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
       initialDate: _selectedDate,
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 1, 12, 31),
-      helpText: '選擇日期',
+      helpText: AppLocalizations.of(context).scheduleChooseDate,
     );
     if (picked == null || !mounted) return;
     setState(() => _selectedDate = picked);
@@ -7326,6 +7579,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.6,
@@ -7337,14 +7591,14 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                widget.stop.stopName,
-                style: theme.textTheme.titleLarge?.copyWith(
+              TransitStationName(
+                name: widget.stop.transitName,
+                primaryStyle: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
               Text(
-                '${widget.routeName}・預計時刻',
+                l10n.stopScheduleSubtitle(widget.routeDisplayName),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -7354,7 +7608,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
                 children: [
                   Expanded(
                     child: Text(
-                      '依時刻表推算，實際以現場為準',
+                      l10n.stopScheduleDisclaimer,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -7381,13 +7635,14 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
   }
 
   Widget _buildBody(ThemeData theme, ScrollController scrollController) {
+    final l10n = AppLocalizations.of(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator.adaptive());
     }
     if (_error != null) {
       return Center(
         child: Text(
-          '載入失敗：$_error',
+          l10n.routeInfoLoadFailed(_error!),
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.error,
           ),
@@ -7408,7 +7663,9 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
     if (timetableEntries.isEmpty && frequencyEntries.isEmpty) {
       return Center(
         child: Text(
-          schedule.isEmpty ? '這條路線沒有時刻表資料' : '這天沒有發車資訊',
+          schedule.isEmpty
+              ? l10n.stopScheduleNoTimetable
+              : l10n.scheduleNoServiceDay,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -7459,7 +7716,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
     if (stopTimes.isEmpty && plainFrequencyEntries.isEmpty) {
       return Center(
         child: Text(
-          '這個站點在當天沒有對應的發車時刻',
+          l10n.stopScheduleNoStopTimes,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -7474,7 +7731,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
       children: [
         if (plainFrequencyEntries.isNotEmpty) ...[
           Text(
-            '行駛班距',
+            l10n.stopScheduleFrequency,
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
             ),
@@ -7491,7 +7748,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
           Row(
             children: [
               Text(
-                '預計到站時間',
+                l10n.stopScheduleEstimatedArrival,
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
@@ -7508,7 +7765,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    '含推算',
+                    l10n.stopScheduleIncludesEstimates,
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.onTertiaryContainer,
                     ),
@@ -7541,7 +7798,7 @@ class _StopScheduleSheetState extends State<_StopScheduleSheet> {
           if (stopTimes.values.any((e) => e)) ...[
             const SizedBox(height: 8),
             Text(
-              '※ 標示「含推算」的時間由班距與行駛時間推算，僅供參考',
+              l10n.stopScheduleEstimateFootnote,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
                 fontStyle: FontStyle.italic,
@@ -7563,7 +7820,7 @@ class _RelatedStopRouteEta {
 
 class _RelatedStopRoutesSheet extends StatefulWidget {
   const _RelatedStopRoutesSheet({
-    required this.stopName,
+    required this.stop,
     required this.loadRoutes,
     required this.fetchLiveMaps,
     required this.buildInitialItems,
@@ -7572,7 +7829,7 @@ class _RelatedStopRoutesSheet extends StatefulWidget {
     required this.directionText,
   });
 
-  final String stopName;
+  final StopInfo stop;
   final Future<List<StopRouteSearchResult>> Function() loadRoutes;
   final Future<BatchLiveStopMap> Function(List<StopRouteSearchResult>)
   fetchLiveMaps;
@@ -7639,6 +7896,7 @@ class _RelatedStopRoutesSheetState extends State<_RelatedStopRoutesSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     Widget content;
     if (_routes == null && _error == null) {
       content = const Center(child: CircularProgressIndicator());
@@ -7647,7 +7905,7 @@ class _RelatedStopRoutesSheetState extends State<_RelatedStopRoutesSheet> {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Text(
-            '載入站牌經過路線時發生錯誤',
+            l10n.relatedRoutesLoadFailed,
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium,
           ),
@@ -7658,7 +7916,11 @@ class _RelatedStopRoutesSheetState extends State<_RelatedStopRoutesSheet> {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Text(
-            '找不到「${widget.stopName}」的路線',
+            l10n.relatedRoutesEmpty(
+              widget.stop.transitName.stationDisplayForLocale(
+                Localizations.localeOf(context).toLanguageTag(),
+              ),
+            ),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium,
           ),
@@ -7685,7 +7947,13 @@ class _RelatedStopRoutesSheetState extends State<_RelatedStopRoutesSheet> {
               ).settings.alwaysShowSeconds,
               size: 52,
             ),
-            title: Text(route.routeName),
+            title: Text(
+              route.transitName.displayForLocale(
+                Localizations.localeOf(context).toLanguageTag(),
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
             subtitle: subtitleParts.isEmpty
                 ? null
                 : Text(subtitleParts.join(' · ')),
@@ -7705,7 +7973,7 @@ class _RelatedStopRoutesSheetState extends State<_RelatedStopRoutesSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
               child: Text(
-                '站牌經過路線',
+                l10n.relatedRoutesTitle,
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
@@ -7713,9 +7981,9 @@ class _RelatedStopRoutesSheetState extends State<_RelatedStopRoutesSheet> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-              child: Text(
-                widget.stopName,
-                style: theme.textTheme.bodyMedium?.copyWith(
+              child: TransitStationName(
+                name: widget.stop.transitName,
+                primaryStyle: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),

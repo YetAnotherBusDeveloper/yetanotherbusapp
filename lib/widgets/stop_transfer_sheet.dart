@@ -7,8 +7,12 @@ import 'directional_bus_icon.dart';
 import '../core/app_controller.dart';
 import '../core/models.dart';
 import '../core/route_direction_label.dart';
+import '../core/transit_name.dart';
 import '../core/transit_repository.dart';
 import '../core/transfer_options.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
+import 'transit_station_name.dart';
 
 class StopTransferSheet extends StatefulWidget {
   const StopTransferSheet({
@@ -31,7 +35,7 @@ class StopTransferSheet extends StatefulWidget {
 class _StopTransferSheetState extends State<StopTransferSheet> {
   List<NearbyTransferStopGroup> _busGroups = const [];
   List<BikeStation> _bikeStations = const [];
-  String? _error;
+  bool _missingCoordinates = false;
   bool _loading = true;
 
   @override
@@ -45,7 +49,7 @@ class _StopTransferSheetState extends State<StopTransferSheet> {
     if (stop.lat == 0 && stop.lon == 0) {
       setState(() {
         _loading = false;
-        _error = '這個站牌沒有座標資料，無法尋找附近轉乘。';
+        _missingCoordinates = true;
       });
       return;
     }
@@ -94,6 +98,8 @@ class _StopTransferSheetState extends State<StopTransferSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.62,
@@ -103,50 +109,69 @@ class _StopTransferSheetState extends State<StopTransferSheet> {
         if (_loading) {
           return const Center(child: CircularProgressIndicator.adaptive());
         }
-        if (_error case final error?) {
+        if (_missingCoordinates) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text(error),
+              child: Text(l10n.transferMissingCoordinates),
             ),
           );
         }
         if (_busGroups.isEmpty && _bikeStations.isEmpty) {
-          return const Center(child: Text('這個站牌附近暫時沒有可顯示的轉乘方式。'));
+          return Center(child: Text(l10n.transferEmpty));
         }
         return ListView(
           controller: scrollController,
           padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
           children: [
-            Text('附近轉乘', style: theme.textTheme.titleLarge),
+            Text(l10n.transferTitle, style: theme.textTheme.titleLarge),
             const SizedBox(height: 4),
             Text(
-              '${widget.stop.stopName}・步行 250 公尺內的公車與 300 公尺內的 YouBike',
+              l10n.transferWalkingRanges(
+                widget.stop.transitName.stationDisplayForLocale(
+                  locale,
+                  separator: '\n',
+                ),
+              ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             if (_busGroups.isNotEmpty) ...[
               const SizedBox(height: 18),
-              Text('公車', style: theme.textTheme.titleSmall),
+              Text(l10n.transitBus, style: theme.textTheme.titleSmall),
               const SizedBox(height: 6),
               for (final group in _busGroups)
                 Card(
                   child: ExpansionTile(
-                    title: Text(group.stopName),
+                    title: TransitStationName(
+                      name: group.routes.first.stop.transitName,
+                    ),
                     subtitle: Text(
-                      '${formatDistance(group.distanceMeters)}・${group.routes.length} 條路線',
+                      l10n.transferRouteCount(
+                        localizedDistance(l10n, group.distanceMeters),
+                        group.routes.length,
+                      ),
                     ),
                     children: [
                       for (final row in labelNearbyRouteDirections(
                         group.routes,
+                        locale: locale,
                       ))
                         ListTile(
                           leading: DirectionalBusIcon(
                             pathId: row.result.stop.pathId,
                           ),
-                          title: Text(row.result.route.routeName),
-                          subtitle: Text(row.directionLabel),
+                          title: Text(
+                            row.result.route.transitName.displayForLocale(
+                              locale,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: TransitDirectionLabel(
+                            label: row.directionLabel,
+                          ),
                           trailing: const Icon(Icons.chevron_right_rounded),
                           onTap: () => Navigator.of(context).pop(row.result),
                         ),
@@ -156,15 +181,35 @@ class _StopTransferSheetState extends State<StopTransferSheet> {
             ],
             if (_bikeStations.isNotEmpty) ...[
               const SizedBox(height: 18),
-              Text('YouBike', style: theme.textTheme.titleSmall),
+              Text(l10n.transitYouBike, style: theme.textTheme.titleSmall),
               const SizedBox(height: 6),
               for (final station in _bikeStations)
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.pedal_bike_rounded),
-                    title: Text(station.name),
+                    title: TransitStationName(
+                      name: TransitName(
+                        zh: station.name,
+                        en: station.nameEn,
+                        stableId: station.stationUid.trim().isEmpty
+                            ? station.stationId
+                            : station.stationUid,
+                      ),
+                    ),
                     subtitle: Text(
-                      '${station.distanceMeters == null ? '' : '${formatDistance(station.distanceMeters!.toDouble())}・'}可借 ${station.availableRent}・可還 ${station.availableReturn}',
+                      station.distanceMeters == null
+                          ? l10n.transferBikeAvailability(
+                              station.availableRent,
+                              station.availableReturn,
+                            )
+                          : l10n.transferBikeAvailabilityDistance(
+                              localizedDistance(
+                                l10n,
+                                station.distanceMeters!.toDouble(),
+                              ),
+                              station.availableRent,
+                              station.availableReturn,
+                            ),
                     ),
                   ),
                 ),

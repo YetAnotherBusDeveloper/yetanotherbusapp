@@ -8,14 +8,16 @@ import '../app/bus_app.dart';
 import '../core/app_motion.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/app_controller.dart';
-import '../core/friendly_error.dart';
 import '../core/haptic_feedback_service.dart';
 import '../core/models.dart';
 import '../core/route_direction_label.dart';
 import '../core/route_search_ranking.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/cat_state_card.dart';
 import '../widgets/route_search_keypad.dart';
+import '../widgets/transit_station_name.dart';
 import 'route_detail_navigation.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -152,6 +154,7 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget? _buildSearchSuffix() {
+    final l10n = AppLocalizations.of(context);
     final showClear = _controller.text.isNotEmpty;
     final showKeypad =
         _supportsRouteKeypad &&
@@ -166,7 +169,7 @@ class _SearchScreenState extends State<SearchScreen> {
         if (showClear)
           IconButton(
             key: const ValueKey<String>('clear-search-query'),
-            tooltip: '清除搜尋',
+            tooltip: l10n.searchClearTooltip,
             onPressed: () {
               _controller.clear();
               _onQueryChanged('');
@@ -176,7 +179,7 @@ class _SearchScreenState extends State<SearchScreen> {
         if (showKeypad)
           IconButton(
             key: const ValueKey<String>('show-route-keypad'),
-            tooltip: '開啓快捷鍵盤',
+            tooltip: l10n.searchShowKeypadTooltip,
             onPressed: _showRouteKeypad,
             icon: const Icon(Icons.dialpad_rounded),
           ),
@@ -610,7 +613,7 @@ class _SearchScreenState extends State<SearchScreen> {
         return;
       }
       setState(() {
-        _error = friendlyErrorMessage(error);
+        _error = localizedFriendlyError(AppLocalizations.of(context), error);
         _isResolvingStopDistances = false;
       });
       unawaited(
@@ -1048,12 +1051,19 @@ class _SearchScreenState extends State<SearchScreen> {
     return distanceMeters <= 80;
   }
 
-  String _subtitleForResult(_SearchDisplayItem item) {
+  String _subtitleForResult(
+    _SearchDisplayItem item,
+    String locale,
+    AppLocalizations l10n,
+  ) {
     final route = item.route;
     final providerLabel = busProviderFromString(route.sourceProvider).label;
-    final routeMeta = route.description.trim().isEmpty
+    final hasPathName =
+        route.description.trim().isNotEmpty ||
+        (route.pathNameEn?.trim().isNotEmpty ?? false);
+    final routeMeta = !hasPathName
         ? providerLabel
-        : '$providerLabel | ${route.description.trim()}';
+        : '$providerLabel | ${routeDirectionLabelForLocale(route: route, pathId: route.rtrip, locale: locale)}';
     final stopSearch = item.stopSearch;
     if (stopSearch == null) {
       return routeMeta;
@@ -1064,7 +1074,10 @@ class _SearchScreenState extends State<SearchScreen> {
     final nearestDistanceMeters = stopSearch.nearestDistanceMeters;
     if (nearestStop != null && nearestDistanceMeters != null) {
       details.add(
-        '離你最近：${nearestStop.stopName} (${formatDistance(nearestDistanceMeters)})',
+        l10n.searchNearestStop(
+          nearestStop.transitName.displayForLocale(locale),
+          formatDistance(nearestDistanceMeters),
+        ),
       );
     }
 
@@ -1173,6 +1186,11 @@ class _SearchScreenState extends State<SearchScreen> {
     _SearchDisplayItem item,
     AppController busController,
   ) {
+    final locale = Localizations.localeOf(context).toLanguageTag();
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final routeName = item.route.transitName.displayForLocale(locale);
+    final matchedStop = item.stopSearch?.matchedStop;
     return ListTile(
       leading: CircleAvatar(
         child: Padding(
@@ -1188,14 +1206,29 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ),
       ),
-      title: item.stopSearch?.matchedStop.stopName != null
-          ? Text(
-              '${item.stopSearch!.matchedStop.stopName} (${item.route.routeName})',
+      title: matchedStop != null
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TransitStationName(
+                  name: matchedStop.transitName,
+                  primaryStyle: theme.textTheme.titleMedium,
+                ),
+                Text(
+                  '($routeName)',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             )
-          : Text(item.route.routeName),
+          : Text(routeName, maxLines: 2, overflow: TextOverflow.ellipsis),
       subtitle: Text(
-        _subtitleForResult(item),
-        maxLines: item.isStopSearchResult ? 3 : 1,
+        _subtitleForResult(item, locale, l10n),
+        maxLines: item.isStopSearchResult ? 4 : 2,
+        overflow: TextOverflow.ellipsis,
       ),
       onTap: () async {
         final route = item.route;
@@ -1230,6 +1263,7 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     final busController = AppControllerScope.of(context);
+    final l10n = AppLocalizations.of(context);
     final selectedProviders = busController.selectedProviders;
     final hasSearchBackgroundImage = hasBackgroundImageForPage(
       busController.settings,
@@ -1252,7 +1286,7 @@ class _SearchScreenState extends State<SearchScreen> {
       pageKey: 'search',
       child: Scaffold(
         backgroundColor: hasSearchBackgroundImage ? Colors.transparent : null,
-        appBar: AppBar(title: const Text('搜尋路線或站牌')),
+        appBar: AppBar(title: Text(l10n.searchTitle)),
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 680),
@@ -1271,7 +1305,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     onSubmitted: _submitNativeSearch,
                     decoration: InputDecoration(
                       prefixIcon: const Icon(Icons.search_rounded),
-                      hintText: '搜尋公車路線或站牌名稱',
+                      hintText: l10n.searchHint,
                       suffixIcon: _buildSearchSuffix(),
                     ),
                   ),
@@ -1323,23 +1357,23 @@ class _SearchScreenState extends State<SearchScreen> {
                               else if (_error != null)
                                 CatStateCard(
                                   mood: CatStateMood.cry,
-                                  title: '搜尋撞到貓貓了',
+                                  title: l10n.searchErrorTitle,
                                   message: _error,
                                 )
                               else if (_isResolvingStopDistances &&
                                   _results.isEmpty)
-                                const CatStateCard(
+                                CatStateCard(
                                   mood: CatStateMood.laugh,
-                                  title: '貓貓正在翻站牌',
-                                  message: '正在搜尋附近可搭的站牌...',
+                                  title: l10n.searchResolvingTitle,
+                                  message: l10n.searchResolvingMessage,
                                 )
                               else if (_results.isEmpty)
                                 CatStateCard(
                                   mood: CatStateMood.sad,
-                                  title: '沒有找到這台貓公車',
+                                  title: l10n.searchEmptyTitle,
                                   message: missingProviders.isEmpty
-                                      ? '試試看少打一點，或換成站牌名稱搜尋。'
-                                      : '部分站牌搜尋需要本機資料庫，先更新資料庫後再試一次。',
+                                      ? l10n.searchEmptyMessage
+                                      : l10n.searchEmptyNeedsDatabase,
                                 ),
                             ],
                           ),
@@ -1438,9 +1472,13 @@ class _HistorySection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     if (history.isEmpty) {
-      return const Card(
-        child: Padding(padding: EdgeInsets.all(16), child: Text('還沒有搜尋紀錄。')),
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(l10n.searchHistoryEmpty),
+        ),
       );
     }
 
@@ -1449,13 +1487,16 @@ class _HistorySection extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text('最近搜尋', style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              l10n.searchRecentTitle,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const Spacer(),
             TextButton(
               onPressed: () async {
                 await onClear();
               },
-              child: const Text('清除'),
+              child: Text(l10n.commonClear),
             ),
           ],
         ),

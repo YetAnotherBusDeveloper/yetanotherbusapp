@@ -18,9 +18,9 @@ import '../core/app_launch_service.dart';
 import '../core/android_home_integration.dart';
 import '../core/desktop_discord_presence_service.dart';
 import '../core/desktop_discord_route_observer.dart';
-import '../core/friendly_error.dart';
 import '../core/app_route_observer.dart';
 import '../core/ios_widget_integration.dart';
+import '../core/interface_scale_text_scaler.dart';
 import '../core/models.dart';
 import '../core/route_detail_launch_bridge.dart';
 import '../core/startup_permission_service.dart';
@@ -47,6 +47,8 @@ import '../screens/terms_of_service_page.dart';
 import '../widgets/app_update_dialog.dart';
 import '../widgets/announcement_popup_dialog.dart';
 import '../widgets/database_update_dialog.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 
 class BusApp extends StatelessWidget {
   const BusApp({
@@ -73,11 +75,16 @@ class BusApp extends StatelessWidget {
             initialSeedColor: automaticSeedColor,
             initialPath: automaticSeedPath,
             builder: (automaticSeedColor) => AnimatedBuilder(
-              animation: controller.themeRevision,
+              animation: controller.rootRevision,
               builder: (context, _) {
                 return MaterialApp(
-                  title: 'YetAnotherBusApp',
+                  onGenerateTitle: (context) =>
+                      AppLocalizations.of(context).appTitle,
                   debugShowCheckedModeBanner: false,
+                  locale: _localeForLanguage(controller.settings.language),
+                  localizationsDelegates:
+                      AppLocalizations.localizationsDelegates,
+                  supportedLocales: AppLocalizations.supportedLocales,
                   themeMode: controller.settings.themeMode,
                   theme: _buildTheme(
                     Brightness.light,
@@ -99,7 +106,7 @@ class BusApp extends StatelessWidget {
                   builder: (context, child) {
                     final theme = Theme.of(context);
                     final isDark = theme.brightness == Brightness.dark;
-                    return AnnotatedRegion<SystemUiOverlayStyle>(
+                    final content = AnnotatedRegion<SystemUiOverlayStyle>(
                       value: SystemUiOverlayStyle(
                         statusBarColor: Colors.transparent,
                         statusBarIconBrightness: isDark
@@ -116,6 +123,19 @@ class BusApp extends StatelessWidget {
                         systemNavigationBarContrastEnforced: false,
                       ),
                       child: child ?? const SizedBox.shrink(),
+                    );
+                    final mediaQuery = MediaQuery.maybeOf(context);
+                    if (mediaQuery == null) {
+                      return content;
+                    }
+                    return MediaQuery(
+                      data: mediaQuery.copyWith(
+                        textScaler: InterfaceScaleTextScaler(
+                          systemTextScaler: mediaQuery.textScaler,
+                          interfaceScale: controller.settings.interfaceScale,
+                        ),
+                      ),
+                      child: content,
                     );
                   },
                   onGenerateRoute: (settings) =>
@@ -245,6 +265,12 @@ class BusApp extends StatelessWidget {
     );
   }
 }
+
+Locale? _localeForLanguage(AppLanguage language) => switch (language) {
+  AppLanguage.system => null,
+  AppLanguage.traditionalChinese => const Locale('zh', 'TW'),
+  AppLanguage.english => const Locale('en'),
+};
 
 String? automaticBackgroundColorPath(AppSettings settings) {
   if (settings.colorSource != AppColorSource.automatic) {
@@ -553,14 +579,18 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
 
   void _showWebUpdateBanner(web_update.WebUpdateCheckResult result) {
     final messenger = ScaffoldMessenger.maybeOf(context);
+    final l10n = AppLocalizations.of(context);
     messenger?.showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 8),
         content: Text(
-          '有新版本可用（${result.latestVersion}+${result.latestBuildNumber}）',
+          l10n.shellWebUpdateAvailable(
+            result.latestVersion,
+            result.latestBuildNumber,
+          ),
         ),
         action: SnackBarAction(
-          label: '重新載入',
+          label: l10n.commonReload,
           onPressed: () => web_update.reloadPage(),
         ),
       ),
@@ -654,23 +684,22 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
       return;
     }
     _showingAccountSyncPrompt = true;
+    final l10n = AppLocalizations.of(context);
     final enabled = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('啓用雲端同步？'),
-          content: const Text(
-            '登入後可以自動同步最愛站牌與偏好設定。之後進入 app 時會自動更新，資料變更後也會稍後自動同步。',
-          ),
+          title: Text(l10n.shellEnableSyncTitle),
+          content: Text(l10n.shellEnableSyncDescription),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('先不要'),
+              child: Text(l10n.commonNotNow),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('開啓同步'),
+              child: Text(l10n.shellEnableSyncAction),
             ),
           ],
         );
@@ -688,7 +717,9 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
       }
       messenger?.showSnackBar(
         SnackBar(
-          content: Text(enabled == true ? '已開啓雲端同步。' : '已略過自動同步，你之後仍可手動同步。'),
+          content: Text(
+            enabled == true ? l10n.shellSyncEnabled : l10n.shellSyncSkipped,
+          ),
         ),
       );
     } catch (error) {
@@ -696,7 +727,11 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
         return;
       }
       messenger?.showSnackBar(
-        SnackBar(content: Text('設定同步偏好失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.shellSyncPreferenceFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
@@ -834,6 +869,7 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
 
     if (action.target == AppLaunchTarget.authCallback) {
       final messenger = ScaffoldMessenger.maybeOf(context);
+      final l10n = AppLocalizations.of(context);
       if (action.authLinkStatus != null) {
         await _consumeAuthLinkCallback(action, messenger);
         return;
@@ -843,13 +879,19 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
         if (!mounted) {
           return;
         }
-        messenger?.showSnackBar(const SnackBar(content: Text('登入成功。')));
+        messenger?.showSnackBar(
+          SnackBar(content: Text(l10n.shellSignInSucceeded)),
+        );
       } catch (error) {
         if (!mounted) {
           return;
         }
         messenger?.showSnackBar(
-          SnackBar(content: Text('登入失敗：${friendlyErrorMessage(error)}')),
+          SnackBar(
+            content: Text(
+              l10n.shellSignInFailed(localizedFriendlyError(l10n, error)),
+            ),
+          ),
         );
       }
       return;
@@ -927,6 +969,7 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
     AppLaunchAction action,
     ScaffoldMessengerState? messenger,
   ) async {
+    final l10n = AppLocalizations.of(context);
     try {
       final result = await widget.controller.completeAuthLinkCallback(action);
       if (!mounted) {
@@ -936,13 +979,17 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
         case AuthLinkOutcome.linked:
           messenger?.showSnackBar(
             SnackBar(
-              content: Text('已連結 ${_providerLabel(result.provider)} 帳號。'),
+              content: Text(
+                l10n.shellAccountLinked(_providerLabel(result.provider)),
+              ),
             ),
           );
         case AuthLinkOutcome.alreadyLinked:
           messenger?.showSnackBar(
             SnackBar(
-              content: Text('${_providerLabel(result.provider)} 已在此帳號上。'),
+              content: Text(
+                l10n.shellAccountAlreadyLinked(_providerLabel(result.provider)),
+              ),
             ),
           );
         case AuthLinkOutcome.mergeRequired:
@@ -953,7 +1000,11 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
         return;
       }
       messenger?.showSnackBar(
-        SnackBar(content: Text('連結失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.shellLinkFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
@@ -964,19 +1015,21 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
       return;
     }
     final controller = widget.controller;
+    final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.maybeOf(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('合併帳號？'),
+        title: Text(l10n.shellMergeAccountsTitle),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '「${_providerLabel(result.provider)}」已經屬於另一個帳號。'
-                '合併後下列身分與資料會移入目前帳號，來源帳號將被刪除：',
+                l10n.shellMergeAccountsDescription(
+                  _providerLabel(result.provider),
+                ),
               ),
               const SizedBox(height: 12),
               for (final identity in preview.sourceIdentities)
@@ -998,7 +1051,7 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
                 ),
               if (preview.activeDeviceCount > 0) ...[
                 const SizedBox(height: 8),
-                Text('來源帳號目前有 ${preview.activeDeviceCount} 台啓用中的裝置。'),
+                Text(l10n.shellActiveDevices(preview.activeDeviceCount)),
               ],
             ],
           ),
@@ -1006,11 +1059,11 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('取消'),
+            child: Text(l10n.commonCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('合併帳號'),
+            child: Text(l10n.shellMergeAccountsAction),
           ),
         ],
       ),
@@ -1025,7 +1078,9 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
       }
       messenger?.showSnackBar(
         SnackBar(
-          content: Text('帳號已合併，${_providerLabel(result.provider)} 已連結到目前帳號。'),
+          content: Text(
+            l10n.shellAccountsMerged(_providerLabel(result.provider)),
+          ),
         ),
       );
     } catch (error) {
@@ -1033,7 +1088,11 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
         return;
       }
       messenger?.showSnackBar(
-        SnackBar(content: Text('合併失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.shellMergeFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
@@ -1047,6 +1106,7 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
   }
 
   Future<void> _runStartupCheck() async {
+    final l10n = AppLocalizations.of(context);
     try {
       final databasePlan = await widget.controller
           .maybeCheckForDatabaseUpdatesOnLaunch();
@@ -1054,7 +1114,9 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
         if (databasePlan.shouldAutoDownload) {
           final providers = databasePlan.updates.keys.toList();
           final messenger = ScaffoldMessenger.maybeOf(context);
-          messenger?.showSnackBar(const SnackBar(content: Text('正在更新資料庫...')));
+          messenger?.showSnackBar(
+            SnackBar(content: Text(l10n.shellDatabaseUpdating)),
+          );
           try {
             await widget.controller.downloadProviderDatabases(providers);
             if (!mounted) {
@@ -1063,7 +1125,12 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
             messenger?.showSnackBar(
               SnackBar(
                 content: Text(
-                  '資料庫已更新：${providers.map((provider) => provider.label).join('、')}',
+                  l10n.shellDatabaseUpdated(
+                    localizedList(
+                      l10n,
+                      providers.map((provider) => provider.label),
+                    ),
+                  ),
                 ),
               ),
             );
@@ -1073,7 +1140,11 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
             }
             messenger?.showSnackBar(
               SnackBar(
-                content: Text('自動更新資料庫失敗：${friendlyErrorMessage(error)}'),
+                content: Text(
+                  l10n.shellDatabaseAutoUpdateFailed(
+                    localizedFriendlyError(l10n, error),
+                  ),
+                ),
               ),
             );
           }
@@ -1090,16 +1161,20 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
               if (!mounted) {
                 return;
               }
-              ScaffoldMessenger.maybeOf(
-                context,
-              )?.showSnackBar(const SnackBar(content: Text('資料庫更新完成。')));
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                SnackBar(content: Text(l10n.shellDatabaseUpdateComplete)),
+              );
             } catch (error) {
               if (!mounted) {
                 return;
               }
               ScaffoldMessenger.maybeOf(context)?.showSnackBar(
                 SnackBar(
-                  content: Text('資料庫更新失敗：${friendlyErrorMessage(error)}'),
+                  content: Text(
+                    l10n.shellDatabaseUpdateFailed(
+                      localizedFriendlyError(l10n, error),
+                    ),
+                  ),
                 ),
               );
             }
@@ -1109,10 +1184,15 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
           messenger?.showSnackBar(
             SnackBar(
               content: Text(
-                '資料庫有新版本：${databasePlan.updates.keys.map((provider) => provider.label).join('、')}',
+                l10n.shellDatabaseUpdatesAvailable(
+                  localizedList(
+                    l10n,
+                    databasePlan.updates.keys.map((provider) => provider.label),
+                  ),
+                ),
               ),
               action: SnackBarAction(
-                label: '更新',
+                label: l10n.commonUpdate,
                 onPressed: () async {
                   final shouldUpdate = await showDatabaseUpdateDialog(
                     context,
@@ -1128,16 +1208,20 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
                     if (!mounted) {
                       return;
                     }
-                    ScaffoldMessenger.maybeOf(
-                      context,
-                    )?.showSnackBar(const SnackBar(content: Text('資料庫更新完成。')));
+                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                      SnackBar(content: Text(l10n.shellDatabaseUpdateComplete)),
+                    );
                   } catch (error) {
                     if (!mounted) {
                       return;
                     }
                     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
                       SnackBar(
-                        content: Text('資料庫更新失敗：${friendlyErrorMessage(error)}'),
+                        content: Text(
+                          l10n.shellDatabaseUpdateFailed(
+                            localizedFriendlyError(l10n, error),
+                          ),
+                        ),
                       ),
                     );
                   }
@@ -1145,16 +1229,22 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
               ),
             ),
           );
-        } else if (databasePlan.deferredReason case final reason?) {
-          ScaffoldMessenger.maybeOf(
-            context,
-          )?.showSnackBar(SnackBar(content: Text(reason)));
+        } else if (databasePlan.deferredReason != null) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(content: Text(l10n.shellDatabaseUpdateDeferred)),
+          );
         }
       }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(content: Text('檢查資料庫更新失敗：${friendlyErrorMessage(error)}')),
+          SnackBar(
+            content: Text(
+              l10n.shellDatabaseCheckFailed(
+                localizedFriendlyError(l10n, error),
+              ),
+            ),
+          ),
         );
       }
     }
@@ -1171,9 +1261,9 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
         final messenger = ScaffoldMessenger.maybeOf(context);
         messenger?.showSnackBar(
           SnackBar(
-            content: Text(result.message),
+            content: Text(localizedAppUpdateResult(l10n, result)),
             action: SnackBarAction(
-              label: '查看',
+              label: l10n.commonView,
               onPressed: () {
                 showAppUpdateDialog(
                   context,

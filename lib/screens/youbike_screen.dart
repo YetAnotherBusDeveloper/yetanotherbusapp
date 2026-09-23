@@ -12,10 +12,13 @@ import '../app/bus_app.dart';
 import '../core/debouncer.dart';
 import '../core/request_sequence.dart';
 import '../core/transit_repository.dart';
+import '../core/transit_name.dart';
 import '../core/user_location.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/platform_map_provider.dart';
 import '../widgets/ad_banner_widget.dart';
+import '../widgets/transit_station_name.dart';
 
 class YouBikeScreen extends StatefulWidget {
   const YouBikeScreen({
@@ -135,9 +138,14 @@ class _YouBikeScreenState extends State<YouBikeScreen>
       unawaited(_loadNearby(loc));
     } catch (error) {
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       final message = error is LocationFailure
-          ? error.message
-          : '目前無法取得定位，請稍後再試。';
+          ? error.serviceDisabled
+                ? l10n.locationServicesDisabled
+                : error.deniedForever
+                ? l10n.locationPermissionDenied
+                : l10n.youBikeLocationUnavailable
+          : l10n.youBikeLocationUnavailable;
       final serviceDisabled = error is LocationFailure && error.serviceDisabled;
       final deniedForever = error is LocationFailure && error.deniedForever;
       setState(() {
@@ -151,13 +159,13 @@ class _YouBikeScreenState extends State<YouBikeScreen>
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$message 已改為顯示預設區域。'),
+            content: Text(l10n.youBikeUsingDefaultArea(message)),
             action: SnackBarAction(
               label: serviceDisabled
-                  ? '定位設定'
-                  : deniedForever
-                  ? '權限設定'
-                  : '重試',
+                  ? l10n.nearbyLocationSettings
+                   : deniedForever
+                  ? l10n.nearbyPermissionSettings
+                  : l10n.commonRetry,
               onPressed: serviceDisabled
                   ? () => unawaited(Geolocator.openLocationSettings())
                   : deniedForever
@@ -336,6 +344,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
 
   void _showNearbyStationsSheet() {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -369,10 +378,13 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
-                      Text('附近站點', style: theme.textTheme.titleMedium),
+                      Text(
+                        l10n.youBikeNearbyStations,
+                        style: theme.textTheme.titleMedium,
+                      ),
                       const Spacer(),
                       Text(
-                        '${_stations.length} 站',
+                        l10n.youBikeStationCount(_stations.length),
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
@@ -383,7 +395,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                   child: _stations.isEmpty
                       ? Center(
                           child: Text(
-                            '附近沒有站點',
+                             l10n.youBikeNoNearbyStations,
                             style: theme.textTheme.bodyLarge?.copyWith(
                               color: theme.colorScheme.outline,
                             ),
@@ -421,13 +433,10 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                                   ),
                                 ),
                               ),
-                              title: Text(
-                                station.name,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                               title: TransitStationName(
+                                 name: _stationName(station),
+                                 primaryStyle: theme.textTheme.bodyMedium
+                                     ?.copyWith(fontWeight: FontWeight.w600),
                               ),
                               subtitle: Text(
                                 _bikeAvailabilitySummary(station),
@@ -496,6 +505,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
 
   Widget _buildStationDetailContent(ThemeData theme, BikeStation station) {
     final color = _availabilityColor(station);
+    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -519,9 +529,9 @@ class _YouBikeScreenState extends State<YouBikeScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    station.name,
-                    style: theme.textTheme.titleMedium?.copyWith(
+                  TransitStationName(
+                    name: _stationName(station),
+                    primaryStyle: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -552,7 +562,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                 child: _StatItem(
                   icon: Icons.pedal_bike_rounded,
                   color: Colors.green.shade600,
-                  label: '一般車',
+                   label: l10n.youBikeGeneralBike,
                   value: '${station.availableRentGeneral}',
                 ),
               ),
@@ -565,7 +575,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                 child: _StatItem(
                   icon: Icons.electric_bike_rounded,
                   color: Colors.orange.shade700,
-                  label: '2.0E 電輔',
+                   label: l10n.youBikeElectricBike,
                   value: '${station.availableRentElectric}',
                 ),
               ),
@@ -578,7 +588,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                 child: _StatItem(
                   icon: Icons.local_parking_rounded,
                   color: Colors.blue.shade600,
-                  label: '可還',
+                   label: l10n.youBikeReturnSlots,
                   value: '${station.availableReturn}',
                 ),
               ),
@@ -596,7 +606,9 @@ class _YouBikeScreenState extends State<YouBikeScreen>
               ),
               const SizedBox(width: 6),
               Text(
-                '距離 ${_formatDist(station.distanceMeters!.toDouble())}',
+                l10n.youBikeDistance(
+                  _formatDist(station.distanceMeters!.toDouble()),
+                ),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.primary,
                   fontWeight: FontWeight.w500,
@@ -610,6 +622,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
   }
 
   Widget _buildSplitStationSidebar(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
       child: Column(
@@ -623,14 +636,14 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '站點資訊',
+                          l10n.youBikeStationInfo,
                           style: theme.textTheme.titleLarge?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '按一下左側站點或地圖上的標記後，這裡就會顯示可借、可還與距離資訊。',
+                          l10n.youBikeSelectStationHint,
                           style: theme.textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 16),
@@ -640,12 +653,14 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                           children: [
                             Chip(
                               avatar: const Icon(Icons.pedal_bike_rounded),
-                              label: Text('附近 ${_stations.length} 站'),
+                              label: Text(
+                                l10n.youBikeStationCount(_stations.length),
+                              ),
                             ),
                             if (_userLocation != null)
-                              const Chip(
-                                avatar: Icon(Icons.my_location_rounded),
-                                label: Text('已取得目前位置'),
+                              Chip(
+                                avatar: const Icon(Icons.my_location_rounded),
+                                label: Text(l10n.youBikeLocationAcquired),
                               ),
                           ],
                         ),
@@ -666,12 +681,12 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                       children: [
                         Expanded(
                           child: Text(
-                            '附近站點',
+                             l10n.youBikeNearbyStations,
                             style: theme.textTheme.titleMedium,
                           ),
                         ),
                         Text(
-                          '${_stations.length} 站',
+                          l10n.youBikeStationCount(_stations.length),
                           style: theme.textTheme.bodySmall,
                         ),
                       ],
@@ -682,7 +697,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                     child: _stations.isEmpty
                         ? Center(
                             child: Text(
-                              '附近沒有站點',
+                               l10n.youBikeNoNearbyStations,
                               style: theme.textTheme.bodyLarge?.copyWith(
                                 color: theme.colorScheme.outline,
                               ),
@@ -727,13 +742,10 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                                     ),
                                   ),
                                 ),
-                                title: Text(
-                                  station.name,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                 title: TransitStationName(
+                                   name: _stationName(station),
+                                   primaryStyle: theme.textTheme.bodyMedium
+                                       ?.copyWith(fontWeight: FontWeight.w600),
                                 ),
                                 subtitle: Text(
                                   _bikeAvailabilitySummary(station),
@@ -766,6 +778,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
 
   Widget _buildMapContent({required bool useGoogleMapsPointProvider}) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     if (useGoogleMapsPointProvider) {
       _ensureGoogleStationIcons();
       _ensureGoogleUserLocationIcon();
@@ -914,7 +927,9 @@ class _YouBikeScreenState extends State<YouBikeScreen>
           bottom: 24,
           child: FloatingActionButton.small(
             heroTag: 'recenter',
-            tooltip: _userLocation == null ? '重新定位' : '回到目前位置',
+            tooltip: _userLocation == null
+                ? l10n.youBikeRelocate
+                : l10n.youBikeBackToLocation,
             onPressed: _locating
                 ? null
                 : _userLocation == null
@@ -1189,6 +1204,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
 
   Set<gmaps.Marker> _buildGoogleMarkers(ThemeData theme) {
     final markers = <gmaps.Marker>{};
+    final locale = Localizations.localeOf(context).toLanguageTag();
     final userLocation = _userLocation;
     if (userLocation != null) {
       final userIcon = _googleUserLocationIcon;
@@ -1244,7 +1260,9 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                 googleMarkerHueForColor(color),
               ),
           infoWindow: gmaps.InfoWindow(
-            title: station.name,
+            title: _stationName(
+              station,
+            ).stationDisplayForLocale(locale, separator: '\n'),
             snippet: station.address.isEmpty ? null : station.address,
           ),
           zIndexInt: selected ? 2 : 1,
@@ -1272,6 +1290,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final useGoogleMapsPointProvider = useGoogleMapsProviderFor(
       AppControllerScope.of(context).settings.mobileMapProvider,
     );
@@ -1287,12 +1306,12 @@ class _YouBikeScreenState extends State<YouBikeScreen>
         return Scaffold(
           backgroundColor: hasBackgroundImage ? Colors.transparent : null,
           appBar: AppBar(
-            title: const Text('YouBike'),
+            title: Text(l10n.transitYouBike),
             automaticallyImplyLeading: false,
             actions: [
               if (!useSplitLayout)
                 IconButton(
-                  tooltip: '附近站點',
+                  tooltip: l10n.youBikeNearbyStations,
                   onPressed: _showNearbyStationsSheet,
                   icon: Badge(
                     isLabelVisible: _stations.isNotEmpty,
@@ -1341,15 +1360,28 @@ class _YouBikeScreenState extends State<YouBikeScreen>
   }
 
   String _formatDist(double meters) {
-    if (meters < 1000) return '${meters.round()}m';
-    return '${(meters / 1000).toStringAsFixed(1)}km';
+    final l10n = AppLocalizations.of(context);
+    if (meters < 1000) return l10n.distanceMetersValue(meters.round());
+    return l10n.distanceKilometersValue(
+      (meters / 1000).toStringAsFixed(1),
+    );
   }
 
   String _bikeAvailabilitySummary(BikeStation station) {
-    return '一般 ${station.availableRentGeneral} · '
-        '2.0E ${station.availableRentElectric} · '
-        '可還 ${station.availableReturn}';
+    return AppLocalizations.of(context).youBikeAvailability(
+      station.availableRentGeneral,
+      station.availableRentElectric,
+      station.availableReturn,
+    );
   }
+
+  TransitName _stationName(BikeStation station) => TransitName(
+    zh: station.name,
+    en: station.nameEn,
+    stableId: station.stationUid.isEmpty
+        ? station.stationId
+        : station.stationUid,
+  );
 }
 
 class _GoogleYouBikeMarkerRequest {

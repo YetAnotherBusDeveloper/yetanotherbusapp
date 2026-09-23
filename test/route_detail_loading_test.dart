@@ -353,6 +353,73 @@ void main() {
     },
   );
 
+  test('route search API parses route and path English names', () async {
+    final repository = BusRepository(
+      client: MockClient(
+        (_) async => jsonResponse([
+          {
+            'routeid': 'TXG500',
+            'route_name': '500',
+            'route_name_en': 'Five Hundred',
+            'pathid': 0,
+            'path_name': '去程',
+            'path_name_en': 'Outbound',
+          },
+          {
+            'routeid': 'TXG500',
+            'route_name': '500',
+            'route_name_en': 'Five Hundred',
+            'pathid': 1,
+            'path_name': '返程',
+            'path_name_en': 'Inbound',
+          },
+        ]),
+      ),
+    );
+
+    final routes = await repository.searchRoutesFromApi(
+      'Five Hundred',
+      provider: BusProvider.txg,
+    );
+
+    expect(routes.single.routeNameEn, 'Five Hundred');
+    expect(routes.single.pathNameEn, 'Inbound / Outbound');
+  });
+
+  test('nearby API parses stop, route and path English names', () async {
+    final repository = BusRepository(
+      client: MockClient(
+        (_) async => jsonResponse([
+          {
+            'routeid': 'TXG500',
+            'route_name': '500',
+            'route_name_en': 'Five Hundred',
+            'pathid': 0,
+            'path_name': '往車站',
+            'path_name_en': 'To Station',
+            'stopid': 'S0',
+            'stop_name': '測試站',
+            'stop_name_en': 'Test Stop',
+            'seq': 1,
+            'lat': 24.1,
+            'lon': 120.65,
+            'distance': 20,
+          },
+        ]),
+      ),
+    );
+
+    final nearby = await repository.fetchNearbyStops(
+      provider: BusProvider.txg,
+      latitude: 24.1,
+      longitude: 120.65,
+    );
+
+    expect(nearby.single.route.routeNameEn, 'Five Hundred');
+    expect(nearby.single.route.pathNameEn, 'To Station');
+    expect(nearby.single.stop.stopNameEn, 'Test Stop');
+  });
+
   test('local database supplies the first stage without a stops request', () async {
     final folder = await Directory('${directory.path}/.yabus_backend').create();
     final metadata = await openDatabase(
@@ -367,7 +434,7 @@ void main() {
     await metadata.insert('routes', {
       'routeid': 'TXG500',
       'name': '500',
-      'name_en': '500',
+      'name_en': 'Five Hundred',
       'path_name': '去程',
     });
     await metadata.insert('paths', {
@@ -379,13 +446,14 @@ void main() {
     await metadata.close();
     final city = await openDatabase('${folder.path}/bus_txg_v2.sqlite');
     await city.execute(
-      'CREATE TABLE stops(routeid TEXT, pathid INTEGER, stopid TEXT, name TEXT, seq INTEGER, lon REAL, lat REAL)',
+      'CREATE TABLE stops(routeid TEXT, pathid INTEGER, stopid TEXT, name TEXT, name_en TEXT, seq INTEGER, lon REAL, lat REAL)',
     );
     await city.insert('stops', {
       'routeid': 'TXG500',
       'pathid': 0,
       'stopid': 'S0',
       'name': '離線站',
+      'name_en': 'Offline Stop',
       'seq': 1,
       'lon': 120.65,
       'lat': 24.1,
@@ -401,10 +469,31 @@ void main() {
         throw StateError('Local stops unexpectedly requested via API');
       }),
     );
+    final routeNameMatches = await repository.searchRoutes(
+      'Five Hundred',
+      provider: BusProvider.txg,
+    );
+    final pathNameMatches = await repository.searchRoutes(
+      'Outbound',
+      provider: BusProvider.txg,
+    );
+    final stopNameMatches = await repository.searchRoutesByStopName(
+      'Offline Stop',
+      provider: BusProvider.txg,
+    );
+    expect(routeNameMatches.single.routeNameEn, 'Five Hundred');
+    expect(pathNameMatches.single.pathNameEn, 'Outbound');
+    expect(stopNameMatches.single.matchedStop.stopNameEn, 'Offline Stop');
     final updates = <RouteDetailUpdate>[];
     final work = watch(repository).forEach(updates.add);
     await until(() => updates.isNotEmpty);
+    expect(updates.first.detail.route.routeNameEn, 'Five Hundred');
+    expect(updates.first.detail.paths.single.nameEn, 'Outbound');
     expect(updates.first.detail.stopsByPath[0]!.single.stopName, '離線站');
+    expect(
+      updates.first.detail.stopsByPath[0]!.single.stopNameEn,
+      'Offline Stop',
+    );
     live.complete(jsonResponse(livePayload('TXG500', 30)));
     await work;
     expect(paths.any((p) => p.endsWith('/stops')), isFalse);

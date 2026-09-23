@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/announcement_models.dart';
+import '../l10n/app_localizations.dart';
 import 'announcement_content.dart';
 
 enum AnnouncementPopupResult { later, dismissForever, viewDetails }
@@ -12,6 +13,7 @@ Future<AnnouncementPopupResult> showAnnouncementPopupDialog(
   final result = await showDialog<AnnouncementPopupResult>(
     context: context,
     builder: (dialogContext) {
+      final l10n = AppLocalizations.of(dialogContext);
       return AlertDialog(
         title: Text(announcement.title),
         content: SizedBox(
@@ -25,20 +27,20 @@ Future<AnnouncementPopupResult> showAnnouncementPopupDialog(
             onPressed: () => Navigator.of(
               dialogContext,
             ).pop(AnnouncementPopupResult.later),
-            child: const Text('稍後'),
+            child: Text(l10n.commonLater),
           ),
           if (announcement.behavior.popup == AnnouncementRepeatBehavior.forever)
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(
                 AnnouncementPopupResult.dismissForever,
               ),
-              child: const Text('不再顯示'),
+              child: Text(l10n.announcementDismissForever),
             ),
           FilledButton(
             onPressed: () => Navigator.of(
               dialogContext,
             ).pop(AnnouncementPopupResult.viewDetails),
-            child: const Text('查看公告'),
+            child: Text(l10n.announcementViewDetails),
           ),
         ],
       );

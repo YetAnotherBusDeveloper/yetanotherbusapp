@@ -6,13 +6,15 @@ import 'package:geolocator/geolocator.dart';
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/bus_repository.dart';
-import '../core/friendly_error.dart';
 import '../core/models.dart';
 import '../core/route_direction_label.dart';
 import '../core/user_location.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import 'adaptive_settings_presenter.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/eta_badge.dart';
+import '../widgets/transit_station_name.dart';
 import 'route_detail_navigation.dart';
 
 class NearbyScreen extends StatefulWidget {
@@ -98,7 +100,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       }
       setState(() {
         _results = const [];
-        _error = friendlyErrorMessage(error);
+        _error = localizedFriendlyError(AppLocalizations.of(context), error);
         _locationFailure = error is LocationFailure ? error : null;
       });
     } finally {
@@ -332,7 +334,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
   /// Groups flat results (one per route) into stops, preserving distance
   /// order. Routes within each group are sorted by ETA once live data is
   /// available.
-  List<_NearbyStopGroup> _buildGroups() {
+  List<_NearbyStopGroup> _buildGroups(String locale) {
     final groupOrder = <String>[];
     final groupDistances = <String, double>{};
     final groupRoutes = <String, List<NearbyStopResult>>{};
@@ -356,6 +358,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
           // rows would otherwise read alike, so it has to see the final order.
           routes: labelNearbyRouteDirections(
             groupRoutes[name]!..sort(_compareByEta),
+            locale: locale,
           ),
         ),
     ];
@@ -373,10 +376,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
     required bool alwaysShowSeconds,
   }) {
     final item = row.result;
-    final subtitle = <String>[
-      busProviderFromString(item.route.sourceProvider).label,
-      if (row.directionLabel.isNotEmpty) row.directionLabel,
-    ].join(' · ');
+    final locale = Localizations.localeOf(context).toLanguageTag();
+    final providerLabel = busProviderFromString(
+      item.route.sourceProvider,
+    ).label;
 
     return Material(
       color: Colors.transparent,
@@ -399,7 +402,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      item.route.routeName,
+                      item.route.transitName.displayForLocale(locale),
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -408,13 +411,20 @@ class _NearbyScreenState extends State<NearbyScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      subtitle,
+                      providerLabel,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (row.directionLabel.isNotEmpty)
+                      TransitDirectionLabel(
+                        label: row.directionLabel,
+                        primaryStyle: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -461,21 +471,24 @@ class _NearbyScreenState extends State<NearbyScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
     final hasNearbyBackgroundImage = hasBackgroundImageForPage(
       controller.settings,
       pageKey: 'nearby',
     );
-    final groups = _buildGroups();
+    final groups = _buildGroups(locale);
 
     return BackgroundImageWrapper(
       pageKey: 'nearby',
       child: Scaffold(
         backgroundColor: hasNearbyBackgroundImage ? Colors.transparent : null,
         appBar: AppBar(
-          title: const Text('附近站牌'),
+          title: Text(l10n.nearbyTitle),
           actions: [
             IconButton(
+              tooltip: l10n.commonRefresh,
               onPressed: _loading ? null : _loadNearbyStops,
               icon: const Icon(Icons.refresh_rounded),
             ),
@@ -507,7 +520,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                           children: [
                             FilledButton(
                               onPressed: _loadNearbyStops,
-                              child: const Text('重試'),
+                              child: Text(l10n.commonRetry),
                             ),
                             OutlinedButton(
                               onPressed:
@@ -521,10 +534,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                   : () => openAdaptiveSettingsScreen(context),
                               child: Text(
                                 _locationFailure?.serviceDisabled == true
-                                    ? '定位設定'
+                                    ? l10n.nearbyLocationSettings
                                     : _locationFailure?.deniedForever == true
-                                    ? '權限設定'
-                                    : '前往設定',
+                                    ? l10n.nearbyPermissionSettings
+                                    : l10n.commonOpenSettings,
                               ),
                             ),
                           ],
@@ -534,7 +547,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   ),
                 )
               : groups.isEmpty
-              ? const Center(child: Text('附近沒有找到站牌。'))
+              ? Center(child: Text(l10n.nearbyEmpty))
               : Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 760),
@@ -569,14 +582,19 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                     ),
                                     const SizedBox(width: 14),
                                     Expanded(
-                                      child: Text(
-                                        group.stopName,
-                                        style: theme.textTheme.titleMedium
+                                      child: TransitStationName(
+                                        name: group
+                                            .routes
+                                            .first
+                                            .result
+                                            .stop
+                                            .transitName,
+                                        primaryStyle: theme
+                                            .textTheme
+                                            .titleMedium
                                             ?.copyWith(
                                               fontWeight: FontWeight.w700,
                                             ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                   ],

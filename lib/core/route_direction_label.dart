@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'transit_name.dart';
 
 /// One nearby route row together with the direction text that tells it apart
 /// from the other direction of the same route at the same stop name.
@@ -62,6 +63,30 @@ String routeDirectionLabel({
       : '$_directionPrefix $trimmed';
 }
 
+String routeDirectionLabelForLocale({
+  required RouteSummary route,
+  required int? pathId,
+  required String locale,
+}) {
+  final zh = isMeaningfulPathName(route.description, routeName: route.routeName)
+      ? routeDirectionLabel(
+          pathName: route.description,
+          pathId: pathId,
+          routeName: route.routeName,
+        )
+      : null;
+  final en =
+      isMeaningfulPathName(route.pathNameEn, routeName: route.routeNameEn)
+      ? route.pathNameEn
+      : null;
+  final ordinal = directionOrdinalLabel(pathId);
+  return TransitName(
+    zh: zh,
+    en: en,
+    stableId: ordinal.isEmpty ? '${route.routeId}:${pathId ?? ''}' : ordinal,
+  ).stationDisplayForLocale(locale);
+}
+
 /// Labels every route row inside one nearby stop-name group.
 ///
 /// The nearby list groups purely by stop name, so both directions of a route
@@ -72,15 +97,23 @@ String routeDirectionLabel({
 ///
 /// Input order is preserved; callers should sort before labelling.
 List<NearbyRouteRow> labelNearbyRouteDirections(
-  List<NearbyStopResult> results,
-) {
+  List<NearbyStopResult> results, {
+  String? locale,
+}) {
   final labels = [
     for (final result in results)
-      routeDirectionLabel(
-        pathName: result.route.description,
-        pathId: result.stop.pathId,
-        routeName: result.route.routeName,
-      ),
+      if (locale == null)
+        routeDirectionLabel(
+          pathName: result.route.description,
+          pathId: result.stop.pathId,
+          routeName: result.route.routeName,
+        )
+      else
+        routeDirectionLabelForLocale(
+          route: result.route,
+          pathId: result.stop.pathId,
+          locale: locale,
+        ),
   ];
 
   // Keyed by route name too, so two different routes that happen to share a

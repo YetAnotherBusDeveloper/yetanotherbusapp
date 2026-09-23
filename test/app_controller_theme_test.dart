@@ -21,19 +21,25 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('theme revision changes only for theme-affecting settings', () async {
+  test('root revision changes only for root-affecting settings', () async {
     final controller = await _buildController();
     addTearDown(controller.dispose);
 
-    final initialRevision = controller.themeRevision.value;
+    final initialRevision = controller.rootRevision.value;
     controller.notifyListeners();
-    expect(controller.themeRevision.value, initialRevision);
+    expect(controller.rootRevision.value, initialRevision);
 
     await controller.updateHomeBackgroundOpacity(0.42);
-    expect(controller.themeRevision.value, initialRevision);
+    expect(controller.rootRevision.value, initialRevision);
+
+    await controller.updateLanguage(AppLanguage.english);
+    expect(controller.rootRevision.value, initialRevision + 1);
+
+    await controller.updateInterfaceScale(1.2);
+    expect(controller.rootRevision.value, initialRevision + 2);
 
     await controller.updateThemeMode(ThemeMode.dark);
-    expect(controller.themeRevision.value, initialRevision + 1);
+    expect(controller.rootRevision.value, initialRevision + 3);
   });
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../app/bus_app.dart';
 import '../core/announcement_models.dart';
 import '../core/app_routes.dart';
+import '../l10n/app_localizations.dart';
 
 /// A Discord-style reaction bar: a wrap of emoji count chips plus an add
 /// button. Tapping a chip toggles the signed-in user's reaction; the add
@@ -17,6 +18,7 @@ class AnnouncementReactionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -24,20 +26,22 @@ class AnnouncementReactionBar extends StatelessWidget {
       children: [
         for (final reaction in announcement.reactions)
           FilterChip(
-            label: Text('${reaction.emoji} ${reaction.count}'),
+            label: Text(
+              l10n.announcementReactionCount(reaction.emoji, reaction.count),
+            ),
             selected: announcement.myReactions.contains(reaction.emoji),
             showCheckmark: false,
             onSelected: (_) => _toggle(context, reaction.emoji),
           ),
         ActionChip(
           avatar: const Icon(Icons.add_reaction_outlined, size: 18),
-          label: const Text('反應'),
-          tooltip: '新增表情符號反應',
+          label: Text(l10n.announcementReaction),
+          tooltip: l10n.announcementAddReaction,
           onPressed: () => _openPicker(context),
         ),
         if (announcement.reactions.isEmpty)
           Text(
-            '成為第一個反應的人',
+            l10n.announcementFirstReaction,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -93,11 +97,12 @@ class AnnouncementReactionBar extends StatelessWidget {
     }
     final controller = AppControllerScope.read(context);
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     try {
       await controller.toggleAnnouncementReaction(announcement.id, emoji);
     } catch (_) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('無法更新反應，請稍後再試。')),
+        SnackBar(content: Text(l10n.announcementReactionUpdateFailed)),
       );
     }
   }
@@ -108,11 +113,12 @@ class AnnouncementReactionBar extends StatelessWidget {
       return true;
     }
     final navigator = Navigator.of(context);
+    final l10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('請先登入才能新增反應'),
+        content: Text(l10n.announcementReactionSignInRequired),
         action: SnackBarAction(
-          label: '登入',
+          label: l10n.accountSignIn,
           onPressed: () => navigator.pushNamed(AppRoutes.account),
         ),
       ),

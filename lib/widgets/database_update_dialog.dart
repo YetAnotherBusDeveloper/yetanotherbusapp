@@ -1,33 +1,43 @@
 import 'package:flutter/material.dart';
 
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 
 Future<bool> showDatabaseUpdateDialog(
   BuildContext context, {
   required Map<BusProvider, int> updates,
 }) async {
+  final l10n = AppLocalizations.of(context);
   final sortedEntries = updates.entries.toList()
-    ..sort((left, right) => left.key.label.compareTo(right.key.label));
+    ..sort(
+      (left, right) => localizedBusProvider(
+        l10n,
+        left.key,
+      ).compareTo(localizedBusProvider(l10n, right.key)),
+    );
 
   final shouldUpdate =
       await showDialog<bool>(
         context: context,
         builder: (dialogContext) {
           return AlertDialog(
-            title: const Text('資料庫有新版本'),
+            title: Text(l10n.databaseUpdatesDialogTitle),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('已檢查到以下地區有資料庫更新：'),
+                Text(l10n.databaseUpdatesDialogDescription),
                 const SizedBox(height: 12),
                 ...sortedEntries.map(
                   (entry) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Row(
                       children: [
-                        Expanded(child: Text(entry.key.label)),
-                        Text('版本 ${entry.value}'),
+                        Expanded(
+                          child: Text(localizedBusProvider(l10n, entry.key)),
+                        ),
+                        Text(l10n.databaseVersion(entry.value)),
                       ],
                     ),
                   ),
@@ -37,11 +47,11 @@ Future<bool> showDatabaseUpdateDialog(
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('稍後'),
+                child: Text(l10n.commonLater),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('立即更新'),
+                child: Text(l10n.databaseUpdateNow),
               ),
             ],
           );

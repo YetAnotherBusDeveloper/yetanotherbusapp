@@ -18,6 +18,7 @@ import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/station_detail_screen.dart';
 
 Map<String, Object?> _stationPayload() => {
@@ -111,10 +112,14 @@ void main() {
     expect(requestedUri?.path, '/api/v1/stations/resolve');
     expect(requestedUri?.queryParameters, {'city': 'TPE', 'stopid': 'STOP-B'});
     expect(station?.stationId, 'TPE-STATION-1');
+    expect(station?.stationNameEn, 'City Hall');
     expect(station?.sides.map((side) => side.label), ['A', 'B']);
     expect(station?.nextArrival?.sideLabel, 'B');
     expect(station?.nextArrival?.result.route.routeName, '藍1');
+    expect(station?.nextArrival?.result.route.routeNameEn, 'BL1');
+    expect(station?.nextArrival?.result.route.pathNameEn, 'Nangang');
     expect(station?.nextArrival?.result.matchedStop.sec, 60);
+    expect(station?.nextArrival?.result.matchedStop.stopNameEn, 'City Hall');
     expect(station?.nextArrival?.result.matchedStop.rawStopId, 'ROUTE-STOP-B');
   });
 
@@ -196,6 +201,10 @@ void main() {
   testWidgets('station detail renders routes for every stable side', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     final client = MockClient(
       (_) async => http.Response(
@@ -225,6 +234,9 @@ void main() {
     try {
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('zh', 'TW'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: AppControllerScope(
             controller: controller,
             child: const StationDetailScreen(
@@ -246,6 +258,27 @@ void main() {
 
       expect(find.text('藍1'), findsOneWidget);
       expect(find.text('往南港'), findsOneWidget);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: AppControllerScope(
+            controller: controller,
+            child: const StationDetailScreen(
+              provider: BusProvider.tpe,
+              stationId: 'TPE-STATION-1',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('City Hall\n市政府'), findsOneWidget);
+      expect(find.text('BL1 / 藍1'), findsOneWidget);
+      expect(find.text('Nangang / 往南港'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;

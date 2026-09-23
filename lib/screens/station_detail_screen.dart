@@ -7,9 +7,11 @@ import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/android_home_integration.dart';
 import '../core/app_routes.dart';
-import '../core/friendly_error.dart';
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/eta_badge.dart';
+import '../widgets/transit_station_name.dart';
 
 class StationDetailScreen extends StatefulWidget {
   const StationDetailScreen({
@@ -37,16 +39,24 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
 
   Future<void> _pinStationShortcut() async {
     final station = _station;
+    final l10n = AppLocalizations.of(context);
     final didPin = await AndroidHomeIntegration.pinFavoriteShortcut(
       favorite: FavoriteStation(
         provider: widget.provider,
         stationId: widget.stationId,
-        stationName: station?.stationName ?? widget.stationName ?? '整站',
+        stationName:
+            station?.stationName ??
+            widget.stationName ??
+            l10n.stationFallbackTitle,
       ),
     );
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(didPin ? '已送出整站捷徑要求。' : '這台裝置不支援主畫面捷徑。')),
+      SnackBar(
+        content: Text(
+          didPin ? l10n.stationShortcutRequested : l10n.shortcutUnsupported,
+        ),
+      ),
     );
   }
 
@@ -59,6 +69,7 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
   }
 
   Future<void> _load() async {
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _loading = true;
       _error = null;
@@ -69,11 +80,11 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
       if (!mounted) return;
       setState(() {
         _station = station;
-        _error = station == null ? '找不到這一站的整站資料。' : null;
+        _error = station == null ? l10n.stationNotFound : null;
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _error = friendlyErrorMessage(error));
+      setState(() => _error = localizedFriendlyError(l10n, error));
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -84,19 +95,25 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final station = _station;
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(station?.stationName ?? widget.stationName ?? '整站'),
+        title: station == null
+            ? Text(widget.stationName ?? l10n.stationFallbackTitle)
+            : TransitStationName(
+                name: station.transitName,
+                primaryStyle: Theme.of(context).textTheme.titleLarge,
+              ),
         actions: [
           if (_isAndroid)
             IconButton(
               onPressed: () => unawaited(_pinStationShortcut()),
-              tooltip: '將整站新增到主畫面',
+              tooltip: l10n.stationPinTooltip,
               icon: const Icon(Icons.add_to_home_screen_rounded),
             ),
           IconButton(
             onPressed: _loading ? null : () => unawaited(_load()),
-            tooltip: '重新整理',
+            tooltip: l10n.commonRefresh,
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -120,7 +137,7 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                       const SizedBox(height: 12),
                       FilledButton.tonal(
                         onPressed: () => unawaited(_load()),
-                        child: const Text('重試'),
+                        child: Text(l10n.commonRetry),
                       ),
                     ],
                   ),
@@ -132,9 +149,10 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
   }
 
   Widget _buildStation(StationPassbyData station) {
+    final l10n = AppLocalizations.of(context);
     final sides = station.sides;
     if (sides.isEmpty) {
-      return const Center(child: Text('這一站目前沒有可顯示的站牌。'));
+      return Center(child: Text(l10n.stationNoSides));
     }
     return DefaultTabController(
       length: sides.length,
@@ -148,8 +166,8 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                 for (final side in sides)
                   Tab(
                     text: side.direction?.isNotEmpty == true
-                        ? '${side.label} · ${side.direction}'
-                        : '站牌 ${side.label}',
+                        ? l10n.stationSideDirection(side.label, side.direction!)
+                        : l10n.stationSideLabel(side.label),
                   ),
               ],
             ),
@@ -166,8 +184,9 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
   }
 
   Widget _buildSide(StationSideData side) {
+    final l10n = AppLocalizations.of(context);
     if (side.routes.isEmpty) {
-      return Center(child: Text('站牌 ${side.label} 目前沒有經過路線。'));
+      return Center(child: Text(l10n.stationSideNoRoutes(side.label)));
     }
     return RefreshIndicator(
       onRefresh: _load,
@@ -187,11 +206,21 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
                   context,
                 ).settings.alwaysShowSeconds,
               ),
-              title: Text(route.routeName),
-              subtitle: Text(
-                route.description.trim().isNotEmpty
-                    ? route.description
-                    : (side.direction ?? '站牌 ${side.label}'),
+              title: TransitStationName(
+                name: route.transitName,
+                primaryMaxLines: 1,
+                secondaryMaxLines: 1,
+              ),
+              subtitle: TransitDirectionLabel(
+                label:
+                    route.description.trim().isNotEmpty ||
+                        (route.pathNameEn?.trim().isNotEmpty ?? false)
+                    ? localizedRouteDirectionForRoute(
+                        l10n,
+                        route: route,
+                        pathId: stop.pathId,
+                      )
+                    : (side.direction ?? l10n.stationSideLabel(side.label)),
               ),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => Navigator.of(context).pushNamed(

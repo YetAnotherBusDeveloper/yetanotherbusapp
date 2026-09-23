@@ -4,17 +4,20 @@ import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
-import '../core/friendly_error.dart';
 import '../core/rail_line_stations.dart';
 import '../core/rail_time.dart';
 import '../core/request_sequence.dart';
 import '../core/transit_repository.dart';
+import '../core/transit_name.dart';
 import '../core/user_location.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/rail_station_picker.dart';
 import '../widgets/transit_panels.dart';
 import '../widgets/transit_station_map.dart';
 import '../widgets/ad_banner_widget.dart';
+import '../widgets/transit_station_name.dart';
 
 enum _ThsrPanel { timetable, seats, map }
 
@@ -170,7 +173,12 @@ class _ThsrScreenState extends State<ThsrScreen> {
       if (!mounted || !_initialDataRequest.isCurrent(request)) {
         return;
       }
-      setState(() => _pageError = friendlyErrorMessage(error));
+      setState(
+        () => _pageError = localizedFriendlyError(
+          AppLocalizations.of(context),
+          error,
+        ),
+      );
     } finally {
       if (mounted && _initialDataRequest.isCurrent(request)) {
         setState(() => _loadingStations = false);
@@ -229,7 +237,10 @@ class _ThsrScreenState extends State<ThsrScreen> {
       }
       setState(() {
         _selectedStation = activeStation;
-        _seatError = friendlyErrorMessage(error);
+         _seatError = localizedFriendlyError(
+           AppLocalizations.of(context),
+           error,
+         );
       });
     } finally {
       if (mounted && _seatsRequest.isCurrent(request)) {
@@ -263,8 +274,9 @@ class _ThsrScreenState extends State<ThsrScreen> {
   }
 
   Future<void> _chooseObservedStation() async {
+    final l10n = AppLocalizations.of(context);
     final picked = await _pickStationWithWheel(
-      title: '選擇車站',
+      title: l10n.thsrChooseStation,
       initial: _selectedStation,
     );
     if (picked == null || !mounted) return;
@@ -272,8 +284,9 @@ class _ThsrScreenState extends State<ThsrScreen> {
   }
 
   Future<void> _chooseOrigin() async {
+    final l10n = AppLocalizations.of(context);
     final picked = await _pickStationWithWheel(
-      title: '選擇出發站',
+      title: l10n.railChooseOrigin,
       initial: _origin,
       excluded: _dest,
     );
@@ -282,8 +295,9 @@ class _ThsrScreenState extends State<ThsrScreen> {
   }
 
   Future<void> _chooseDest() async {
+    final l10n = AppLocalizations.of(context);
     final picked = await _pickStationWithWheel(
-      title: '選擇到達站',
+      title: l10n.railChooseDestination,
       initial: _dest,
       excluded: _origin,
     );
@@ -332,7 +346,12 @@ class _ThsrScreenState extends State<ThsrScreen> {
       if (!mounted) {
         return;
       }
-      setState(() => _queryError = friendlyErrorMessage(error));
+      setState(
+        () => _queryError = localizedFriendlyError(
+          AppLocalizations.of(context),
+          error,
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() => _searching = false);
@@ -371,6 +390,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final hasBackgroundImage = hasBackgroundImageForPage(
       AppControllerScope.of(context).settings,
       pageKey: 'bus',
@@ -378,11 +398,11 @@ class _ThsrScreenState extends State<ThsrScreen> {
     return Scaffold(
       backgroundColor: hasBackgroundImage ? Colors.transparent : null,
       appBar: AppBar(
-        title: const Text('高鐵'),
+        title: Text(l10n.transitThsr),
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
-            tooltip: '重新整理',
+            tooltip: l10n.commonRefresh,
             onPressed: () => _loadInitialData(refresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
@@ -449,6 +469,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
   }
 
   Widget _buildSeatOverview(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final selectedStation = _selectedStation;
     final previewInfos = _seatInfos.take(3).toList(growable: false);
 
@@ -465,7 +486,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '座位即時概況',
+                        l10n.thsrSeatOverview,
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -483,16 +504,18 @@ class _ThsrScreenState extends State<ThsrScreen> {
                 if (selectedStation != null)
                   Chip(
                     avatar: const Icon(Icons.location_on_rounded, size: 18),
-                    label: Text(selectedStation.name),
+                    label: TransitStationName(
+                      name: _railStationName(selectedStation),
+                    ),
                   ),
               ],
             ),
             const SizedBox(height: 16),
             RailStationField(
               key: const ValueKey('thsr-observed-selector'),
-              label: '觀察車站',
+              label: l10n.thsrObservedStation,
               station: selectedStation,
-              placeholder: '選擇車站',
+              placeholder: l10n.thsrChooseStation,
               onTap: _pickerGroups.isEmpty ? null : _chooseObservedStation,
             ),
             if (_loadingSeats) ...[
@@ -509,14 +532,14 @@ class _ThsrScreenState extends State<ThsrScreen> {
             const SizedBox(height: 12),
             if (selectedStation == null)
               Text(
-                '先選一個車站，再看最近幾班高鐵的座位狀況。',
+                l10n.thsrSelectStationForSeats,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
               )
             else if (previewInfos.isEmpty)
               Text(
-                '目前沒有 ${selectedStation.name} 的座位即時資料。',
+                l10n.thsrNoStationSeats(selectedStation.name),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
@@ -547,6 +570,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
   }
 
   Widget _buildTimetablePanel(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final past = _results
         .where((train) => _isTrainPast(train.originDeparture))
         .toList(growable: false);
@@ -565,9 +589,9 @@ class _ThsrScreenState extends State<ThsrScreen> {
               children: [
                 RailStationField(
                   key: const ValueKey('thsr-origin-selector'),
-                  label: '出發站',
+                  label: l10n.railOrigin,
                   station: _origin,
-                  placeholder: '選擇出發站',
+                  placeholder: l10n.railChooseOrigin,
                   onTap: _pickerGroups.isEmpty ? null : _chooseOrigin,
                 ),
                 Align(
@@ -575,14 +599,14 @@ class _ThsrScreenState extends State<ThsrScreen> {
                   child: IconButton(
                     onPressed: _swapStations,
                     icon: const Icon(Icons.swap_vert_rounded),
-                    tooltip: '交換',
+                    tooltip: l10n.railSwapStations,
                   ),
                 ),
                 RailStationField(
                   key: const ValueKey('thsr-dest-selector'),
-                  label: '到達站',
+                  label: l10n.railDestination,
                   station: _dest,
-                  placeholder: '選擇到達站',
+                  placeholder: l10n.railChooseDestination,
                   onTap: _pickerGroups.isEmpty ? null : _chooseDest,
                 ),
                 const SizedBox(height: 14),
@@ -593,7 +617,11 @@ class _ThsrScreenState extends State<ThsrScreen> {
                         onPressed: _pickDate,
                         icon: const Icon(Icons.calendar_today_rounded),
                         label: Text(
-                          '${_date.month}/${_date.day}（${railWeekdayLabel(_date.weekday)}）',
+                          l10n.scheduleDateLabel(
+                            _date.month,
+                            _date.day,
+                            localizedRailWeekday(l10n, _date.weekday),
+                          ),
                         ),
                       ),
                     ),
@@ -609,7 +637,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
                               ),
                             )
                           : const Icon(Icons.search_rounded),
-                      label: const Text('查詢班次'),
+                      label: Text(l10n.thsrSearchServices),
                     ),
                   ],
                 ),
@@ -624,17 +652,17 @@ class _ThsrScreenState extends State<ThsrScreen> {
         const SizedBox(height: 16),
         Text(
           _results.isEmpty
-              ? '尚未查詢班次'
-              : '還有 ${upcoming.length} 班可搭（共 ${_results.length} 班）',
+              ? l10n.thsrNotSearched
+              : l10n.thsrServicesSummary(upcoming.length, _results.length),
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 10),
         if (_results.isEmpty)
-          const TransitEmptyPanel(
+          TransitEmptyPanel(
             icon: Icons.schedule_rounded,
-            label: '選好起訖站與日期後，就能看高鐵班次。',
+            label: l10n.thsrQueryPrompt,
           )
         else ...[
           if (past.isNotEmpty) ...[
@@ -657,7 +685,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
           if (upcoming.isEmpty)
             TransitEmptyPanel(
               icon: Icons.nightlight_round,
-              label: '這一天的班次都開完了。',
+              label: l10n.thsrDayDeparted,
             )
           else
             ...upcoming.map(
@@ -672,6 +700,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
   }
 
   Widget _buildSeatPanel(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       key: const ValueKey('seats'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -686,7 +715,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        '自由座與商務車座位',
+                        l10n.thsrSeatTitle,
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -697,7 +726,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
                           ? null
                           : () => _loadSeats(station: _selectedStation),
                       icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('刷新'),
+                      label: Text(l10n.commonRefresh),
                     ),
                   ],
                 ),
@@ -711,9 +740,9 @@ class _ThsrScreenState extends State<ThsrScreen> {
                 const SizedBox(height: 16),
                 RailStationField(
                   key: const ValueKey('thsr-seat-selector'),
-                  label: '查詢站點',
+                  label: l10n.thsrQueryStation,
                   station: _selectedStation,
-                  placeholder: '選擇車站',
+                  placeholder: l10n.thsrChooseStation,
                   onTap: _pickerGroups.isEmpty ? null : _chooseObservedStation,
                 ),
                 if (_loadingSeats) ...[
@@ -730,14 +759,14 @@ class _ThsrScreenState extends State<ThsrScreen> {
         ],
         const SizedBox(height: 16),
         if (_selectedStation == null)
-          const TransitEmptyPanel(
+          TransitEmptyPanel(
             icon: Icons.airline_seat_recline_normal_rounded,
-            label: '先選一個站，再看各班次座位餘量。',
+            label: l10n.thsrSelectStationSeats,
           )
         else if (_seatInfos.isEmpty)
-          const TransitEmptyPanel(
+          TransitEmptyPanel(
             icon: Icons.airline_seat_recline_normal_rounded,
-            label: '目前沒有可顯示的座位資料。',
+            label: l10n.thsrNoSeatData,
           )
         else
           ..._seatInfos.map((info) {
@@ -758,13 +787,15 @@ class _ThsrScreenState extends State<ThsrScreen> {
   }
 
   Widget _buildMapPanel(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final mapPoints = _stations
         .where((station) => station.lat != 0 || station.lon != 0)
         .map(
           (station) => TransitMapPoint(
             id: station.stationId,
             label: station.name,
-            subtitle: station.nameEn,
+             subtitle: station.nameEn,
+             name: _railStationName(station),
             latitude: station.lat,
             longitude: station.lon,
             color: Colors.orange.shade700,
@@ -786,7 +817,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        '站點地圖',
+                        l10n.thsrMapTitle,
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -798,7 +829,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
                       icon: const Icon(
                         Icons.airline_seat_recline_normal_rounded,
                       ),
-                      label: const Text('看座位'),
+                      label: Text(l10n.thsrViewSeats),
                     ),
                   ],
                 ),
@@ -820,7 +851,7 @@ class _ThsrScreenState extends State<ThsrScreen> {
                     }
                   },
                   height: 360,
-                  emptyLabel: '高鐵站點目前沒有可用座標。',
+                  emptyLabel: l10n.thsrMapNoCoordinates,
                 ),
               ],
             ),
@@ -837,6 +868,12 @@ class _ThsrScreenState extends State<ThsrScreen> {
       ],
     );
   }
+
+  TransitName _railStationName(RailStation station) => TransitName(
+    zh: station.name,
+    en: station.nameEn,
+    stableId: station.stationId,
+  );
 }
 
 class _ThsrPanelButtons extends StatelessWidget {
@@ -847,12 +884,13 @@ class _ThsrPanelButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Row(
       children: [
         Expanded(
           child: TransitPanelButton(
             icon: Icons.schedule_rounded,
-            label: '班次查詢',
+            label: l10n.thsrTimetable,
             selected: current == _ThsrPanel.timetable,
             onPressed: () => onChanged(_ThsrPanel.timetable),
           ),
@@ -861,7 +899,7 @@ class _ThsrPanelButtons extends StatelessWidget {
         Expanded(
           child: TransitPanelButton(
             icon: Icons.airline_seat_recline_normal_rounded,
-            label: '座位資訊',
+            label: l10n.thsrSeats,
             selected: current == _ThsrPanel.seats,
             onPressed: () => onChanged(_ThsrPanel.seats),
           ),
@@ -870,7 +908,7 @@ class _ThsrPanelButtons extends StatelessWidget {
         Expanded(
           child: TransitPanelButton(
             icon: Icons.map_rounded,
-            label: '站點地圖',
+            label: l10n.thsrMapTitle,
             selected: current == _ThsrPanel.map,
             onPressed: () => onChanged(_ThsrPanel.map),
           ),
@@ -889,6 +927,7 @@ class _ThsrTimetableTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
@@ -927,7 +966,7 @@ class _ThsrTimetableTile extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '高鐵',
+                    l10n.thsrTrainLabel,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: chipForeground,
                       fontSize: 10,
@@ -942,14 +981,20 @@ class _ThsrTimetableTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${train.originDeparture} → ${train.destArrival}',
+                    l10n.railTimeRange(
+                      train.originDeparture,
+                      train.destArrival,
+                    ),
                     style: theme.textTheme.titleSmall?.copyWith(
                       color: isPast ? cs.onSurfaceVariant : cs.onSurface,
                     ),
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${train.startStation} → ${train.endStation}',
+                    l10n.railStationRange(
+                      train.startStation,
+                      train.endStation,
+                    ),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: isPast ? cs.outline : cs.onSurfaceVariant,
                     ),
@@ -968,7 +1013,7 @@ class _ThsrTimetableTile extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    '已開出',
+                    l10n.railDeparted,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: cs.onSurfaceVariant,
                       fontWeight: FontWeight.w700,
@@ -978,7 +1023,11 @@ class _ThsrTimetableTile extends StatelessWidget {
               )
             else
               Text(
-                railDurationLabel(train.originDeparture, train.destArrival),
+                 localizedRailDuration(
+                   l10n,
+                   train.originDeparture,
+                   train.destArrival,
+                 ),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: cs.primary,
                   fontWeight: FontWeight.w700,
@@ -1007,6 +1056,7 @@ class _ThsrSeatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final seat = _seatForStation();
@@ -1054,12 +1104,12 @@ class _ThsrSeatTile extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${info.departureTime} 發車',
+                        l10n.thsrDepartureTime(info.departureTime),
                         style: theme.textTheme.titleSmall,
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '往 ${info.destination}',
+                        l10n.directionTo(info.destination),
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
@@ -1070,7 +1120,7 @@ class _ThsrSeatTile extends StatelessWidget {
             const SizedBox(height: 12),
             if (seat == null)
               Text(
-                '這班車目前沒有 ${station.name} 的座位欄位。',
+                l10n.thsrNoSeatField(station.name),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
@@ -1080,8 +1130,14 @@ class _ThsrSeatTile extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _SeatStatusChip(label: '標準車', value: seat.standardSeat),
-                  _SeatStatusChip(label: '商務車', value: seat.businessSeat),
+                  _SeatStatusChip(
+                    label: l10n.thsrStandardCar,
+                    value: seat.standardSeat,
+                  ),
+                  _SeatStatusChip(
+                    label: l10n.thsrBusinessCar,
+                    value: seat.businessSeat,
+                  ),
                 ],
               ),
           ],
@@ -1112,6 +1168,7 @@ class _SeatStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final style = _statusStyle(value);
 
     return Container(
@@ -1134,7 +1191,7 @@ class _SeatStatusChip extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            value.isEmpty ? '未提供' : value,
+            value.isEmpty ? l10n.thsrNotProvided : value,
             style: theme.textTheme.bodySmall?.copyWith(color: style.foreground),
           ),
         ],
@@ -1193,6 +1250,7 @@ class _SelectedThsrStationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -1205,26 +1263,23 @@ class _SelectedThsrStationCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        station.name,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (station.nameEn.isNotEmpty)
-                        Text(
-                          station.nameEn,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
+                       TransitStationName(
+                         name: TransitName(
+                           zh: station.name,
+                           en: station.nameEn,
+                           stableId: station.stationId,
+                         ),
+                         primaryStyle: theme.textTheme.titleLarge?.copyWith(
+                           fontWeight: FontWeight.w700,
+                         ),
+                       ),
                     ],
                   ),
                 ),
                 FilledButton.tonalIcon(
                   onPressed: () => onRefresh(station: station),
                   icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('刷新'),
+                   label: Text(l10n.commonRefresh),
                 ),
               ],
             ),
@@ -1235,7 +1290,7 @@ class _SelectedThsrStationCard extends StatelessWidget {
             const SizedBox(height: 12),
             if (infos.isEmpty)
               Text(
-                '這個站目前沒有可顯示的座位資料。',
+                l10n.thsrStationNoSeats,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.outline,
                 ),

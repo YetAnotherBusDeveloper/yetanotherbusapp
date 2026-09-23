@@ -6,7 +6,8 @@ import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
 // import '../core/announcement_models.dart';
 import '../core/app_routes.dart';
-import '../core/relative_time_formatter.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 
 class AnnouncementsPage extends StatefulWidget {
   const AnnouncementsPage({super.key});
@@ -49,6 +50,7 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return AnimatedBuilder(
       animation: controller,
@@ -59,10 +61,10 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('公告'),
+            title: Text(l10n.announcementsTitle),
             actions: [
               IconButton(
-                tooltip: '重新整理',
+                tooltip: l10n.commonRefresh,
                 onPressed: loading
                     ? null
                     : () => _loadAnnouncements(force: true),
@@ -102,11 +104,15 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            '公告同步失敗',
+                                            l10n.announcementsSyncFailed,
                                             style: theme.textTheme.titleMedium,
                                           ),
                                           const SizedBox(height: 8),
-                                          Text(error),
+                                          Text(
+                                            l10n.localeName.startsWith('zh')
+                                                ? error
+                                                : l10n.errorGeneric,
+                                          ),
                                         ],
                                       ),
                                     ),
@@ -124,7 +130,7 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                                   const Icon(Icons.campaign_outlined, size: 40),
                                   const SizedBox(height: 12),
                                   Text(
-                                    '目前沒有公告。',
+                                    l10n.announcementsEmpty,
                                     style: theme.textTheme.titleMedium,
                                   ),
                                 ],
@@ -175,7 +181,8 @@ class _AnnouncementsPageState extends State<AnnouncementsPage> {
                                                     size: 18,
                                                   ),
                                                   label: Text(
-                                                    formatRelativeTimestamp(
+                                                    localizedRelativeTimestamp(
+                                                      l10n,
                                                       announcement
                                                           .createdAtDateTime,
                                                     ),

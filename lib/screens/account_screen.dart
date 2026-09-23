@@ -5,7 +5,8 @@ import '../app/bus_app.dart';
 import '../core/account_sync_models.dart';
 import '../core/app_controller.dart';
 import '../core/auth_service.dart';
-import '../core/friendly_error.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
@@ -41,12 +42,15 @@ class _AccountScreenState extends State<AccountScreen> {
     String provider,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     try {
       final opened = await controller.startAuthLogin(provider);
       if (!mounted || opened) {
         return;
       }
-      messenger.showSnackBar(const SnackBar(content: Text('無法開啓登入頁面。')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.accountLoginPageOpenFailed)),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -54,34 +58,49 @@ class _AccountScreenState extends State<AccountScreen> {
       // is 429?
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.errorRateLimited)),
+        );
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('登入失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.accountLoginFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
 
   Future<void> _startAuthLink(AppController controller, String provider) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     try {
       final opened = await controller.startAuthLink(provider);
       if (!mounted || opened) {
         return;
       }
-      messenger.showSnackBar(const SnackBar(content: Text('無法開啓連結頁面。')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.accountLinkPageOpenFailed)),
+      );
     } catch (error) {
       if (!mounted) {
         return;
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.errorRateLimited)),
+        );
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('連結失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.accountLinkFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
@@ -91,6 +110,7 @@ class _AccountScreenState extends State<AccountScreen> {
     bool quiet = false,
   }) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     try {
       await controller.refreshAuthAccount();
     } catch (error) {
@@ -99,24 +119,37 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.errorRateLimited)),
+        );
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('重新整理帳號失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.accountRefreshFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
 
   Future<void> _toggleSync(AppController controller, bool enabled) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     try {
       await controller.setAccountSyncEnabled(enabled, syncNow: enabled);
       if (!mounted) {
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text(enabled ? '已開啓自動同步。' : '已關閉自動同步。')),
+        SnackBar(
+          content: Text(
+            enabled
+                ? l10n.accountAutoSyncEnabled
+                : l10n.accountAutoSyncDisabled,
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
@@ -124,11 +157,19 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.errorRateLimited)),
+        );
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('更新同步設定失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.accountSyncSettingsFailed(
+              localizedFriendlyError(l10n, error),
+            ),
+          ),
+        ),
       );
     }
   }
@@ -137,22 +178,21 @@ class _AccountScreenState extends State<AccountScreen> {
     AppController controller,
     bool enabled,
   ) async {
+    final l10n = AppLocalizations.of(context);
     if (enabled) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('同步路線紀錄？'),
-          content: const Text(
-            '開啓後，最近搜尋的路線與智慧推薦使用紀錄會上傳至你的帳號，讓其他裝置也能使用。這不包含定位資料，且可隨時關閉並移除本裝置上傳的紀錄。',
-          ),
+          title: Text(l10n.accountRouteHistoryPromptTitle),
+          content: Text(l10n.accountRouteHistoryPromptDescription),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('取消'),
+              child: Text(l10n.commonCancel),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('開啓同步'),
+              child: Text(l10n.accountEnableSync),
             ),
           ],
         ),
@@ -169,26 +209,41 @@ class _AccountScreenState extends State<AccountScreen> {
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text(enabled ? '已開啓路線紀錄同步。' : '已關閉路線紀錄同步。')),
+        SnackBar(
+          content: Text(
+            enabled
+                ? l10n.accountRouteHistoryEnabled
+                : l10n.accountRouteHistoryDisabled,
+          ),
+        ),
       );
     } catch (error) {
       if (!mounted) {
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('更新路線紀錄同步失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.accountRouteHistoryUpdateFailed(
+              localizedFriendlyError(l10n, error),
+            ),
+          ),
+        ),
       );
     }
   }
 
   Future<void> _manualSync(AppController controller) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     try {
       await controller.syncAllAccountData();
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(const SnackBar(content: Text('同步完成。')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.accountSyncComplete)),
+      );
     } catch (error) {
       if (error is AccountSyncConflictException) {
         await _showSyncConflictDialog(controller, error);
@@ -199,11 +254,17 @@ class _AccountScreenState extends State<AccountScreen> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(const SnackBar(content: Text('你已受到速率限制。')));
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.errorRateLimited)),
+        );
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('同步失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.accountSyncFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
@@ -213,39 +274,43 @@ class _AccountScreenState extends State<AccountScreen> {
     AccountSyncConflictException conflict,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     final namespace = conflict.namespace;
     final action = await showDialog<_SyncConflictAction>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('同步發生衝突'),
+          title: Text(l10n.accountSyncConflictTitle),
           content: Text(
-            conflict.message.trim().isNotEmpty
+            l10n.localeName.startsWith('zh') &&
+                    conflict.message.trim().isNotEmpty
                 ? conflict.message
-                : '${namespace.label} 同步時發生衝突。',
+                : l10n.accountSyncConflictFallback(
+                    localizedAccountSyncNamespace(l10n, namespace),
+                  ),
           ),
           actions: [
             TextButton(
               onPressed: () =>
                   Navigator.of(dialogContext).pop(_SyncConflictAction.cancel),
-              child: const Text('取消'),
+              child: Text(l10n.commonCancel),
             ),
             TextButton(
               onPressed: () =>
                   Navigator.of(dialogContext).pop(_SyncConflictAction.useCloud),
-              child: const Text('使用雲端'),
+              child: Text(l10n.accountUseCloud),
             ),
             if (conflict.canMerge)
               TextButton(
                 onPressed: () =>
                     Navigator.of(dialogContext).pop(_SyncConflictAction.merge),
-                child: const Text('嘗試合併'),
+                child: Text(l10n.accountTryMerge),
               ),
             FilledButton(
               onPressed: () => Navigator.of(
                 dialogContext,
               ).pop(_SyncConflictAction.overwriteCloud),
-              child: const Text('覆蓋雲端'),
+              child: Text(l10n.accountOverwriteCloud),
             ),
           ],
         );
@@ -277,24 +342,33 @@ class _AccountScreenState extends State<AccountScreen> {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(const SnackBar(content: Text('同步完成。')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.accountSyncComplete)),
+      );
     } catch (error) {
       if (!mounted) {
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('處理同步衝突失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.accountSyncConflictFailed(
+              localizedFriendlyError(l10n, error),
+            ),
+          ),
+        ),
       );
     }
   }
 
   Future<void> _logout(AppController controller) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     await controller.logoutAuth();
     if (!mounted) {
       return;
     }
-    messenger.showSnackBar(const SnackBar(content: Text('已登出。')));
+    messenger.showSnackBar(SnackBar(content: Text(l10n.accountLoggedOut)));
   }
 
   @override
@@ -302,9 +376,10 @@ class _AccountScreenState extends State<AccountScreen> {
     final controller = AppControllerScope.of(context);
     final session = controller.authSession;
     final account = controller.authAccount;
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('帳號')),
+      appBar: AppBar(title: Text(l10n.accountTitle)),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
@@ -319,8 +394,8 @@ class _AccountScreenState extends State<AccountScreen> {
                       account?.displayName ?? session?.displayName ?? '',
                 ),
                 _AuthActionsCard(
-                  title: '登入',
-                  description: '登入來備份你的最愛站牌與設定！',
+                  title: l10n.accountSignIn,
+                  description: l10n.accountSignInDescription,
                   busy: controller.authBusy,
                   onDiscord: () => _startAuthLogin(controller, 'discord'),
                   onGoogle: () => _startAuthLogin(controller, 'google'),
@@ -358,7 +433,7 @@ class _AccountScreenState extends State<AccountScreen> {
                             ? null
                             : () => _logout(controller),
                         icon: const Icon(Icons.logout_rounded),
-                        label: const Text('登出'),
+                        label: Text(l10n.accountLogout),
                       ),
                     ),
                   ),
@@ -381,10 +456,15 @@ class _IntroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final title = isAuthenticated ? '已登入' : '尚未登入。';
+    final l10n = AppLocalizations.of(context);
+    final title = isAuthenticated
+        ? l10n.accountSignedIn
+        : l10n.accountSignedOut;
     final subtitle = isAuthenticated
-        ? (displayName.trim().isEmpty ? 'Ciallo～(∠・ω< )⌒☆' : displayName)
-        : '使用 Discord 或 Google 繼續以建立或連結您的帳戶。';
+        ? (displayName.trim().isEmpty
+              ? l10n.accountDefaultDisplayName
+              : displayName)
+        : l10n.accountContinueDescription;
 
     return Card(
       child: Padding(
@@ -439,6 +519,7 @@ class _LinkedProvidersCard extends StatelessWidget {
     final identities = account?.identities ?? const <AuthIdentity>[];
     final fallbackProvider = session?.provider ?? '';
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Card(
       child: Padding(
@@ -446,18 +527,18 @@ class _LinkedProvidersCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('已登入', style: theme.textTheme.titleMedium),
+            Text(l10n.accountSignedIn, style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             if (loading && identities.isEmpty)
               const LinearProgressIndicator()
             else if (identities.isEmpty && fallbackProvider.isNotEmpty)
               _ProviderTile(
                 provider: fallbackProvider,
-                label: session?.displayName ?? fallbackProvider,
-                detail: '從當前登入令牌載入',
+                label: session?.displayName ?? '',
+                detail: l10n.accountLoadedFromCurrentToken,
               )
             else if (identities.isEmpty)
-              const Text('尚未載入任何連結的提供者詳細資訊。')
+              Text(l10n.accountNoLinkedProviders)
             else
               for (final identity in identities)
                 _ProviderTile(
@@ -477,14 +558,18 @@ class _LinkedProvidersCard extends StatelessWidget {
                     OutlinedButton.icon(
                       onPressed: busy ? null : onDiscordLink,
                       icon: const FaIcon(FontAwesomeIcons.discord, size: 16),
-                      label: const Text('連結 Discord'),
+                      label: Text(
+                        l10n.accountLinkProvider(l10n.accountProviderDiscord),
+                      ),
                     ),
                   ],
                   if (!(account?.hasGoogle ?? false)) ...[
                     OutlinedButton.icon(
                       onPressed: busy ? null : onGoogleLink,
                       icon: const FaIcon(FontAwesomeIcons.google, size: 16),
-                      label: const Text('連結 Google'),
+                      label: Text(
+                        l10n.accountLinkProvider(l10n.accountProviderGoogle),
+                      ),
                     ),
                   ],
                 ],
@@ -521,21 +606,26 @@ class _SyncCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('雲端同步', style: theme.textTheme.titleMedium),
+            Text(l10n.accountCloudSync, style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
               value: enabled,
               onChanged: busy ? null : onChanged,
-              title: const Text('啓用雲端同步'),
+              title: Text(l10n.accountEnableCloudSync),
               subtitle: Text(
-                enabled ? '最後同步時間：${_formatDateTime(lastSyncAt)}' : '同步已關閉。',
+                enabled
+                    ? l10n.accountLastSync(
+                        _formatDateTime(l10n, lastSyncAt),
+                      )
+                    : l10n.accountSyncDisabled,
               ),
             ),
             const Divider(height: 24),
@@ -544,15 +634,15 @@ class _SyncCard extends StatelessWidget {
               value: routeHistoryEnabled,
               onChanged: busy ? null : onRouteHistoryChanged,
               secondary: const Icon(Icons.history_rounded),
-              title: const Text('同步路線紀錄'),
+              title: Text(l10n.accountSyncRouteHistory),
               subtitle: Text(
                 routeHistoryDeletionPending
-                    ? '已關閉，正在移除本裝置的雲端路線紀錄。'
+                    ? l10n.accountRouteHistoryDeletionPending
                     : routeHistoryEnabled
                     ? enabled
-                          ? '最近搜尋與智慧推薦使用紀錄會同步；不包含定位資料。'
-                          : '已允許同步，開啓雲端同步後才會上傳。'
-                    : '選擇性功能，預設關閉。',
+                          ? l10n.accountRouteHistorySyncDescription
+                          : l10n.accountRouteHistoryWaitingForCloudSync
+                    : l10n.accountRouteHistoryOptional,
               ),
             ),
             if (busy) ...[
@@ -563,7 +653,7 @@ class _SyncCard extends StatelessWidget {
             FilledButton.icon(
               onPressed: busy ? null : onSyncNow,
               icon: const Icon(Icons.sync_rounded),
-              label: const Text('立即同步'),
+              label: Text(l10n.accountSyncNow),
             ),
           ],
         ),
@@ -590,6 +680,7 @@ class _AuthActionsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -607,12 +698,20 @@ class _AuthActionsCard extends StatelessWidget {
                 FilledButton.icon(
                   onPressed: busy ? null : onDiscord,
                   icon: const FaIcon(FontAwesomeIcons.discord, size: 18),
-                  label: const Text('使用 Discord 繼續'),
+                  label: Text(
+                    l10n.accountContinueWithProvider(
+                      l10n.accountProviderDiscord,
+                    ),
+                  ),
                 ),
                 FilledButton.tonalIcon(
                   onPressed: busy ? null : onGoogle,
                   icon: const FaIcon(FontAwesomeIcons.google, size: 18),
-                  label: const Text('使用 Google 繼續'),
+                  label: Text(
+                    l10n.accountContinueWithProvider(
+                      l10n.accountProviderGoogle,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -623,9 +722,9 @@ class _AuthActionsCard extends StatelessWidget {
   }
 }
 
-String _formatDateTime(DateTime? value) {
+String _formatDateTime(AppLocalizations l10n, DateTime? value) {
   if (value == null) {
-    return '尚未同步';
+    return l10n.accountNeverSynced;
   }
   final local = value.toLocal();
   final month = local.month.toString().padLeft(2, '0');
@@ -650,11 +749,16 @@ class _ProviderTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: CircleAvatar(child: _providerIcon(provider)),
-      title: Text(label.trim().isEmpty ? _providerName(provider) : label),
-      subtitle: Text(detail.trim().isEmpty ? _providerName(provider) : detail),
+      title: Text(
+        label.trim().isEmpty ? _providerName(l10n, provider) : label,
+      ),
+      subtitle: Text(
+        detail.trim().isEmpty ? _providerName(l10n, provider) : detail,
+      ),
     );
   }
 }
@@ -670,13 +774,13 @@ Widget _providerIcon(String provider) {
   }
 }
 
-String _providerName(String provider) {
+String _providerName(AppLocalizations l10n, String provider) {
   switch (provider) {
     case 'discord':
-      return 'Discord';
+      return l10n.accountProviderDiscord;
     case 'google':
-      return 'Google';
+      return l10n.accountProviderGoogle;
     default:
-      return provider.trim().isEmpty ? 'OAuth' : provider;
+      return provider.trim().isEmpty ? l10n.accountProviderOAuth : provider;
   }
 }

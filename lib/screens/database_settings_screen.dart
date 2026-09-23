@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
 import '../core/app_controller.dart';
-import '../core/friendly_error.dart';
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 
 class DatabaseSettingsScreen extends StatelessWidget {
   const DatabaseSettingsScreen({super.key});
@@ -14,6 +15,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
     AppController controller,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     try {
       final updates = await controller.checkDatabaseUpdates();
       if (!context.mounted) {
@@ -24,12 +26,19 @@ class DatabaseSettingsScreen extends StatelessWidget {
           .where((entry) => entry.value != null)
           .toList();
       if (availableUpdates.isEmpty) {
-        messenger.showSnackBar(const SnackBar(content: Text('目前資料庫已是最新版本。')));
+        messenger.showSnackBar(
+          SnackBar(content: Text(l10n.databaseUpToDate)),
+        );
         return;
       }
 
       final lines = availableUpdates
-          .map((entry) => '${entry.key.label} 有新版本 ${entry.value}')
+          .map(
+            (entry) => l10n.databaseUpdateAvailable(
+              localizedBusProvider(l10n, entry.key),
+              entry.value!,
+            ),
+          )
           .join('\n');
       messenger.showSnackBar(SnackBar(content: Text(lines)));
     } catch (error) {
@@ -37,7 +46,11 @@ class DatabaseSettingsScreen extends StatelessWidget {
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('檢查資料庫更新失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.databaseCheckFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
@@ -49,9 +62,12 @@ class DatabaseSettingsScreen extends StatelessWidget {
     required String successMessage,
   }) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     final targets = providers.toSet().toList();
     if (targets.isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('目前沒有可更新的資料庫。')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.databaseNoUpdatesAvailable)),
+      );
       return;
     }
 
@@ -66,7 +82,11 @@ class DatabaseSettingsScreen extends StatelessWidget {
         return;
       }
       messenger.showSnackBar(
-        SnackBar(content: Text('下載資料庫失敗：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.databaseDownloadFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
@@ -75,6 +95,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final supportsDesktopDiscordPresence =
         !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.windows ||
@@ -82,7 +103,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
             defaultTargetPlatform == TargetPlatform.macOS);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('資料庫與下載')),
+      appBar: AppBar(title: Text(l10n.databaseDownloadsTitle)),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 860),
@@ -95,17 +116,24 @@ class DatabaseSettingsScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('啓動時更新', style: theme.textTheme.titleMedium),
+                      Text(
+                        l10n.databaseStartupUpdateTitle,
+                        style: theme.textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<DatabaseAutoUpdateMode>(
                         initialValue:
                             controller.settings.databaseAutoUpdateMode,
-                        decoration: const InputDecoration(labelText: '自動更新模式'),
+                        decoration: InputDecoration(
+                          labelText: l10n.databaseAutoUpdateModeLabel,
+                        ),
                         items: DatabaseAutoUpdateMode.values
                             .map(
                               (mode) => DropdownMenuItem(
                                 value: mode,
-                                child: Text(mode.label),
+                                child: Text(
+                                  localizedDatabaseAutoUpdateMode(l10n, mode),
+                                ),
                               ),
                             )
                             .toList(),
@@ -117,7 +145,10 @@ class DatabaseSettingsScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        controller.settings.databaseAutoUpdateMode.description,
+                        localizedDatabaseAutoUpdateModeDescription(
+                          l10n,
+                          controller.settings.databaseAutoUpdateMode,
+                        ),
                         style: theme.textTheme.bodySmall,
                       ),
                       if (controller.hasPendingDatabaseUpdates) ...[
@@ -134,7 +165,9 @@ class DatabaseSettingsScreen extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                '目前有 ${controller.pendingDatabaseUpdates.length} 個地區可更新',
+                                l10n.databasePendingRegions(
+                                  controller.pendingDatabaseUpdates.length,
+                                ),
                                 style: theme.textTheme.titleSmall,
                               ),
                               const SizedBox(height: 8),
@@ -142,9 +175,19 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                 controller.pendingDatabaseUpdates.entries
                                     .map(
                                       (entry) =>
-                                          '${entry.key.label} v${entry.value}',
+                                          l10n.databaseRegionVersion(
+                                            localizedBusProvider(
+                                              l10n,
+                                              entry.key,
+                                            ),
+                                            entry.value,
+                                          ),
                                     )
-                                    .join('、'),
+                                    .join(
+                                      l10n.localeName.startsWith('zh')
+                                          ? '、'
+                                          : ', ',
+                                    ),
                                 style: theme.textTheme.bodySmall,
                               ),
                             ],
@@ -164,7 +207,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                     controller,
                                   ),
                             icon: const Icon(Icons.cloud_sync_outlined),
-                            label: const Text('立即檢查更新'),
+                            label: Text(l10n.databaseCheckNow),
                           ),
                           FilledButton.icon(
                             onPressed:
@@ -176,7 +219,8 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                     controller,
                                     providers:
                                         controller.pendingDatabaseUpdates.keys,
-                                    successMessage: '已更新所有有新版本的資料庫。',
+                                    successMessage:
+                                        l10n.databaseAllUpdatesDownloaded,
                                   ),
                             icon: controller.downloadingDatabase
                                 ? const SizedBox.square(
@@ -186,7 +230,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                     ),
                                   )
                                 : const Icon(Icons.download_rounded),
-                            label: const Text('更新可用更新'),
+                            label: Text(l10n.databaseDownloadUpdates),
                           ),
                         ],
                       ),
@@ -201,7 +245,10 @@ class DatabaseSettingsScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('路線資料庫', style: theme.textTheme.titleMedium),
+                      Text(
+                        l10n.databaseRouteDatabaseTitle,
+                        style: theme.textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 8),
                       // Text(
                       //   '這份資料庫保存所有路線與方向資料，會在下載任一地區資料庫時一併更新。',
@@ -220,7 +267,11 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                       ? Icons.alt_route_rounded
                                       : Icons.cloud_off_outlined,
                                 ),
-                                label: Text(ready ? '已下載' : '尚未下載'),
+                                label: Text(
+                                  ready
+                                      ? l10n.databaseDownloaded
+                                      : l10n.databaseNotDownloadedYet,
+                                ),
                               ),
                               const SizedBox(width: 12),
                               // Expanded(
@@ -244,16 +295,23 @@ class DatabaseSettingsScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('資料來源', style: theme.textTheme.titleMedium),
+                      Text(
+                        l10n.databaseDataSourceTitle,
+                        style: theme.textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<BusProvider>(
                         initialValue: controller.settings.provider,
-                        decoration: const InputDecoration(labelText: '預設顯示地區'),
+                        decoration: InputDecoration(
+                          labelText: l10n.databaseDefaultRegionLabel,
+                        ),
                         items: downloadableBusProviders()
                             .map(
                               (provider) => DropdownMenuItem(
                                 value: provider,
-                                child: Text(provider.label),
+                                child: Text(
+                                  localizedBusProvider(l10n, provider),
+                                ),
                               ),
                             )
                             .toList(),
@@ -265,7 +323,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        '選取要保留在本機的縣市資料庫。',
+                        l10n.databaseSelectLocalRegions,
                         style: theme.textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 12),
@@ -274,7 +332,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                         runSpacing: 8,
                         children: downloadableBusProviders().map((provider) {
                           return FilterChip(
-                            label: Text(provider.label),
+                            label: Text(localizedBusProvider(l10n, provider)),
                             selected: controller.selectedProviders.contains(
                               provider,
                             ),
@@ -301,7 +359,8 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                 context,
                                 controller,
                                 providers: controller.selectedProviders,
-                                successMessage: '已下載選取地區的資料庫。',
+                                successMessage:
+                                    l10n.databaseSelectedRegionsDownloaded,
                               ),
                         icon: controller.downloadingDatabase
                             ? const SizedBox.square(
@@ -311,14 +370,14 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                 ),
                               )
                             : const Icon(Icons.download_for_offline_outlined),
-                        label: const Text('下載已選地區資料庫'),
+                        label: Text(l10n.databaseDownloadSelectedRegions),
                       ),
                       if (supportsDesktopDiscordPresence) ...[
                         const SizedBox(height: 20),
                         const Divider(height: 1),
                         const SizedBox(height: 18),
                         Text(
-                          'Discord Rich Presence',
+                          l10n.databaseDiscordPresenceSection,
                           style: theme.textTheme.titleMedium,
                         ),
                         // const SizedBox(height: 8),
@@ -329,9 +388,9 @@ class DatabaseSettingsScreen extends StatelessWidget {
                         const SizedBox(height: 8),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('啓用 Discord Rich Presence'),
-                          subtitle: const Text(
-                            '分享你正在看的公車給朋友 (⁠ ⁠/⁠^⁠ω⁠^⁠)⁠/⁠⁠',
+                          title: Text(l10n.databaseDiscordPresenceTitle),
+                          subtitle: Text(
+                            l10n.databaseDiscordPresenceDescription,
                           ),
                           value:
                               controller.settings.desktopDiscordPresenceEnabled,
@@ -343,7 +402,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                           runSpacing: 8,
                           children: [
                             FilterChip(
-                              label: const Text('目前頁面'),
+                              label: Text(l10n.databasePresenceCurrentPage),
                               selected:
                                   controller.settings.desktopDiscordShowScreen,
                               onSelected:
@@ -354,7 +413,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                   : null,
                             ),
                             FilterChip(
-                              label: const Text('地區'),
+                              label: Text(l10n.databasePresenceRegion),
                               selected: controller
                                   .settings
                                   .desktopDiscordShowProvider,
@@ -366,7 +425,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                   : null,
                             ),
                             FilterChip(
-                              label: const Text('路線名稱'),
+                              label: Text(l10n.databasePresenceRouteName),
                               selected: controller
                                   .settings
                                   .desktopDiscordShowRouteName,
@@ -398,7 +457,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                             children: [
                               Expanded(
                                 child: Text(
-                                  provider.label,
+                                  localizedBusProvider(l10n, provider),
                                   style: theme.textTheme.titleMedium,
                                 ),
                               ),
@@ -408,7 +467,9 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                   avatar: const Icon(
                                     Icons.system_update_alt_rounded,
                                   ),
-                                  label: Text('可更新 v$version'),
+                                  label: Text(
+                                    l10n.databaseVersionAvailable(version),
+                                  ),
                                 )
                               else
                                 Chip(
@@ -419,8 +480,8 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                   ),
                                   label: Text(
                                     controller.isDatabaseReady(provider)
-                                        ? '已下載'
-                                        : '未下載',
+                                        ? l10n.databaseDownloaded
+                                        : l10n.databaseNotDownloaded,
                                   ),
                                 ),
                             ],
@@ -434,8 +495,8 @@ class DatabaseSettingsScreen extends StatelessWidget {
                               final version = snapshot.data;
                               return Text(
                                 version == null || version == 0
-                                    ? '本機版本：未下載'
-                                    : '本機版本：$version',
+                                    ? l10n.databaseLocalVersionNotDownloaded
+                                    : l10n.databaseLocalVersion(version),
                                 style: theme.textTheme.bodyMedium,
                               );
                             },
@@ -452,14 +513,19 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                         context,
                                         controller,
                                         providers: [provider],
-                                        successMessage:
-                                            '${provider.label} 資料庫已更新。',
+                                        successMessage: l10n
+                                            .databaseRegionUpdated(
+                                              localizedBusProvider(
+                                                l10n,
+                                                provider,
+                                              ),
+                                            ),
                                       ),
                                 icon: const Icon(Icons.download_rounded),
                                 label: Text(
                                   controller.isDatabaseReady(provider)
-                                      ? '重新下載'
-                                      : '下載',
+                                      ? l10n.databaseRedownload
+                                      : l10n.commonDownload,
                                 ),
                               ),
                               OutlinedButton.icon(
@@ -478,7 +544,12 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                           messenger.showSnackBar(
                                             SnackBar(
                                               content: Text(
-                                                '${provider.label} 資料庫已刪除。',
+                                                l10n.databaseRegionDeleted(
+                                                  localizedBusProvider(
+                                                    l10n,
+                                                    provider,
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           );
@@ -489,14 +560,19 @@ class DatabaseSettingsScreen extends StatelessWidget {
                                           messenger.showSnackBar(
                                             SnackBar(
                                               content: Text(
-                                                '刪除資料庫失敗：${friendlyErrorMessage(error)}',
+                                                l10n.databaseDeleteFailed(
+                                                  localizedFriendlyError(
+                                                    l10n,
+                                                    error,
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           );
                                         }
                                       },
                                 icon: const Icon(Icons.delete_outline_rounded),
-                                label: const Text('刪除'),
+                                label: Text(l10n.commonDelete),
                               ),
                             ],
                           ),

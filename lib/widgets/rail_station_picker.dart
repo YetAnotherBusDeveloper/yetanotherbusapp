@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../core/debouncer.dart';
-import '../core/models.dart';
 import '../core/rail_line_stations.dart';
 import '../core/transit_repository.dart';
 import '../core/user_location.dart';
+import '../core/transit_name.dart';
+import '../l10n/app_localizations.dart';
+import 'transit_station_name.dart';
 
 /// Opens the wheel station picker and returns the chosen station, or `null`.
 ///
@@ -178,7 +180,9 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
       }
       final hit = findStationInGroups(_groups, value);
       if (hit == null) {
-        setState(() => _message = '找不到符合的車站');
+        setState(
+          () => _message = AppLocalizations.of(context).railPickerNoMatches,
+        );
         return;
       }
       setState(() => _message = null);
@@ -225,7 +229,9 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
         return;
       }
       if (nearest == null) {
-        setState(() => _message = '找不到附近的車站。');
+        setState(
+          () => _message = AppLocalizations.of(context).railPickerNoNearby,
+        );
         return;
       }
       final at = locateStationInGroups(
@@ -233,9 +239,17 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
         nearest.station.stationId,
         preferredGroup: _groupIndex,
       );
-      final distance = formatDistance(nearest.distanceMeters);
+      final l10n = AppLocalizations.of(context);
+      final distance = nearest.distanceMeters < 1000
+          ? l10n.distanceMetersValue(nearest.distanceMeters.round())
+          : l10n.distanceKilometersValue(
+              (nearest.distanceMeters / 1000).toStringAsFixed(1),
+            );
       setState(
-        () => _message = '最近的車站：${nearest.station.name}（約 $distance）',
+        () => _message = l10n.railPickerNearest(
+          nearest.station.name,
+          distance,
+        ),
       );
       // Does not auto-confirm: the user sees which station was picked and still
       // taps 選擇, so a bad GPS fix never silently changes their query.
@@ -245,14 +259,21 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
         return;
       }
       setState(() {
-        _message = error.message;
+        final l10n = AppLocalizations.of(context);
+        _message = error.serviceDisabled
+            ? l10n.locationServicesDisabled
+            : error.deniedForever
+            ? l10n.locationPermissionDenied
+            : l10n.railLocationUnavailable;
         _locationUnavailable = error.deniedForever;
       });
     } catch (_) {
       if (!mounted) {
         return;
       }
-      setState(() => _message = '目前無法取得定位，請稍後再試。');
+      setState(
+        () => _message = AppLocalizations.of(context).railLocationUnavailable,
+      );
     } finally {
       if (mounted) {
         setState(() => _locating = false);
@@ -271,6 +292,7 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final media = MediaQuery.of(context);
     final wheelHeight = _itemExtent * _visibleRows;
     // A short viewport (landscape phone) cannot fit the stacked layout, so the
@@ -292,7 +314,14 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
                 itemCount: _groups.length,
                 selectedIndex: _groupIndex,
                 onSelectedItemChanged: (index) => _selectLine(index),
-                labelBuilder: (index) => _groups[index].lineName,
+                labelBuilder: (index) {
+                  final lineName = _groups[index].lineName;
+                  return switch (lineName) {
+                    kRailAllStationsLineName => l10n.railAllStations,
+                    kRailOtherLineName => l10n.railOtherStations,
+                    _ => lineName,
+                  };
+                },
               ),
             ),
             const SizedBox(width: 8),
@@ -317,6 +346,26 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
                 );
               },
               labelBuilder: (index) => _stations[index].name,
+              itemBuilder: (index, isSelected) {
+                final station = _stations[index];
+                return TransitStationName(
+                  name: TransitName(
+                    zh: station.name,
+                    en: station.nameEn,
+                    stableId: station.stationId,
+                  ),
+                  primaryStyle: theme.textTheme.titleMedium?.copyWith(
+                    color: isSelected
+                        ? theme.colorScheme.onSurface
+                        : theme.colorScheme.onSurfaceVariant,
+                    fontWeight: isSelected
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                  ),
+                  primaryMaxLines: 1,
+                  secondaryMaxLines: 1,
+                );
+              },
               onItemTapped: (index) {
                 if (index == _stationIndex) {
                   _confirm();
@@ -343,10 +392,10 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
           controller: _searchController,
           onChanged: _onSearchChanged,
           textInputAction: TextInputAction.search,
-          decoration: const InputDecoration(
-            hintText: '搜尋車站名稱或代碼',
-            prefixIcon: Icon(Icons.search_rounded),
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            hintText: l10n.railPickerSearchHint,
+            prefixIcon: const Icon(Icons.search_rounded),
+            border: const OutlineInputBorder(),
             isDense: true,
           ),
         ),
@@ -361,7 +410,7 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.my_location_rounded),
-            label: const Text('使用目前位置'),
+            label: Text(l10n.railUseCurrentLocation),
           ),
         ],
         if (_message != null) ...[
@@ -381,7 +430,7 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
         Expanded(
           child: OutlinedButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
+            child: Text(l10n.commonCancel),
           ),
         ),
         const SizedBox(width: 12),
@@ -391,7 +440,9 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
             key: const ValueKey('rail-picker-confirm'),
             onPressed: _confirmEnabled ? _confirm : null,
             child: Text(
-              _selected == null ? '選擇車站' : '選擇 ${_selected!.name}',
+              _selected == null
+                  ? l10n.railChooseStation
+                  : l10n.railChooseNamedStation(_selected!.name),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -432,7 +483,7 @@ class _RailStationPickerSheetState extends State<RailStationPickerSheet> {
             if (!_confirmEnabled && _selected != null) ...[
               const SizedBox(height: 8),
               Text(
-                '這一站已經是另一端的車站',
+                l10n.railSameStationExcluded,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.error,
                 ),
@@ -461,6 +512,7 @@ class _WheelColumn extends StatelessWidget {
     required this.selectedIndex,
     required this.onSelectedItemChanged,
     required this.labelBuilder,
+    this.itemBuilder,
     this.onItemTapped,
     super.key,
   });
@@ -471,6 +523,7 @@ class _WheelColumn extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelectedItemChanged;
   final String Function(int index) labelBuilder;
+  final Widget Function(int index, bool isSelected)? itemBuilder;
   final ValueChanged<int>? onItemTapped;
 
   @override
@@ -520,17 +573,21 @@ class _WheelColumn extends StatelessWidget {
               final label = Center(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Text(
-                    labelBuilder(index),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: isSelected ? cs.onSurface : cs.onSurfaceVariant,
-                      fontWeight: isSelected
-                          ? FontWeight.w700
-                          : FontWeight.w400,
-                    ),
-                  ),
+                  child:
+                      itemBuilder?.call(index, isSelected) ??
+                      Text(
+                        labelBuilder(index),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: isSelected
+                              ? cs.onSurface
+                              : cs.onSurfaceVariant,
+                          fontWeight: isSelected
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                        ),
+                      ),
                 ),
               );
               if (onItemTapped == null) {
@@ -581,15 +638,24 @@ class RailStationField extends StatelessWidget {
           suffixIcon: const Icon(Icons.expand_more_rounded),
           border: const OutlineInputBorder(),
         ),
-        child: Text(
-          selected == null ? placeholder : selected.name,
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: selected == null
-                ? theme.colorScheme.onSurfaceVariant
-                : theme.colorScheme.onSurface,
-            fontWeight: selected == null ? FontWeight.w400 : FontWeight.w700,
-          ),
-        ),
+        child: selected == null
+            ? Text(
+                placeholder,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            : TransitStationName(
+                name: TransitName(
+                  zh: selected.name,
+                  en: selected.nameEn,
+                  stableId: selected.stationId,
+                ),
+                primaryStyle: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
       ),
     );
   }

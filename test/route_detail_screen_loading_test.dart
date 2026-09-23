@@ -19,6 +19,7 @@ import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/route_detail_screen.dart';
 import 'package:taiwanbus_flutter/widgets/eta_badge.dart';
 
@@ -98,6 +99,7 @@ class _NoLocation extends GeolocatorPlatform {
 RouteDetailData _detail({
   int? eta,
   String name = '測試路線',
+  String? nameEn,
   DateTime? updatedAt,
   List<String> family = const [],
 }) => RouteDetailData(
@@ -112,10 +114,21 @@ RouteDetailData _detail({
     category: '',
     sequence: 0,
     rtrip: 0,
+    routeNameEn: nameEn,
   ),
-  paths: const [
-    PathInfo(routeKey: 500, pathId: 0, name: '去程'),
-    PathInfo(routeKey: 500, pathId: 1, name: '返程'),
+  paths: [
+    PathInfo(
+      routeKey: 500,
+      pathId: 0,
+      name: '去程',
+      nameEn: nameEn == null ? null : 'Outbound',
+    ),
+    PathInfo(
+      routeKey: 500,
+      pathId: 1,
+      name: '返程',
+      nameEn: nameEn == null ? null : 'Inbound',
+    ),
   ],
   stopsByPath: {
     for (final path in [0, 1])
@@ -126,6 +139,9 @@ RouteDetailData _detail({
             pathId: path,
             stopId: i,
             stopName: '${path == 0 ? '去程' : '返程'}站$i',
+            stopNameEn: nameEn == null
+                ? null
+                : '${path == 0 ? 'Outbound' : 'Inbound'} Stop $i',
             sequence: i,
             lat: 25,
             lon: 121,
@@ -180,8 +196,9 @@ Future<void> _resumeRoute(WidgetTester tester) async {
 
 void _screenTest(
   String name,
-  Future<void> Function(WidgetTester, _Repository) body,
-) {
+  Future<void> Function(WidgetTester, _Repository) body, {
+  Locale locale = const Locale('zh', 'TW'),
+}) {
   testWidgets(name, (tester) async {
     SharedPreferences.setMockInitialValues({});
     final previousLocation = GeolocatorPlatform.instance;
@@ -194,6 +211,9 @@ void _screenTest(
         AppControllerScope(
           controller: controller,
           child: MaterialApp(
+            locale: locale,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
             navigatorObservers: [appRouteObserver],
             home: const RouteDetailScreen(
               routeKey: 500,
@@ -220,6 +240,59 @@ void _screenTest(
 }
 
 void main() {
+  _screenTest('shows Chinese route, path, and stop names without overflow', (
+    tester,
+    repository,
+  ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    repository.topologyRequests.single.complete(
+      _detail(nameEn: 'Test Route With A Long English Name'),
+    );
+    await _frames(tester);
+
+    expect(find.text('測試路線'), findsOneWidget);
+    expect(
+      find.text('Test Route With A Long English Name / 測試路線'),
+      findsNothing,
+    );
+    expect(find.text('返程'), findsOneWidget);
+    expect(find.text('Inbound / 返程'), findsNothing);
+    expect(find.text('返程站1'), findsOneWidget);
+    expect(find.text('Inbound Stop 1\n返程站1'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  _screenTest(
+    'localizes route detail in English at narrow width',
+    (tester, repository) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      repository.topologyRequests.single.complete(
+        _detail(nameEn: 'Test Route With A Long English Name'),
+      );
+      await _frames(tester);
+
+      expect(
+        find.text('Test Route With A Long English Name / 測試路線'),
+        findsOneWidget,
+      );
+      expect(find.text('返程'), findsOneWidget);
+      expect(find.text('Inbound'), findsOneWidget);
+      expect(find.text('返程站1'), findsOneWidget);
+      expect(find.text('Inbound Stop 1'), findsOneWidget);
+      expect(find.byTooltip('Bus map'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    locale: const Locale('en'),
+  );
+
   _screenTest('fades in route stops immediately once data is ready', (
     tester,
     repository,

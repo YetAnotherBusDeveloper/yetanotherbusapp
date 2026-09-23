@@ -466,6 +466,7 @@ class BusRepository {
             pathName: row.routeSummaryPathName.trim().isNotEmpty
                 ? row.routeSummaryPathName
                 : row.pathName,
+            pathNameEn: row.pathNameEn,
           ),
         )
         .where((summary) => summary.routeId.isNotEmpty)
@@ -650,6 +651,7 @@ class BusRepository {
             routeNameEn: routeMetadataEntry.routeNameEn,
             pathId: matchedRow.pathId,
             pathName: routeMetadataEntry.pathName,
+            pathNameEn: routeMetadataEntry.pathNameEn,
           ),
           matchedStop: StopInfo(
             routeKey: _routeKeyForRouteId(matchedRow.routeId),
@@ -657,6 +659,7 @@ class BusRepository {
             stopId: _parseStopId(matchedRow.stopId),
             rawStopId: _rawStopIdString(matchedRow.stopId),
             stopName: matchedRow.stopName,
+            stopNameEn: matchedRow.stopNameEn,
             sequence: matchedRow.sequence,
             lon: matchedRow.lon,
             lat: matchedRow.lat,
@@ -822,6 +825,7 @@ class BusRepository {
             routeNameEn: row['route_name_en']?.toString() ?? '',
             pathId: _nullableInt(row['pathid']) ?? 0,
             pathName: row['path_name']?.toString() ?? '',
+            pathNameEn: row['path_name_en']?.toString() ?? '',
           );
         })
         .where((summary) => summary.routeId.isNotEmpty)
@@ -860,6 +864,7 @@ class BusRepository {
             routeNameEn: row['route_name_en']?.toString() ?? '',
             pathId: _nullableInt(row['pathid']) ?? 0,
             pathName: row['path_name']?.toString() ?? '',
+            pathNameEn: row['path_name_en']?.toString() ?? '',
           );
         })
         .where((summary) => summary.routeId.isNotEmpty)
@@ -933,6 +938,7 @@ class BusRepository {
         routeNameEn: routeRow.routeNameEn,
         pathId: routeRow.pathId,
         pathName: routeRow.pathName,
+        pathNameEn: routeRow.pathNameEn,
       );
     } on DatabaseNotReadyException {
       return _getRouteFromApi(
@@ -973,7 +979,7 @@ class BusRepository {
             pathId: _nullableInt(row['pathid']) ?? 0,
             routeSummaryPathName: '',
             pathName: row['path_name']?.toString() ?? '',
-            pathNameEn: '',
+            pathNameEn: row['path_name_en']?.toString() ?? '',
           );
         })
         .where((row) => row.routeId == routeId)
@@ -995,6 +1001,7 @@ class BusRepository {
       routeNameEn: routeRow.routeNameEn,
       pathId: routeRow.pathId,
       pathName: routeRow.pathName,
+      pathNameEn: routeRow.pathNameEn,
     );
   }
 
@@ -1020,6 +1027,7 @@ class BusRepository {
               routeKey: routeKey,
               pathId: row.pathId,
               name: row.pathName,
+              nameEn: _nonEmptyString(row.pathNameEn),
             ),
           )
           .toList();
@@ -1054,6 +1062,7 @@ class BusRepository {
             routeKey: routeKey,
             pathId: _nullableInt(row['pathid']) ?? 0,
             name: row['path_name']?.toString() ?? '',
+            nameEn: _nonEmptyString(row['path_name_en']),
           ),
         )
         .toList();
@@ -1083,6 +1092,7 @@ class BusRepository {
               stopId: _parseStopId(row.stopId),
               rawStopId: _rawStopIdString(row.stopId),
               stopName: row.stopName,
+              stopNameEn: row.stopNameEn,
               sequence: row.sequence,
               lon: row.lon,
               lat: row.lat,
@@ -1119,6 +1129,7 @@ class BusRepository {
             stopId: _parseStopId(stop['stopid']),
             rawStopId: _rawStopIdString(stop['stopid']),
             stopName: stop['name']?.toString() ?? '',
+            stopNameEn: _nonEmptyString(stop['name_en']),
             sequence: _toInt(stop['seq']),
             lon: _toDouble(stop['lon']),
             lat: _toDouble(stop['lat']),
@@ -1756,6 +1767,7 @@ class BusRepository {
         stopId: stopId,
         rawStopId: _rawStopIdString(row.stopId),
         stopName: row.stopName,
+        stopNameEn: row.stopNameEn,
         sequence: row.sequence,
         lon: row.lon,
         lat: row.lat,
@@ -1787,6 +1799,7 @@ class BusRepository {
         routeNameEn: routeMetadataEntry.routeNameEn,
         pathId: pathId,
         pathName: routeMetadataEntry.pathName,
+        pathNameEn: routeMetadataEntry.pathNameEn,
       );
 
       results.add(
@@ -1835,6 +1848,7 @@ class BusRepository {
             stopId: stationStop.stopId,
             rawStopId: stationStop.rawStopId,
             stopName: stopName,
+            stopNameEn: stationStop.stopNameEn,
             sequence: stationStop.sequence,
             lon: stationStop.lon,
             lat: stationStop.lat,
@@ -1891,6 +1905,7 @@ class BusRepository {
       final pathId = _nullableInt(item['pathid']) ?? 0;
       final stopId = _parseStopId(item['stopid']);
       final stopName = item['stop_name']?.toString() ?? '';
+      final stopNameEn = _nonEmptyString(item['stop_name_en']);
       final sequence = _nullableInt(item['seq']) ?? 0;
       final lon = _toDouble(item['lon']);
       final lat = _toDouble(item['lat']);
@@ -1905,9 +1920,10 @@ class BusRepository {
             provider: provider,
             routeId: routeId,
             routeName: routeName,
-            routeNameEn: '',
+            routeNameEn: item['route_name_en']?.toString() ?? '',
             pathId: pathId,
             pathName: pathName,
+            pathNameEn: item['path_name_en']?.toString() ?? '',
           ),
           stop: StopInfo(
             routeKey: _routeKeyForRouteId(routeId),
@@ -1915,6 +1931,7 @@ class BusRepository {
             stopId: stopId,
             rawStopId: _rawStopIdString(item['stopid']),
             stopName: stopName,
+            stopNameEn: stopNameEn,
             sequence: sequence,
             lon: lon,
             lat: lat,
@@ -2005,6 +2022,7 @@ class BusRepository {
             routeKey: routeKey,
             pathId: row.pathId,
             name: row.pathName,
+            nameEn: _nonEmptyString(row.pathNameEn),
           ),
         )
         .toList();
@@ -2022,6 +2040,7 @@ class BusRepository {
         stopId: _parseStopId(row.stopId),
         rawStopId: _rawStopIdString(row.stopId),
         stopName: row.stopName,
+        stopNameEn: row.stopNameEn,
         sequence: row.sequence,
         lon: row.lon,
         lat: row.lat,
@@ -2046,6 +2065,7 @@ class BusRepository {
       pathName: routeRow.routeSummaryPathName.trim().isNotEmpty
           ? routeRow.routeSummaryPathName
           : firstPath?.pathName ?? '',
+      pathNameEn: firstPath?.pathNameEn ?? '',
     );
 
     return RouteDetailData(
@@ -2070,6 +2090,7 @@ class BusRepository {
         routeName: row.routeName,
         routeNameEn: row.routeNameEn,
         pathName: row.pathName,
+        pathNameEn: row.pathNameEn,
       );
     }
     return metadata;
@@ -2116,6 +2137,7 @@ class BusRepository {
             routeKey: routeKey,
             pathId: row.pathId,
             name: row.pathName,
+            nameEn: _nonEmptyString(row.pathNameEn),
           ),
         )
         .toList();
@@ -2134,6 +2156,7 @@ class BusRepository {
         stopId: stopId,
         rawStopId: _rawStopIdString(row['stopid']),
         stopName: row['name']?.toString() ?? '',
+        stopNameEn: _nonEmptyString(row['name_en']),
         sequence: (row['seq'] as num?)?.toInt() ?? 0,
         lon: (row['lon'] as num?)?.toDouble() ?? 0,
         lat: (row['lat'] as num?)?.toDouble() ?? 0,
@@ -2158,6 +2181,7 @@ class BusRepository {
       pathName: routeRow.routeSummaryPathName.trim().isNotEmpty
           ? routeRow.routeSummaryPathName
           : firstPath?.pathName ?? '',
+      pathNameEn: firstPath?.pathNameEn ?? '',
     );
 
     return RouteDetailData(
@@ -2186,7 +2210,15 @@ class BusRepository {
       }
       final pathId = _toInt(rawPath['pathid']);
       final pathName = rawPath['name']?.toString() ?? '';
-      paths.add(PathInfo(routeKey: routeKey, pathId: pathId, name: pathName));
+      final pathNameEn = _nonEmptyString(rawPath['name_en']);
+      paths.add(
+        PathInfo(
+          routeKey: routeKey,
+          pathId: pathId,
+          name: pathName,
+          nameEn: pathNameEn,
+        ),
+      );
       final stops = (rawPath['stops'] as List<dynamic>? ?? const [])
           .whereType<Map>()
           .map(
@@ -2196,6 +2228,7 @@ class BusRepository {
               stopId: _parseStopId(stop['stopid']),
               rawStopId: _rawStopIdString(stop['stopid']),
               stopName: stop['name']?.toString() ?? '',
+              stopNameEn: _nonEmptyString(stop['name_en']),
               sequence: _toInt(stop['seq']),
               lon: _toDouble(stop['lon']),
               lat: _toDouble(stop['lat']),
@@ -2212,9 +2245,10 @@ class BusRepository {
       routeName: routeNameHint?.trim().isNotEmpty == true
           ? routeNameHint!.trim()
           : decoded['name']?.toString() ?? routeId,
-      routeNameEn: '',
+      routeNameEn: decoded['name_en']?.toString() ?? '',
       pathId: firstPath?.pathId ?? 0,
       pathName: firstPath?.name ?? '',
+      pathNameEn: firstPath?.nameEn ?? '',
     );
 
     return RouteDetailData(
@@ -2264,6 +2298,7 @@ class BusRepository {
     required String routeNameEn,
     required int pathId,
     required String pathName,
+    String pathNameEn = '',
   }) {
     final displayRouteName = routeName.trim().isEmpty
         ? routeId
@@ -2277,7 +2312,9 @@ class BusRepository {
       routeId: routeId,
       routeName: displayRouteName,
       officialRouteName: routeNameEn,
+      routeNameEn: _nonEmptyString(routeNameEn),
       description: displayPathName,
+      pathNameEn: _nonEmptyString(pathNameEn),
       category: provider.label,
       sequence: pathId,
       rtrip: pathId,
@@ -2289,9 +2326,9 @@ class BusRepository {
     _CityStopRow right,
     String query,
   ) {
-    final leftName = _normalizeStopSearchText(left.stopName);
-    final rightName = _normalizeStopSearchText(right.stopName);
     final normalizedQuery = _normalizeStopSearchText(query);
+    final leftName = _bestStopSearchName(left, normalizedQuery);
+    final rightName = _bestStopSearchName(right, normalizedQuery);
     final leftTier = _stopSearchMatchTier(leftName, normalizedQuery);
     final rightTier = _stopSearchMatchTier(rightName, normalizedQuery);
     if (leftTier != rightTier) {
@@ -2329,6 +2366,7 @@ class BusRepository {
         pathId: left.matchedStop.pathId,
         stopId: left.matchedStop.stopId,
         stopName: left.matchedStop.stopName,
+        stopNameEn: left.matchedStop.stopNameEn,
         sequence: left.matchedStop.sequence,
         lon: left.matchedStop.lon,
         lat: left.matchedStop.lat,
@@ -2338,6 +2376,7 @@ class BusRepository {
         pathId: right.matchedStop.pathId,
         stopId: right.matchedStop.stopId,
         stopName: right.matchedStop.stopName,
+        stopNameEn: right.matchedStop.stopNameEn,
         sequence: right.matchedStop.sequence,
         lon: right.matchedStop.lon,
         lat: right.matchedStop.lat,
@@ -2383,6 +2422,29 @@ class BusRepository {
     return value.trim().toLowerCase();
   }
 
+  String _bestStopSearchName(_CityStopRow row, String normalizedQuery) {
+    final names = <String>{
+      _normalizeStopSearchText(row.stopName),
+      _normalizeStopSearchText(row.stopNameEn ?? ''),
+    }.where((name) => name.isNotEmpty).toList();
+    if (names.isEmpty) {
+      return '';
+    }
+    names.sort((left, right) {
+      final tier = _stopSearchMatchTier(
+        left,
+        normalizedQuery,
+      ).compareTo(_stopSearchMatchTier(right, normalizedQuery));
+      if (tier != 0) {
+        return tier;
+      }
+      return (left.length - normalizedQuery.length).abs().compareTo(
+        (right.length - normalizedQuery.length).abs(),
+      );
+    });
+    return names.first;
+  }
+
   List<RouteSummary> _collapseRouteSummariesByRouteId(
     List<RouteSummary> items,
   ) {
@@ -2400,6 +2462,13 @@ class BusRepository {
           .toList();
       descriptions.sort();
       final mergedDescription = descriptions.join(' / ');
+      final descriptionsEn =
+          group
+              .map((item) => item.pathNameEn?.trim() ?? '')
+              .where((value) => value.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
 
       return RouteSummary(
         sourceProvider: first.sourceProvider,
@@ -2408,7 +2477,9 @@ class BusRepository {
         routeId: first.routeId,
         routeName: first.routeName,
         officialRouteName: first.officialRouteName,
+        routeNameEn: first.routeNameEn,
         description: mergedDescription,
+        pathNameEn: descriptionsEn.isEmpty ? null : descriptionsEn.join(' / '),
         category: first.category,
         sequence: first.sequence,
         rtrip: first.rtrip,
@@ -2506,6 +2577,7 @@ class BusRepository {
         routeName: row.routeName,
         routeNameEn: row.routeNameEn,
         pathName: row.pathName,
+        pathNameEn: row.pathNameEn,
       );
     }
     return metadata;
@@ -2702,6 +2774,7 @@ class BusRepository {
     }
     final stationId = json['station_id']?.toString().trim() ?? '';
     final stationName = json['station_name']?.toString().trim() ?? '';
+    final stationNameEn = _nonEmptyString(json['station_name_en']);
     if (stationId.isEmpty || stationName.isEmpty) {
       throw const FormatException('Invalid station identity.');
     }
@@ -2734,6 +2807,7 @@ class BusRepository {
           routeNameEn: rawRoute['route_name_en']?.toString() ?? '',
           pathId: pathId,
           pathName: rawRoute['path_name']?.toString() ?? '',
+          pathNameEn: rawRoute['path_name_en']?.toString() ?? '',
         );
         final matchedStop = StopInfo(
           routeKey: _routeKeyForRouteId(routeId),
@@ -2741,6 +2815,7 @@ class BusRepository {
           stopId: _parseStopId(routeRawStopId),
           rawStopId: routeRawStopId,
           stopName: stationName,
+          stopNameEn: stationNameEn,
           sequence: _toInt(rawRoute['seq']),
           lon: _toDouble(side['lon']),
           lat: _toDouble(side['lat']),
@@ -2783,10 +2858,7 @@ class BusRepository {
       provider: expectedProvider,
       stationId: stationId,
       stationName: stationName,
-      stationNameEn:
-          json['station_name_en']?.toString().trim().isNotEmpty == true
-          ? json['station_name_en'].toString().trim()
-          : null,
+      stationNameEn: stationNameEn,
       lat: _toDouble(json['lat']),
       lon: _toDouble(json['lon']),
       sides: sides,
@@ -2836,6 +2908,7 @@ class BusRepository {
     }
 
     final rawRoutes = decoded['routes'] as List<dynamic>? ?? const [];
+    final stopNameEn = _nonEmptyString(decoded['stop_name_en']);
 
     final results = <StopRouteSearchResult>[];
     for (final rawRoute in rawRoutes) {
@@ -2859,6 +2932,7 @@ class BusRepository {
         routeNameEn: rawRoute['route_name_en']?.toString() ?? '',
         pathId: pathId,
         pathName: rawRoute['path_name']?.toString() ?? '',
+        pathNameEn: rawRoute['path_name_en']?.toString() ?? '',
       );
 
       final matchedStop = StopInfo(
@@ -2867,6 +2941,7 @@ class BusRepository {
         stopId: _parseStopId(entryStopId),
         rawStopId: entryStopId,
         stopName: decoded['stop_name']?.toString() ?? '',
+        stopNameEn: stopNameEn,
         sequence: _toInt(rawRoute['seq']),
         lon: 0,
         lat: 0,
@@ -3222,6 +3297,7 @@ class BusRepository {
         name: value['name']?.toString().trim().isNotEmpty == true
             ? value['name'].toString().trim()
             : routeId,
+        nameEn: _nonEmptyString(value['name_en']),
         routeUid: _nonEmptyString(value['route_uid']),
       );
     }
@@ -3238,6 +3314,7 @@ class BusRepository {
         name: value['name']?.toString().trim().isNotEmpty == true
             ? value['name'].toString().trim()
             : routeUid,
+        nameEn: _nonEmptyString(value['name_en']),
         routeIds: (value['routeids'] as List? ?? const [])
             .map((routeId) => routeId?.toString().trim() ?? '')
             .where((routeId) => routeId.isNotEmpty)
@@ -3596,7 +3673,9 @@ class BusRepository {
         routeId: detail.route.routeId,
         routeName: normalizedHint,
         officialRouteName: detail.route.officialRouteName,
+        routeNameEn: detail.route.routeNameEn,
         description: detail.route.description,
+        pathNameEn: detail.route.pathNameEn,
         category: detail.route.category,
         sequence: detail.route.sequence,
         rtrip: detail.route.rtrip,
@@ -3930,12 +4009,16 @@ class BusRepository {
       whereClauses.add(
         '('
         'routes.name LIKE ? OR '
+        "COALESCE(routes.name_en, '') LIKE ? OR "
         'routes.routeid LIKE ? OR '
         "COALESCE(routes.path_name, '') LIKE ? OR "
-        '$pathNameColumn LIKE ?'
+        '$pathNameColumn LIKE ? OR '
+        "COALESCE($pathNameEnColumn, '') LIKE ?"
         ')',
       );
       parameters.addAll(<Object?>[
+        '%$normalizedQuery%',
+        '%$normalizedQuery%',
         '%$normalizedQuery%',
         '%$normalizedQuery%',
         '%$normalizedQuery%',
@@ -3949,8 +4032,11 @@ class BusRepository {
         ORDER BY
           CASE
             WHEN routes.name LIKE ? THEN 0
+            WHEN COALESCE(routes.name_en, '') LIKE ? THEN 0
             WHEN routes.name LIKE ? THEN 1
+            WHEN COALESCE(routes.name_en, '') LIKE ? THEN 1
             WHEN routes.name LIKE ? THEN 2
+            WHEN COALESCE(routes.name_en, '') LIKE ? THEN 2
             WHEN routes.routeid LIKE ? THEN 3
             WHEN routes.routeid LIKE ? THEN 4
             ELSE 5
@@ -3961,7 +4047,10 @@ class BusRepository {
     if (normalizedQuery.isNotEmpty) {
       parameters.addAll(<Object?>[
         normalizedQuery,
+        normalizedQuery,
         '$normalizedQuery%',
+        '$normalizedQuery%',
+        '%$normalizedQuery%',
         '%$normalizedQuery%',
         normalizedQuery,
         '%$normalizedQuery%',
@@ -4038,12 +4127,16 @@ class BusRepository {
       whereClauses.add(
         '('
         'routes.name LIKE ? OR '
+        "COALESCE(routes.name_en, '') LIKE ? OR "
         'routes.routeid LIKE ? OR '
         "COALESCE(routes.path_name, '') LIKE ? OR "
-        '$pathNameColumn LIKE ?'
+        '$pathNameColumn LIKE ? OR '
+        "COALESCE($pathNameEnColumn, '') LIKE ?"
         ')',
       );
       parameters.addAll(<Object?>[
+        '%$normalizedQuery%',
+        '%$normalizedQuery%',
         '%$normalizedQuery%',
         '%$normalizedQuery%',
         '%$normalizedQuery%',
@@ -4057,8 +4150,11 @@ class BusRepository {
         ORDER BY
           CASE
             WHEN routes.name LIKE ? THEN 0
+            WHEN COALESCE(routes.name_en, '') LIKE ? THEN 0
             WHEN routes.name LIKE ? THEN 1
+            WHEN COALESCE(routes.name_en, '') LIKE ? THEN 1
             WHEN routes.name LIKE ? THEN 2
+            WHEN COALESCE(routes.name_en, '') LIKE ? THEN 2
             WHEN routes.routeid LIKE ? THEN 3
             WHEN routes.routeid LIKE ? THEN 4
             ELSE 5
@@ -4069,7 +4165,10 @@ class BusRepository {
     if (normalizedQuery.isNotEmpty) {
       parameters.addAll(<Object?>[
         normalizedQuery,
+        normalizedQuery,
         '$normalizedQuery%',
+        '$normalizedQuery%',
+        '%$normalizedQuery%',
         '%$normalizedQuery%',
         normalizedQuery,
         '%$normalizedQuery%',
@@ -4131,8 +4230,13 @@ class BusRepository {
     }
     final normalizedStopNameQuery = stopNameQuery?.trim() ?? '';
     if (normalizedStopNameQuery.isNotEmpty) {
-      whereClauses.add('stops.name LIKE ?');
-      parameters.add('%$normalizedStopNameQuery%');
+      whereClauses.add(
+        "(stops.name LIKE ? OR COALESCE(stops.name_en, '') LIKE ?)",
+      );
+      parameters.addAll([
+        '%$normalizedStopNameQuery%',
+        '%$normalizedStopNameQuery%',
+      ]);
     }
     if (latitude != null &&
         longitude != null &&
@@ -4156,6 +4260,7 @@ class BusRepository {
         stops.pathid,
         stops.stopid,
         stops.name AS stop_name,
+        stops.name_en AS stop_name_en,
         stops.seq,
         stops.lon,
         stops.lat
@@ -4172,6 +4277,7 @@ class BusRepository {
             pathId: (row['pathid'] as num?)?.toInt() ?? 0,
             stopId: row['stopid'],
             stopName: row['stop_name']?.toString() ?? '',
+            stopNameEn: _nonEmptyString(row['stop_name_en']),
             sequence: (row['seq'] as num?)?.toInt() ?? 0,
             lon: (row['lon'] as num?)?.toDouble() ?? 0,
             lat: (row['lat'] as num?)?.toDouble() ?? 0,
@@ -4198,8 +4304,13 @@ class BusRepository {
     }
     final normalizedStopNameQuery = stopNameQuery?.trim() ?? '';
     if (normalizedStopNameQuery.isNotEmpty) {
-      whereClauses.add('stops.name LIKE ?');
-      parameters.add('%$normalizedStopNameQuery%');
+      whereClauses.add(
+        "(stops.name LIKE ? OR COALESCE(stops.name_en, '') LIKE ?)",
+      );
+      parameters.addAll([
+        '%$normalizedStopNameQuery%',
+        '%$normalizedStopNameQuery%',
+      ]);
     }
     if (latitude != null &&
         longitude != null &&
@@ -4223,6 +4334,7 @@ class BusRepository {
         stops.pathid,
         stops.stopid,
         stops.name AS stop_name,
+        stops.name_en AS stop_name_en,
         stops.seq,
         stops.lon,
         stops.lat
@@ -4239,6 +4351,7 @@ class BusRepository {
             pathId: (row['pathid'] as num?)?.toInt() ?? 0,
             stopId: row['stopid'],
             stopName: row['stop_name']?.toString() ?? '',
+            stopNameEn: _nonEmptyString(row['stop_name_en']),
             sequence: (row['seq'] as num?)?.toInt() ?? 0,
             lon: (row['lon'] as num?)?.toDouble() ?? 0,
             lat: (row['lat'] as num?)?.toDouble() ?? 0,
@@ -5141,11 +5254,13 @@ class _RouteMetadataRow {
     required this.routeName,
     required this.routeNameEn,
     required this.pathName,
+    required this.pathNameEn,
   });
 
   final String routeName;
   final String routeNameEn;
   final String pathName;
+  final String pathNameEn;
 }
 
 class _CityStopRow {
@@ -5154,6 +5269,7 @@ class _CityStopRow {
     required this.pathId,
     required this.stopId,
     required this.stopName,
+    required this.stopNameEn,
     required this.sequence,
     required this.lon,
     required this.lat,
@@ -5163,6 +5279,7 @@ class _CityStopRow {
   final int pathId;
   final Object? stopId;
   final String stopName;
+  final String? stopNameEn;
   final int sequence;
   final double lon;
   final double lat;

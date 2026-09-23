@@ -78,6 +78,7 @@ StopInfo mergeRouteFamilyStopLiveData(
     stopId: baseStop.stopId,
     rawStopId: baseStop.rawStopId,
     stopName: baseStop.stopName,
+    stopNameEn: baseStop.stopNameEn,
     sequence: baseStop.sequence,
     lon: baseStop.lon,
     lat: baseStop.lat,

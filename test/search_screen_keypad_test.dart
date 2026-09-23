@@ -14,6 +14,7 @@ import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/search_screen.dart';
 import 'package:taiwanbus_flutter/widgets/route_search_keypad.dart';
 
@@ -127,6 +128,9 @@ Future<void> _pumpSearchScreen(
   });
   await tester.pumpWidget(
     MaterialApp(
+      locale: const Locale('zh', 'TW'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: AppControllerScope(
         controller: controller,
         child: const SearchScreen(),

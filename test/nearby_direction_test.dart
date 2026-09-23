@@ -21,6 +21,7 @@ import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
 import 'package:taiwanbus_flutter/screens/nearby_screen.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 
 const _latitude = 25.0330;
 const _longitude = 121.5654;
@@ -229,6 +230,9 @@ Future<void> _pumpNearbyScreen(
 
   await tester.pumpWidget(
     MaterialApp(
+      locale: const Locale('zh', 'TW'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: AppControllerScope(
         controller: controller,
         child: const NearbyScreen(),
@@ -400,6 +404,9 @@ void main() {
     try {
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('zh', 'TW'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: AppControllerScope(
             controller: controller,
             child: const NearbyScreen(),

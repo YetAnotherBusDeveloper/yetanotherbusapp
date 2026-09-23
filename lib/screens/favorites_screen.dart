@@ -9,8 +9,9 @@ import '../core/app_routes.dart';
 import '../core/haptic_feedback_service.dart';
 import '../core/app_route_observer.dart';
 import '../core/bus_repository.dart';
-import '../core/friendly_error.dart';
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/eta_badge.dart';
 import 'favorite_groups_screen.dart';
 import '../widgets/background_image_wrapper.dart';
@@ -251,6 +252,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       return;
     }
     final controller = AppControllerScope.read(context);
+    final l10n = AppLocalizations.of(context);
     final groups = controller.favoriteGroupNames;
     final groupName = _currentGroupName(groups);
     if (groupName == null) {
@@ -273,7 +275,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       _error = null;
       _refreshingGroupName = groupName;
       _refreshingSignature = signature;
-      _statusMessage = '正在更新';
+      _statusMessage = l10n.favoritesUpdating;
     });
 
     try {
@@ -403,13 +405,13 @@ class _FavoritesScreenState extends State<FavoritesScreen>
           refreshRequestCount > 0 && failedRequestCount == refreshRequestCount;
       final hasAnyLiveData = liveRouteCount > 0 || hasStationLiveData;
       final nextStatusMessage = allRequestsFailed
-          ? '即時資訊更新失敗'
+          ? l10n.favoritesRealtimeUpdateFailed
           : refreshRequestCount == 0
           ? null
           : !hasAnyLiveData
-          ? '目前沒有可用的即時資訊'
+          ? l10n.favoritesNoRealtime
           : failedRequestCount > 0
-          ? '部分即時資訊更新失敗'
+          ? l10n.favoritesPartialUpdateFailed
           : null;
 
       setState(() {
@@ -433,10 +435,12 @@ class _FavoritesScreenState extends State<FavoritesScreen>
 
       setState(() {
         _isLoading = false;
-        _error = friendlyErrorMessage(error);
+        _error = localizedFriendlyError(l10n, error);
         _refreshingGroupName = null;
         _refreshingSignature = '';
-        _statusMessage = _items.isEmpty ? '載入失敗' : '更新失敗，保留上一筆資料';
+        _statusMessage = _items.isEmpty
+            ? l10n.favoritesLoadFailed
+            : l10n.favoritesUpdateFailedKeepingData;
       });
       _startCountdown(controller.settings.busErrorUpdateTime);
     }
@@ -523,6 +527,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     FavoriteItem item,
     String label,
   ) async {
+    final l10n = AppLocalizations.of(context);
     setState(() {
       if (item is FavoriteStop) {
         _items = _items
@@ -540,9 +545,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       return;
     }
     unawaited(AppHaptics.lightImpact());
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已從 $groupName 移除 $label')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(l10n.favoriteRemoved(label, groupName))),
+    );
     _scheduleRefresh(forceResolveStatic: true);
   }
 
@@ -573,11 +578,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   }
 
   Widget _buildFavoriteTypeBadge(BuildContext context, FavoriteItemType type) {
-    final label = switch (type) {
-      FavoriteItemType.route => '路線',
-      FavoriteItemType.station => '整站',
-      FavoriteItemType.boarding => '站牌',
-    };
+    final label = localizedFavoriteItemType(AppLocalizations.of(context), type);
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -677,6 +678,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     String groupName,
     FavoriteStation favorite,
   ) {
+    final l10n = AppLocalizations.of(context);
     final station = _stationDataByKey[favorite.stableKey];
     final nextArrival = station?.nextArrival;
     final route = nextArrival?.result.route;
@@ -684,8 +686,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     final showTypeBadge =
         controller.favoriteGroupKind(groupName) == FavoriteGroupKind.mixed;
     final statusText = nextArrival == null
-        ? '${favorite.provider.label} · 目前沒有即將抵達班次'
-        : '${favorite.provider.label} · ${route!.routeName} · ${nextArrival.sideLabel} 側';
+        ? '${favorite.provider.label} · ${l10n.favoriteNoUpcomingArrivals}'
+        : '${favorite.provider.label} · ${route!.routeName} · '
+              '${l10n.favoriteStationSide(nextArrival.sideLabel)}';
     return _buildDismissibleFavorite(
       context: context,
       favorite: favorite,
@@ -746,12 +749,13 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     String groupName,
     FavoriteStop favorite,
   ) {
+    final l10n = AppLocalizations.of(context);
     final routeName = favorite.routeName?.trim().isNotEmpty == true
         ? favorite.routeName!.trim()
-        : '路線 ${favorite.routeKey}';
+        : l10n.routeIdFallback(favorite.routeKey);
     final stopName = favorite.stopName?.trim().isNotEmpty == true
         ? favorite.stopName!.trim()
-        : '站牌 ${favorite.stopId}';
+        : l10n.stopIdFallback(favorite.stopId);
     final showTypeBadge =
         controller.favoriteGroupKind(groupName) == FavoriteGroupKind.mixed;
     return _buildDismissibleFavorite(
@@ -792,7 +796,10 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                   _buildFavoriteTypeBadge(context, FavoriteItemType.boarding),
                   const SizedBox(height: 5),
                 ],
-                Text('${favorite.provider.label} · 正在取得即時資訊'),
+                Text(
+                  '${favorite.provider.label} · '
+                  '${l10n.favoriteFetchingRealtime}',
+                ),
               ],
             ),
           ),
@@ -819,6 +826,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     FavoriteResolvedItem item,
     _FavoriteDestinationAction action,
   ) async {
+    final l10n = AppLocalizations.of(context);
     if (action == _FavoriteDestinationAction.setDestination) {
       final detail = await controller.getRouteDetail(
         item.reference.routeKey,
@@ -834,7 +842,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       if (pathStops.isEmpty) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('這條路線目前沒有可選的站牌。')));
+        ).showSnackBar(SnackBar(content: Text(l10n.favoriteNoSelectableStops)));
         return;
       }
 
@@ -853,7 +861,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                   final stop = pathStops[index];
                   return ListTile(
                     title: Text(stop.stopName),
-                    subtitle: Text('第 ${index + 1} 站'),
+                    subtitle: Text(l10n.stopSequence(index + 1)),
                     trailing: stop.stopId == item.reference.destinationStopId
                         ? const Icon(Icons.flag_rounded)
                         : null,
@@ -883,7 +891,9 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       if (didChange) {
         unawaited(AppHaptics.lightImpact());
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已將目的地設為 ${destination.stopName}')),
+          SnackBar(
+            content: Text(l10n.favoriteDestinationSet(destination.stopName)),
+          ),
         );
         _scheduleRefresh(forceResolveStatic: true);
       }
@@ -904,7 +914,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
       unawaited(AppHaptics.selectionClick());
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('已清除這個最愛的目的地設定')));
+      ).showSnackBar(SnackBar(content: Text(l10n.favoriteDestinationCleared)));
       _scheduleRefresh(forceResolveStatic: true);
     }
   }
@@ -912,6 +922,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
+    final l10n = AppLocalizations.of(context);
     final groups = controller.favoriteGroupNames;
     _syncTabController(groups);
     _scheduleRefreshIfNeeded(controller, groups);
@@ -935,17 +946,20 @@ class _FavoritesScreenState extends State<FavoritesScreen>
             ? Colors.transparent
             : null,
         appBar: AppBar(
-          title: const Text('我的最愛'),
+          title: Text(l10n.favoritesTitle),
           actions: [
             if (references.length >= 2)
               IconButton(
-                tooltip: _sortMode ? '完成排序' : '調整排序',
+                tooltip: _sortMode
+                    ? l10n.favoritesFinishSorting
+                    : l10n.favoritesAdjustSorting,
                 onPressed: () => setState(() => _sortMode = !_sortMode),
                 icon: Icon(
                   _sortMode ? Icons.check_rounded : Icons.swap_vert_rounded,
                 ),
               ),
             IconButton(
+              tooltip: l10n.favoritesManageGroupsTooltip,
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -1000,8 +1014,10 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                               child: Text(
                                 _statusMessage ??
                                     (_remainingSeconds > 0
-                                        ? '$_remainingSeconds 秒後更新'
-                                        : '正在更新'),
+                                        ? l10n.favoritesUpdateCountdown(
+                                            _remainingSeconds,
+                                          )
+                                        : l10n.favoritesUpdating),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ),
@@ -1032,15 +1048,16 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     required List<FavoriteItem> references,
     required List<FavoriteResolvedItem> items,
   }) {
+    final l10n = AppLocalizations.of(context);
     if (_error != null && references.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: CatStateCard(
             mood: CatStateMood.cry,
-            title: '最愛清單卡住了',
+            title: l10n.favoritesErrorTitle,
             message: _error,
-            actionLabel: '再試一次',
+            actionLabel: l10n.favoritesTryAgain,
             onAction: () => _scheduleRefresh(forceResolveStatic: true),
           ),
         ),
@@ -1052,7 +1069,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     }
 
     if (references.isEmpty) {
-      return const _EmptyFavoritesState(message: '這個群組目前沒有收藏。');
+      return _EmptyFavoritesState(message: l10n.favoritesGroupEmpty);
     }
 
     final resolvedByKey = {
@@ -1144,6 +1161,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     FavoriteItem reference,
     Map<String, FavoriteResolvedItem> resolvedByKey,
   ) {
+    final l10n = AppLocalizations.of(context);
     if (reference is FavoriteRoute) {
       return _buildRouteFavoriteCard(
         context,
@@ -1177,7 +1195,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         ? item.reference.destinationStopName!.trim()
         : (item.reference.destinationStopId == null
               ? null
-              : '站牌 ${item.reference.destinationStopId}');
+              : l10n.stopIdFallback(item.reference.destinationStopId!));
     return _buildDismissibleFavorite(
       context: context,
       favorite: item.reference,
@@ -1224,15 +1242,15 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                 ],
                 Text(
                   '${item.reference.provider.label} · '
-                  '${item.route.description.isEmpty ? "routeKey ${item.route.routeKey}" : item.route.description}'
-                  '${destinationSummary == null ? "" : "\n目的地：$destinationSummary"}',
+                  '${item.route.description.isEmpty ? l10n.routeKeyFallback(item.route.routeKey) : item.route.description}'
+                  '${destinationSummary == null ? "" : "\n${l10n.destinationValue(destinationSummary)}"}',
                 ),
               ],
             ),
           ),
           trailing: controller.settings.enableRouteBackgroundMonitor
               ? PopupMenuButton<_FavoriteDestinationAction>(
-                  tooltip: '目的地設定',
+                  tooltip: l10n.favoriteDestinationSettings,
                   icon: Icon(
                     item.reference.destinationStopId == null
                         ? Icons.flag_outlined
@@ -1250,14 +1268,14 @@ class _FavoritesScreenState extends State<FavoritesScreen>
                   },
                   itemBuilder: (context) {
                     return [
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: _FavoriteDestinationAction.setDestination,
-                        child: Text('設定目的地'),
+                        child: Text(l10n.favoriteSetDestination),
                       ),
                       if (item.reference.destinationStopId != null)
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: _FavoriteDestinationAction.clearDestination,
-                          child: Text('清除目的地'),
+                          child: Text(l10n.favoriteClearDestination),
                         ),
                     ];
                   },
@@ -1301,19 +1319,20 @@ class _FavoritesScreenState extends State<FavoritesScreen>
 enum _FavoriteDestinationAction { setDestination, clearDestination }
 
 class _EmptyFavoritesState extends StatelessWidget {
-  const _EmptyFavoritesState({this.message = '還沒有任何已收藏的站牌 :('});
+  const _EmptyFavoritesState({this.message});
 
-  final String message;
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: CatStateCard(
           mood: CatStateMood.sad,
-          title: '貓貓還沒有固定站牌',
-          message: message,
+          title: l10n.favoritesEmptyTitle,
+          message: message ?? l10n.favoritesEmptyMessage,
         ),
       ),
     );

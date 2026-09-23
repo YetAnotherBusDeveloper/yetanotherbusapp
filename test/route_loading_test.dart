@@ -51,7 +51,11 @@ void main() {
     );
 
     expect(topology.route.routeName, '500');
+    expect(topology.route.routeNameEn, 'Route 500');
+    expect(topology.route.pathNameEn, 'Main Line');
+    expect(topology.paths.single.nameEn, 'Main Line');
     expect(topology.stopsByPath[0]!.single.stopName, '測試站');
+    expect(topology.stopsByPath[0]!.single.stopNameEn, 'Test Stop');
     expect(topology.hasLiveData, isFalse);
     expect(completeDetailFinished, isFalse);
     expect(stopRequests, 1);
@@ -181,15 +185,18 @@ http.Response _jsonResponse(Object body) {
 const _routeStopsPayload = <String, Object>{
   'routeid': 'TXG5000',
   'name': '500 官方',
+  'name_en': 'Route 500',
   'paths': <Object>[
     <String, Object>{
       'pathid': 0,
       'name': '主線',
+      'name_en': 'Main Line',
       'stops': <Object>[
         <String, Object>{
           'stopid': 'STOP-1',
           'seq': 1,
           'name': '測試站',
+          'name_en': 'Test Stop',
           'lat': 24.1,
           'lon': 120.6,
         },
