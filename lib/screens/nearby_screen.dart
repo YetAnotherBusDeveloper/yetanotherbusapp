@@ -476,7 +476,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
     final liveStop = _liveStop(item);
     final catchability = estimateCatchability(
       distanceMeters: item.distanceMeters,
-      etaSeconds: liveStop.sec,
+      etaSeconds: effectiveStopEtaSeconds(liveStop),
       locationAccuracyMeters: _locationAccuracyMeters,
     );
     final l10n = AppLocalizations.of(context);

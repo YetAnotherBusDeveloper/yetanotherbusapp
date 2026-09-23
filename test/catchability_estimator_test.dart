@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taiwanbus_flutter/core/catchability_estimator.dart';
+import 'package:taiwanbus_flutter/core/models.dart';
 
 void main() {
   test('reports a likely catch with remaining time after walking', () {
@@ -51,4 +52,36 @@ void main() {
     expect(result.hasEstimate, isFalse);
     expect(result.message, '定位或即時資料不足，無法準確判斷');
   });
+
+  test(
+    'uses the effective ETA when realtime data is already four minutes old',
+    () {
+      final now = DateTime(2026, 6, 9, 8, 0);
+      final stop = StopInfo(
+        routeKey: 1,
+        pathId: 0,
+        stopId: 10,
+        stopName: 'Main Station',
+        sequence: 1,
+        lon: 121.5,
+        lat: 25.0,
+        sec: 300,
+        t: now.subtract(const Duration(minutes: 4)).toIso8601String(),
+      );
+      final effectiveEta = effectiveStopEtaSeconds(stop, now: now);
+
+      expect(effectiveEta, 60);
+      expect(
+        estimateCatchability(
+          distanceMeters: 100,
+          etaSeconds: effectiveEta,
+        ).status,
+        CatchabilityStatus.departed,
+      );
+      expect(
+        estimateCatchability(distanceMeters: 100, etaSeconds: stop.sec).status,
+        CatchabilityStatus.likely,
+      );
+    },
+  );
 }
