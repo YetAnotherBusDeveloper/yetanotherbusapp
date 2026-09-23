@@ -301,6 +301,9 @@ void main() {
       expect(find.text('台北市'), findsNWidgets(2));
       expect(find.text('往撫遠街'), findsOneWidget);
       expect(find.text('往捷運松山站'), findsOneWidget);
+      // Same-name stops on opposite sides keep their own walking distance.
+      expect(find.text('20m'), findsOneWidget);
+      expect(find.text('30m'), findsOneWidget);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;
