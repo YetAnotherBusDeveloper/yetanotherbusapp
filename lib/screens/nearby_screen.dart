@@ -7,6 +7,7 @@ import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/bus_repository.dart';
+import '../core/catchability_estimator.dart';
 import '../core/models.dart';
 import '../core/route_direction_label.dart';
 import '../core/user_location.dart';
@@ -37,12 +38,103 @@ class _NearbyStopGroup {
   final List<NearbyRouteRow> routes;
 }
 
+String _catchabilityMessage(
+  AppLocalizations l10n,
+  CatchabilityAssessment assessment,
+) {
+  final isChinese = l10n.localeName.startsWith('zh');
+  return switch (assessment.status) {
+    CatchabilityStatus.likely =>
+      isChinese
+          ? '預估來得及，約剩餘 ${assessment.remainingMinutes} 分鐘'
+          : 'Likely in time, about ${assessment.remainingMinutes} min left',
+    CatchabilityStatus.possible =>
+      isChinese
+          ? '可能來得及，步行時間約 ${assessment.walkingMinutes} 分鐘'
+          : 'Possible, walking takes about ${assessment.walkingMinutes} min',
+    CatchabilityStatus.unlikely =>
+      isChinese
+          ? '可能來不及，步行約 ${assessment.walkingMinutes} 分鐘；建議搭乘下一班'
+          : 'May miss it; walking takes about ${assessment.walkingMinutes} min. Try the next bus',
+    CatchabilityStatus.departed =>
+      isChinese ? '公車可能已進站或離站' : 'The bus may already be at or past the stop',
+    CatchabilityStatus.unavailable =>
+      isChinese
+          ? '定位或即時資料不足，無法準確判斷'
+          : 'Not enough location or live data for an accurate estimate',
+  };
+}
+
+class _CatchabilityLabel extends StatelessWidget {
+  const _CatchabilityLabel({
+    required this.assessment,
+    required this.theme,
+    required this.l10n,
+  });
+
+  final CatchabilityAssessment assessment;
+  final ThemeData theme;
+  final AppLocalizations l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color) = switch (assessment.status) {
+      CatchabilityStatus.likely => (
+        Icons.directions_walk_rounded,
+        theme.colorScheme.tertiary,
+      ),
+      CatchabilityStatus.possible => (
+        Icons.access_time_rounded,
+        theme.colorScheme.primary,
+      ),
+      CatchabilityStatus.unlikely => (
+        Icons.warning_amber_rounded,
+        theme.colorScheme.error,
+      ),
+      CatchabilityStatus.departed => (
+        Icons.directions_bus_filled_rounded,
+        theme.colorScheme.onSurfaceVariant,
+      ),
+      CatchabilityStatus.unavailable => (
+        Icons.help_outline_rounded,
+        theme.colorScheme.onSurfaceVariant,
+      ),
+    };
+    final message = _catchabilityMessage(l10n, assessment);
+    final hint = l10n.localeName.startsWith('zh')
+        ? '步行時間為估算值，已保留定位誤差與資料延遲緩衝，僅供參考。'
+        : 'Walking time is an estimate with location and realtime buffers.';
+
+    return Tooltip(
+      message: '$message\n$hint',
+      child: Semantics(
+        label: message,
+        child: Row(
+          children: [
+            Icon(icon, size: 15, color: color),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                message,
+                style: theme.textTheme.labelSmall?.copyWith(color: color),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _NearbyScreenState extends State<NearbyScreen> {
   bool _loading = true;
   String? _error;
   LocationFailure? _locationFailure;
   List<NearbyStopResult> _results = const [];
   Map<String, LiveStopMap> _liveMaps = const {};
+  double? _locationAccuracyMeters;
   bool _loadingEtas = false;
   int _requestGeneration = 0;
   int _etaLoadsInFlight = 0;
@@ -65,6 +157,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       _error = null;
       _locationFailure = null;
       _liveMaps = const {};
+      _locationAccuracyMeters = null;
       _liveMapSequenceByRoute.clear();
       _etaLoadsInFlight = 0;
       _loadingEtas = false;
@@ -82,6 +175,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
       }
       setState(() {
         _results = results;
+        _locationAccuracyMeters = position.accuracy.isFinite
+            ? position.accuracy
+            : null;
       });
 
       unawaited(_loadEtas(results, requestGeneration: requestGeneration));
@@ -377,6 +473,13 @@ class _NearbyScreenState extends State<NearbyScreen> {
     required bool alwaysShowSeconds,
   }) {
     final item = row.result;
+    final liveStop = _liveStop(item);
+    final catchability = estimateCatchability(
+      distanceMeters: item.distanceMeters,
+      etaSeconds: liveStop.sec,
+      locationAccuracyMeters: _locationAccuracyMeters,
+    );
+    final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context).toLanguageTag();
     final providerLabel = busProviderFromString(
       item.route.sourceProvider,
@@ -392,7 +495,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
           child: Row(
             children: [
               EtaBadge(
-                stop: _liveStop(item),
+                stop: liveStop,
                 alwaysShowSeconds: alwaysShowSeconds,
                 size: 44,
               ),
@@ -411,13 +514,28 @@ class _NearbyScreenState extends State<NearbyScreen> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      providerLabel,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            providerLabel,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          flex: 2,
+                          child: _CatchabilityLabel(
+                            assessment: catchability,
+                            theme: theme,
+                            l10n: l10n,
+                          ),
+                        ),
+                      ],
                     ),
                     if (row.directionLabel.isNotEmpty)
                       TransitDirectionLabel(
