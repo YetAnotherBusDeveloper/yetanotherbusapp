@@ -1067,7 +1067,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
           itemCount: references.length,
           buildDefaultDragHandles: false,
           proxyDecorator: _buildDragProxy,
-          onReorder: (oldIndex, newIndex) =>
+          onReorderItem: (oldIndex, newIndex) =>
               _handleReorder(controller, currentGroupName, oldIndex, newIndex),
           itemBuilder: (context, index) {
             final reference = references[index];
@@ -1130,12 +1130,11 @@ class _FavoritesScreenState extends State<FavoritesScreen>
     int oldIndex,
     int newIndex,
   ) {
-    final targetIndex = newIndex > oldIndex ? newIndex - 1 : newIndex;
-    if (targetIndex == oldIndex) {
+    if (newIndex == oldIndex) {
       return;
     }
     unawaited(AppHaptics.lightImpact());
-    unawaited(controller.reorderFavoriteItem(groupName, oldIndex, targetIndex));
+    unawaited(controller.reorderFavoriteItem(groupName, oldIndex, newIndex));
   }
 
   Widget _buildFavoriteCard(

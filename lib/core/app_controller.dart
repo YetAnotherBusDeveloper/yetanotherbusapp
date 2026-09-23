@@ -3214,9 +3214,8 @@ class AppController extends ChangeNotifier {
 
   /// Moves the favorite at [oldIndex] so that it ends up at [newIndex].
   ///
-  /// Both indices refer to the group's list *after* the move, so callers
-  /// driving this from [ReorderableListView.onReorder] must apply the usual
-  /// `if (newIndex > oldIndex) newIndex -= 1` adjustment first.
+  /// Both indices refer to the group's list after the move, matching
+  /// [ReorderableListView.onReorderItem].
   Future<void> reorderFavoriteItem(
     String groupName,
     int oldIndex,
