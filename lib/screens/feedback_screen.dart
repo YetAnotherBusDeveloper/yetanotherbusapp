@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../core/app_controller.dart';
 import '../core/app_routes.dart';
@@ -234,6 +235,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                     ),
                   ),
                 ],
+                const AdBannerWidget(minimumDensity: 4, isInline: true),
               ],
             ),
           ),

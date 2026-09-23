@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
+import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/android_home_integration.dart';
@@ -198,41 +199,50 @@ class _StationDetailScreenState extends State<StationDetailScreen> {
           final arrival = side.routes[index];
           final route = arrival.result.route;
           final stop = arrival.result.matchedStop;
-          return Card(
-            child: ListTile(
-              leading: EtaBadge(
-                stop: stop,
-                alwaysShowSeconds: AppControllerScope.read(
-                  context,
-                ).settings.alwaysShowSeconds,
-              ),
-              title: TransitStationName(
-                name: route.transitName,
-                primaryMaxLines: 1,
-                secondaryMaxLines: 1,
-              ),
-              subtitle: TransitDirectionLabel(
-                label:
-                    route.description.trim().isNotEmpty ||
-                        (route.pathNameEn?.trim().isNotEmpty ?? false)
-                    ? localizedRouteDirectionForRoute(
-                        l10n,
-                        route: route,
-                        pathId: stop.pathId,
-                      )
-                    : (side.direction ?? l10n.stationSideLabel(side.label)),
-              ),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => Navigator.of(context).pushNamed(
-                AppRoutes.routeDetailPath(
-                  provider: widget.provider,
-                  routeKey: route.routeKey,
-                  routeId: route.routeId,
-                  pathId: stop.pathId,
-                  stopId: stop.stopId,
+          return Column(
+            children: [
+              Card(
+                child: ListTile(
+                  leading: EtaBadge(
+                    stop: stop,
+                    alwaysShowSeconds: AppControllerScope.read(
+                      context,
+                    ).settings.alwaysShowSeconds,
+                  ),
+                  title: TransitStationName(
+                    name: route.transitName,
+                    primaryMaxLines: 1,
+                    secondaryMaxLines: 1,
+                  ),
+                  subtitle: TransitDirectionLabel(
+                    label:
+                        route.description.trim().isNotEmpty ||
+                            (route.pathNameEn?.trim().isNotEmpty ?? false)
+                        ? localizedRouteDirectionForRoute(
+                            l10n,
+                            route: route,
+                            pathId: stop.pathId,
+                          )
+                        : (side.direction ?? l10n.stationSideLabel(side.label)),
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).pushNamed(
+                    AppRoutes.routeDetailPath(
+                      provider: widget.provider,
+                      routeKey: route.routeKey,
+                      routeId: route.routeId,
+                      pathId: stop.pathId,
+                      stopId: stop.stopId,
+                    ),
+                  ),
                 ),
               ),
-            ),
+              if (side.routes.length > 1 &&
+                  index == (side.routes.length / 2).ceil() - 1)
+                const AdBannerWidget(minimumDensity: 3, isInline: true),
+              if (index == side.routes.length - 1)
+                const AdBannerWidget(minimumDensity: 3, isInline: true),
+            ],
           );
         },
       ),

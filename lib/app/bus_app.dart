@@ -42,6 +42,7 @@ import '../screens/privacy_policy_page.dart';
 import '../screens/route_detail_navigation.dart';
 import '../screens/station_detail_screen.dart';
 import '../screens/search_screen.dart';
+import '../screens/social_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/terms_of_service_page.dart';
 import '../widgets/app_update_dialog.dart';
@@ -420,6 +421,11 @@ Route<dynamic>? _buildAppRoute(
       return MaterialPageRoute<void>(
         settings: const RouteSettings(name: AppRoutes.account),
         builder: (_) => const AccountScreen(),
+      );
+    case AppRouteKind.social:
+      return MaterialPageRoute<void>(
+        settings: const RouteSettings(name: AppRoutes.social),
+        builder: (_) => const SocialScreen(),
       );
     case AppRouteKind.feedback:
       return MaterialPageRoute<void>(

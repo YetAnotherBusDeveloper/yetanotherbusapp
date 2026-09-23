@@ -9,6 +9,7 @@ class AppRoutes {
   static const nearby = '/nearby';
   static const settings = '/settings';
   static const account = '/account';
+  static const social = '/social';
   static const feedback = '/feedback';
   static const databaseSettings = '/database-settings';
   static const termsOfService = '/terms-of-service';
@@ -24,6 +25,7 @@ class AppRoutes {
     'nearby': nearby,
     'settings': settings,
     'account': account,
+    'social': social,
     'feedback': feedback,
     'feedbacks': feedback,
     'database_settings': databaseSettings,
@@ -141,6 +143,7 @@ enum AppRouteKind {
   nearby,
   settings,
   account,
+  social,
   feedback,
   databaseSettings,
   termsOfService,
@@ -228,6 +231,12 @@ AppRouteIntent parseAppRoute(String? rawLocation) {
     return const AppRouteIntent(
       kind: AppRouteKind.account,
       location: AppRoutes.account,
+    );
+  }
+  if (uri.path == AppRoutes.social) {
+    return const AppRouteIntent(
+      kind: AppRouteKind.social,
+      location: AppRoutes.social,
     );
   }
   if (uri.path == AppRoutes.feedback) {

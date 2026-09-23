@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
+import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
+import '../core/app_routes.dart';
 import '../core/account_sync_models.dart';
 import '../core/app_controller.dart';
 import '../core/auth_service.dart';
@@ -410,6 +412,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   onGoogleLink: () => _startAuthLink(controller, 'google'),
                 ),
                 const SizedBox(height: 12),
+                const _SocialCard(),
+                const SizedBox(height: 12),
                 _SyncCard(
                   enabled: controller.accountSyncEnabled,
                   routeHistoryEnabled: controller.routeHistorySyncEnabled,
@@ -439,9 +443,28 @@ class _AccountScreenState extends State<AccountScreen> {
                   ),
                 ),
               ],
+              const AdBannerWidget(minimumDensity: 4, isInline: true),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SocialCard extends StatelessWidget {
+  const _SocialCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(18, 10, 12, 10),
+        leading: const CircleAvatar(child: Icon(Icons.share_location_rounded)),
+        title: const Text('社交與位置分享'),
+        subtitle: const Text('主動分享目前位置給朋友，不會背景追蹤，也不會自動上傳座標。'),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => Navigator.of(context).pushNamed(AppRoutes.social),
       ),
     );
   }

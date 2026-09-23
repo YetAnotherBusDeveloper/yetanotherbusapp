@@ -2,6 +2,8 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import '../widgets/ad_density_setting.dart';
+import '../widgets/ad_banner_widget.dart';
 import '../core/ad_service.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -771,6 +773,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     value,
                                   ),
                           ),
+                        if (!kIsWeb &&
+                            defaultTargetPlatform == TargetPlatform.android)
+                          const AdDensitySetting(),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: Text(l10n.smartRecommendationsTitle),
@@ -1148,7 +1153,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
-                              width:85,
+                              width: 85,
                               height: 85,
                               decoration: BoxDecoration(
                                 color: theme.colorScheme.primaryContainer,
@@ -1263,6 +1268,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+                const AdBannerWidget(minimumDensity: 4, isInline: true),
               ],
             ),
           ),

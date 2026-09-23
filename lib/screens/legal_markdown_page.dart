@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
+import '../widgets/ad_banner_widget.dart';
 import '../widgets/app_content_transition.dart';
 import '../widgets/markdown_content_view.dart';
 
@@ -121,9 +122,10 @@ class _LegalMarkdownPageState extends State<LegalMarkdownPage> {
                           ),
                         ),
                       ),
-                    if (_content case final content?)
-                      MarkdownContentView(markdown: content)
-                    else if (!_loading)
+                    if (_content case final content?) ...[
+                      MarkdownContentView(markdown: content),
+                      const AdBannerWidget(minimumDensity: 4, isInline: true),
+                    ] else if (!_loading)
                       Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24),

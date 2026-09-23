@@ -6128,10 +6128,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                         controller: _scrollControllerForPath(path.pathId),
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
                         itemCount: pathStops.length + 2,
-                        separatorBuilder: (_, _) => const SizedBox(height: 18),
+                        separatorBuilder: (_, index) =>
+                            index == 0 || index == pathStops.length
+                            ? const SizedBox.shrink()
+                            : const SizedBox(height: 18),
                         itemBuilder: (context, index) {
                           if (index == 0 || index == pathStops.length + 1) {
-                            return const AdBannerWidget();
+                            return const AdBannerWidget(isInline: true);
                           }
                           final stop = pathStops[index - 1];
                           final stopKey = _keyForStop(path.pathId, stop.stopId);

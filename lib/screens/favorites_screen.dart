@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../core/app_controller.dart';
 import '../core/app_routes.dart';
@@ -1082,6 +1083,7 @@ class _FavoritesScreenState extends State<FavoritesScreen>
         child: ReorderableListView.builder(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           itemCount: references.length,
+          footer: const AdBannerWidget(minimumDensity: 2, isInline: true),
           buildDefaultDragHandles: false,
           proxyDecorator: _buildDragProxy,
           onReorderItem: (oldIndex, newIndex) =>

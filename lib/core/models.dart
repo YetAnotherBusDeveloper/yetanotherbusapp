@@ -397,6 +397,7 @@ class AppSettings {
     required this.wearSelectedFavoriteIds,
     required this.wearSmartSuggestionsEnabled,
     required this.enableAds,
+    this.adDensity = 1,
   }) : interfaceScale = interfaceScale != interfaceScale
            ? defaultInterfaceScale
            : interfaceScale < minInterfaceScale
@@ -592,6 +593,9 @@ class AppSettings {
       wearSmartSuggestionsEnabled:
           json['wearSmartSuggestionsEnabled'] as bool? ?? true,
       enableAds: json['enableAds'] as bool? ?? true,
+      adDensity: json['adDensity'] is int
+          ? (json['adDensity'] as int).clamp(1, 4)
+          : 1,
     );
   }
 
@@ -636,6 +640,7 @@ class AppSettings {
   final List<String> wearSelectedFavoriteIds;
   final bool wearSmartSuggestionsEnabled;
   final bool enableAds;
+  final int adDensity;
 
   AppSettings copyWith({
     BusProvider? provider,
@@ -680,6 +685,7 @@ class AppSettings {
     List<String>? wearSelectedFavoriteIds,
     bool? wearSmartSuggestionsEnabled,
     bool? enableAds,
+    int? adDensity,
   }) {
     return AppSettings(
       provider: provider ?? this.provider,
@@ -745,6 +751,7 @@ class AppSettings {
       wearSmartSuggestionsEnabled:
           wearSmartSuggestionsEnabled ?? this.wearSmartSuggestionsEnabled,
       enableAds: enableAds ?? this.enableAds,
+      adDensity: (adDensity ?? this.adDensity).clamp(1, 4),
     );
   }
 
@@ -794,6 +801,7 @@ class AppSettings {
       'wearSelectedFavoriteIds': wearSelectedFavoriteIds,
       'wearSmartSuggestionsEnabled': wearSmartSuggestionsEnabled,
       'enableAds': enableAds,
+      'adDensity': adDensity,
     };
   }
 }

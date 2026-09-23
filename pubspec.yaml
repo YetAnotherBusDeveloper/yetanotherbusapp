@@ -109,6 +109,10 @@ flutter:
     - assets/cat_cry.png
     - assets/cat_laugh.png
     - assets/cat_sad.png
+    - assets/cat_unshock.jpg
+    - assets/cat_shock.jpg
+    - assets/cat_cringe.jpg
+    - assets/cat_scared.jpg
     - assets/oppo_enable_live_alert.jpg
 
   # An image asset can refer to one or more resolution-specific "variants", see

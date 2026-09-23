@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/bus_repository.dart';
@@ -557,69 +558,86 @@ class _NearbyScreenState extends State<NearbyScreen> {
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final group = groups[index];
-                        return Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
+                        return Column(
+                          children: [
+                            Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Container(
-                                      width: 52,
-                                      height: 52,
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                        color:
-                                            theme.colorScheme.primaryContainer,
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      child: Text(
-                                        formatDistance(group.distanceMeters),
-                                        textAlign: TextAlign.center,
-                                        style: theme.textTheme.labelMedium,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: TransitStationName(
-                                        name: group
-                                            .routes
-                                            .first
-                                            .result
-                                            .stop
-                                            .transitName,
-                                        primaryStyle: theme
-                                            .textTheme
-                                            .titleMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w700,
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 52,
+                                          height: 52,
+                                          alignment: Alignment.center,
+                                          decoration: BoxDecoration(
+                                            color: theme
+                                                .colorScheme
+                                                .primaryContainer,
+                                            borderRadius: BorderRadius.circular(
+                                              16,
                                             ),
-                                      ),
+                                          ),
+                                          child: Text(
+                                            formatDistance(
+                                              group.distanceMeters,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                            style: theme.textTheme.labelMedium,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 14),
+                                        Expanded(
+                                          child: TransitStationName(
+                                            name: group
+                                                .routes
+                                                .first
+                                                .result
+                                                .stop
+                                                .transitName,
+                                            primaryStyle: theme
+                                                .textTheme
+                                                .titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
+                                    if (_loadingEtas) ...[
+                                      const SizedBox(height: 10),
+                                      const LinearProgressIndicator(
+                                        minHeight: 2,
+                                      ),
+                                    ],
+                                    const SizedBox(height: 8),
+                                    for (
+                                      var index = 0;
+                                      index < group.routes.length;
+                                      index++
+                                    ) ...[
+                                      if (index > 0) const Divider(height: 1),
+                                      _buildRouteRow(
+                                        theme,
+                                        group.routes[index],
+                                        alwaysShowSeconds: controller
+                                            .settings
+                                            .alwaysShowSeconds,
+                                      ),
+                                    ],
                                   ],
                                 ),
-                                if (_loadingEtas) ...[
-                                  const SizedBox(height: 10),
-                                  const LinearProgressIndicator(minHeight: 2),
-                                ],
-                                const SizedBox(height: 8),
-                                for (
-                                  var index = 0;
-                                  index < group.routes.length;
-                                  index++
-                                ) ...[
-                                  if (index > 0) const Divider(height: 1),
-                                  _buildRouteRow(
-                                    theme,
-                                    group.routes[index],
-                                    alwaysShowSeconds:
-                                        controller.settings.alwaysShowSeconds,
-                                  ),
-                                ],
-                              ],
+                              ),
                             ),
-                          ),
+                            if (index == groups.length - 1)
+                              const AdBannerWidget(
+                                minimumDensity: 2,
+                                isInline: true,
+                              ),
+                          ],
                         );
                       },
                     ),

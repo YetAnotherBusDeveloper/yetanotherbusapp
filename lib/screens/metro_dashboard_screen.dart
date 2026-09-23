@@ -22,11 +22,13 @@ class MetroScreen extends StatefulWidget {
   const MetroScreen({
     required this.isActive,
     this.showAdBanner = true,
+    this.adMinimumDensity = 1,
     super.key,
   });
 
   final bool isActive;
   final bool showAdBanner;
+  final int adMinimumDensity;
 
   @override
   State<MetroScreen> createState() => _MetroScreenState();
@@ -489,7 +491,10 @@ class _MetroScreenState extends State<MetroScreen> {
     }
     final cleaned = hex.replaceAll('#', '');
     if (cleaned.length == 6) {
-      return Color(int.parse('FF$cleaned', radix: 16));
+      final value = int.tryParse('FF$cleaned', radix: 16);
+      if (value != null) {
+        return Color(value);
+      }
     }
     return Colors.grey;
   }
@@ -561,8 +566,10 @@ class _MetroScreenState extends State<MetroScreen> {
                                 ),
                                 const SizedBox(height: 16),
                               ],
-                              _buildSourceBanner(theme),
-                              const SizedBox(height: 16),
+                              if (_selectedLine != null) ...[
+                                _buildSourceBanner(theme),
+                                const SizedBox(height: 16),
+                              ],
                               _MetroPanelButtons(
                                 current: _panel,
                                 onChanged: (panel) =>
@@ -583,7 +590,11 @@ class _MetroScreenState extends State<MetroScreen> {
               ),
             ),
           ),
-          if (widget.showAdBanner) const AdBannerWidget(),
+          if (widget.showAdBanner)
+            AdBannerWidget(
+              minimumDensity: widget.adMinimumDensity,
+              isActive: widget.isActive,
+            ),
         ],
       ),
     );
@@ -603,13 +614,15 @@ class _MetroScreenState extends State<MetroScreen> {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            // const SizedBox(height: 6),
-            // Text(
-            //   '先切城市，再切路線；同一頁就能看即時到站與站點地圖。',
-            //   style: theme.textTheme.bodySmall?.copyWith(
-            //     color: theme.colorScheme.onSurfaceVariant,
-            //   ),
-            // ),
+            const SizedBox(height: 4),
+            Text(
+              _selectedSystem == null
+                  ? '先選擇城市，再挑選路線。'
+                  : '${_selectedSystem!.city} · ${_selectedSystem!.name}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
             const SizedBox(height: 14),
             Wrap(
               spacing: 10,
@@ -682,25 +695,21 @@ class _MetroScreenState extends State<MetroScreen> {
                 label: l10n.metroNoLines,
               )
             else
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: _lines
-                      .map((line) {
-                        final selected = line.lineId == _selectedLine?.lineId;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 10),
-                          child: _LinePill(
-                            line: line,
-                            selected: selected,
-                            onTap: _loadingSystem
-                                ? null
-                                : () => _loadLineEta(line: line),
-                          ),
-                        );
-                      })
-                      .toList(growable: false),
-                ),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _lines
+                    .map((line) {
+                      final selected = line.lineId == _selectedLine?.lineId;
+                      return _LinePill(
+                        line: line,
+                        selected: selected,
+                        onTap: _loadingSystem
+                            ? null
+                            : () => _loadLineEta(line: line),
+                      );
+                    })
+                    .toList(growable: false),
               ),
             if (_loadingEta) ...[
               const SizedBox(height: 12),
@@ -738,8 +747,10 @@ class _MetroScreenState extends State<MetroScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            Icons.info_outline_rounded,
-            color: theme.colorScheme.onSurfaceVariant,
+            _etaSource == 'liveboard'
+                ? Icons.wifi_tethering_rounded
+                : Icons.schedule_rounded,
+            color: theme.colorScheme.primary,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -811,11 +822,12 @@ class _MetroScreenState extends State<MetroScreen> {
               lineColor: _parseLineColor(_selectedLine!.color),
               frequencyLabel: _currentHeadway == null
                   ? null
-                   : l10n.metroHeadway(
-                       _currentHeadway!.minHeadway,
-                       _currentHeadway!.maxHeadway,
-                     ),
+                  : l10n.metroHeadway(
+                      _currentHeadway!.minHeadway,
+                      _currentHeadway!.maxHeadway,
+                    ),
             ),
+            initiallyExpanded: true,
           ),
         ),
       ],
@@ -829,15 +841,15 @@ class _MetroScreenState extends State<MetroScreen> {
     final points = _uniqueStations
         .map((sequence) {
           final station = _stationLookup[sequence.stationId];
-           return TransitMapPoint(
+          return TransitMapPoint(
             id: sequence.stationId,
             label: sequence.name,
-             subtitle: sequence.nameEn,
-             name: TransitName(
-               zh: sequence.name,
-               en: sequence.nameEn,
-               stableId: sequence.stationId,
-             ),
+            subtitle: sequence.nameEn,
+            name: TransitName(
+              zh: sequence.name,
+              en: sequence.nameEn,
+              stableId: sequence.stationId,
+            ),
             latitude: station?.lat ?? 0,
             longitude: station?.lon ?? 0,
             color: lineColor,
@@ -859,7 +871,7 @@ class _MetroScreenState extends State<MetroScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                         l10n.metroRouteMap,
+                        l10n.metroRouteMap,
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -873,13 +885,13 @@ class _MetroScreenState extends State<MetroScreen> {
                     ),
                   ],
                 ),
-                // const SizedBox(height: 8),
-                // Text(
-                //   '點站點會把下方切到該站最近列車；不需要再進第二層畫面。',
-                //   style: theme.textTheme.bodySmall?.copyWith(
-                //     color: theme.colorScheme.onSurfaceVariant,
-                //   ),
-                // ),
+                const SizedBox(height: 8),
+                Text(
+                  '點選站點即可查看最近班次；拖曳地圖可以瀏覽整條路線。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 TransitStationMap(
                   points: points,
@@ -1058,7 +1070,10 @@ class _LinePill extends StatelessWidget {
   Color _parseLineColor(String hex) {
     final cleaned = hex.replaceAll('#', '');
     if (cleaned.length == 6) {
-      return Color(int.parse('FF$cleaned', radix: 16));
+      final value = int.tryParse('FF$cleaned', radix: 16);
+      if (value != null) {
+        return Color(value);
+      }
     }
     return Colors.grey;
   }
@@ -1146,6 +1161,7 @@ class _DirectionSection extends StatelessWidget {
     required this.etaSource,
     required this.stationBuilder,
     required this.onStationTap,
+    required this.initiallyExpanded,
     super.key,
   });
 
@@ -1155,6 +1171,7 @@ class _DirectionSection extends StatelessWidget {
   final String etaSource;
   final Widget Function(MetroStationSequence station) stationBuilder;
   final ValueChanged<String> onStationTap;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -1165,31 +1182,26 @@ class _DirectionSection extends StatelessWidget {
         : l10n.directionNumber(direction.direction + 1);
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: lineColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    directionLabel,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                if (etaSource == 'frequency' && headway != null)
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+        leading: Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: lineColor, shape: BoxShape.circle),
+        ),
+        title: Text(
+          directionLabel,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        trailing: etaSource == 'frequency' && headway != null
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Chip(
                     label: Text(
                       l10n.metroHeadway(
@@ -1198,10 +1210,12 @@ class _DirectionSection extends StatelessWidget {
                       ),
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ...direction.stations.map((station) {
+                  const Icon(Icons.expand_more_rounded),
+                ],
+              )
+            : null,
+        children: direction.stations
+            .map((station) {
               return InkWell(
                 borderRadius: BorderRadius.circular(18),
                 onTap: () => onStationTap(station.stationId),
@@ -1210,9 +1224,8 @@ class _DirectionSection extends StatelessWidget {
                   child: stationBuilder(station),
                 ),
               );
-            }),
-          ],
-        ),
+            })
+            .toList(growable: false),
       ),
     );
   }
@@ -1279,10 +1292,11 @@ class _MetroStationRow extends StatelessWidget {
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
-                      )
+                      ),
                   ],
                 ),
               ),
+              const Icon(Icons.chevron_right_rounded),
             ],
           ),
         ),
@@ -1320,19 +1334,19 @@ class _SelectedMetroStationCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                       TransitStationName(
-                         name: name,
-                         primaryStyle: theme.textTheme.titleLarge?.copyWith(
-                           fontWeight: FontWeight.w700,
-                         ),
-                       ),
+                      TransitStationName(
+                        name: name,
+                        primaryStyle: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 FilledButton.tonalIcon(
                   onPressed: () => onRefresh(),
                   icon: const Icon(Icons.refresh_rounded),
-                   label: Text(l10n.commonRefresh),
+                  label: Text(l10n.commonRefresh),
                 ),
               ],
             ),
