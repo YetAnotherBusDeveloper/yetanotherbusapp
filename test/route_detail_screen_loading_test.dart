@@ -429,7 +429,7 @@ void main() {
     expect(statusRect.right, closeTo(tileRect.right - 8, 0.1));
   });
 
-  _screenTest('fades in route stops immediately once data is ready', (
+  _screenTest('waits for realtime ETA before fading in route stops', (
     tester,
     repository,
   ) async {
@@ -445,14 +445,17 @@ void main() {
     expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 0);
 
     await tester.pump(const Duration(milliseconds: 110));
+    expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 0);
+
+    repository.primaryRequests.single.complete(_detail(eta: 120));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 110));
     expect(
       tester.widget<FadeTransition>(stopsFade).opacity.value,
       greaterThan(0),
     );
     expect(tester.widget<FadeTransition>(stopsFade).opacity.value, lessThan(1));
-
-    repository.primaryRequests.single.complete(_detail(eta: 120));
-    await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
     expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 1);
   }, initialFrameCount: 1);

@@ -459,7 +459,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             _isLoading = false;
             _status = _RouteDetailStatus.loadingRealtime;
           });
-          _scheduleInitialStopsReveal();
           _updateDesktopPresence();
           if (_isRouteVisible) {
             unawaited(_loadSupplementaryNotices(topology));
