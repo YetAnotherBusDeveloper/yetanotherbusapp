@@ -123,6 +123,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<DatabaseAutoUpdateMode>(
+                        isExpanded: true,
                         initialValue:
                             controller.settings.databaseAutoUpdateMode,
                         decoration: InputDecoration(
@@ -302,6 +303,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<BusProvider>(
+                        isExpanded: true,
                         initialValue: controller.settings.provider,
                         decoration: InputDecoration(
                           labelText: l10n.databaseDefaultRegionLabel,
