@@ -9,10 +9,10 @@ import '../app/bus_app.dart';
 import '../core/app_motion.dart';
 import '../core/app_routes.dart';
 import '../core/app_controller.dart';
+import '../core/last_bus_message.dart';
 import '../core/models.dart';
 import '../core/pwa_install_service.dart';
 import '../core/route_direction_label.dart';
-import '../core/smart_route_service.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 import '../widgets/eta_badge.dart';
@@ -720,35 +720,13 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     // Smart route suggestions require local database for usage profiles.
     // On web (or when DB not ready), skip to nearby fallback if location is available.
     if (controller.databaseReady && controller.routeUsageProfiles.isNotEmpty) {
+      position = await positionFuture;
       final baseSuggestions = await controller.getSmartRouteSuggestions(
+        position: position,
         limit: widget.maxSuggestions,
       );
       if (baseSuggestions.isNotEmpty) {
-        final allHaveFavoriteStops = baseSuggestions.every(
-          (suggestion) => suggestion.favoriteStop != null,
-        );
-        if (!allHaveFavoriteStops) {
-          position = await positionFuture;
-        }
-        final suggestions = position == null
-            ? baseSuggestions
-            : baseSuggestions
-                  .map((suggestion) {
-                    final detail = suggestion.detail;
-                    if (detail == null) {
-                      return suggestion;
-                    }
-                    return SmartRouteService.buildSuggestion(
-                      profile: suggestion.profile,
-                      score: suggestion.score,
-                      reason: suggestion.reason,
-                      detail: detail,
-                      favorite: suggestion.favorite,
-                      position: position,
-                    );
-                  })
-                  .toList(growable: false);
-        return _SmartCardData.recommended(suggestions);
+        return _SmartCardData.recommended(baseSuggestions);
       }
     }
 
@@ -762,43 +740,60 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
       final nearbyStops = await controller.getNearbyStops(
         latitude: position.latitude,
         longitude: position.longitude,
-        limit: widget.maxSuggestions,
+        limit: widget.maxSuggestions < 20 ? 20 : widget.maxSuggestions,
       );
       if (nearbyStops.isEmpty) {
         return null;
       }
 
-      final nearbyResults = await Future.wait(
-        nearbyStops.take(widget.maxSuggestions).map((nearest) async {
-          try {
-            final routeProvider = busProviderFromString(
-              nearest.route.sourceProvider,
-            );
-            final detail = await controller.getPrimaryRouteDetail(
-              nearest.route.routeKey,
-              provider: routeProvider,
-              routeIdHint: nearest.route.routeId,
-              routeNameHint: nearest.route.routeName,
-            );
-            final liveStop = _findStopInDetail(
-              detail,
-              pathId: nearest.stop.pathId,
-              stopId: nearest.stop.stopId,
-            );
-            return _NearbyFallbackData(
+      final nearbyList = <_NearbyFallbackData>[];
+      final seen = <String>{};
+      for (final nearest in nearbyStops) {
+        final identity = [
+          nearest.route.sourceProvider,
+          nearest.route.routeId,
+          nearest.route.routeKey,
+          nearest.stop.pathId,
+          nearest.stop.stopId,
+        ].join(':');
+        if (!seen.add(identity)) {
+          continue;
+        }
+        try {
+          final routeProvider = busProviderFromString(
+            nearest.route.sourceProvider,
+          );
+          final detail = await controller.getPrimaryRouteDetail(
+            nearest.route.routeKey,
+            provider: routeProvider,
+            routeIdHint: nearest.route.routeId,
+            routeNameHint: nearest.route.routeName,
+          );
+          final liveStop = _findStopInDetail(
+            detail,
+            pathId: nearest.stop.pathId,
+            stopId: nearest.stop.stopId,
+          );
+          final stop = liveStop ?? nearest.stop;
+          if (isLastBusMessage(stop.msg) ||
+              stop.etas.any((eta) => isLastBusMessage(eta.msg))) {
+            continue;
+          }
+          nearbyList.add(
+            _NearbyFallbackData(
               result: nearest,
               detail: detail,
               liveStop: liveStop,
               path: _findPath(detail, nearest.stop.pathId),
-            );
-          } catch (_) {
-            return null;
+            ),
+          );
+          if (nearbyList.length == widget.maxSuggestions) {
+            break;
           }
-        }),
-      );
-      final nearbyList = nearbyResults.whereType<_NearbyFallbackData>().toList(
-        growable: false,
-      );
+        } catch (_) {
+          // Try the next nearby route when one candidate cannot be resolved.
+        }
+      }
       if (nearbyList.isEmpty) {
         return null;
       }
