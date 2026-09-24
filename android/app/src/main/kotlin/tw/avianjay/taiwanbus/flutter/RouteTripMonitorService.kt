@@ -34,6 +34,9 @@ import kotlin.math.abs
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal fun buildOnboardTripSubText(nearestStopName: String): String =
+    "已上車 · 最近站牌 $nearestStopName"
+
 class RouteTripMonitorService : Service() {
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -815,7 +818,7 @@ class RouteTripMonitorService : Service() {
                 remainingStops == 0 -> "已接近 ${destinationStop.stopName}"
                 else -> "距離 ${destinationStop.stopName} 還有 $remainingStops 站 · $destinationEtaText"
             },
-            subText = "已上車 · 最近站牌 ${nearestStop.stopName}",
+            subText = buildOnboardTripSubText(nearestStop.stopName),
             progressMax = toProgressMax(journeyPointCount),
             progressValue = toProgressValue(currentProgressPoint, journeyPointCount),
             shortCriticalText = buildShortCriticalText(
