@@ -51,57 +51,56 @@ class SmartRouteNotificationWorker(
                 .loadProfiles(applicationContext)
                 .filter { it.provider == settings.provider }
             val now = System.currentTimeMillis()
-            val candidate = SmartRouteNotificationSupport.chooseProfileForNow(
+            val candidates = SmartRouteNotificationSupport.chooseProfilesForNow(
                 profiles = profiles,
                 nowMs = now,
-            ) ?: return Result.success()
-            if (SmartRouteNotificationSupport.wasRecentlyInteracted(candidate, now)) {
-                return Result.success()
-            }
+            )
+            if (candidates.isEmpty()) return Result.success()
 
             val currentLocation = SmartRouteNotificationSupport.loadCurrentLocation(
                 applicationContext,
             ) ?: return Result.success()
-            val routeData = SmartRouteNotificationSupport.loadRouteData(
-                context = applicationContext,
-                provider = candidate.provider,
-                routeKey = candidate.routeKey,
-                fallbackRouteName = candidate.routeName,
-            ) ?: return Result.success()
-            val nearestStop = SmartRouteNotificationSupport.findNearestStop(
-                location = currentLocation,
-                routeData = routeData,
-                pathId = candidate.pathId,
-            ) ?: return Result.success()
-            val liveStop = SmartRouteNotificationSupport.fetchLiveStop(
-                routeId = routeData.routeId,
-                preferredPathId = nearestStop.pathId,
-                stopId = nearestStop.stopId,
-            ) ?: return Result.success()
-            if (!SmartRouteNotificationSupport.shouldNotify(liveStop)) {
-                return Result.success()
-            }
-            if (!SmartRouteNotificationSupport.shouldDeliverNotification(
+
+            for (candidate in candidates) {
+                if (SmartRouteNotificationSupport.wasRecentlyInteracted(candidate, now)) continue
+                val routeData = SmartRouteNotificationSupport.loadRouteData(
                     context = applicationContext,
                     provider = candidate.provider,
                     routeKey = candidate.routeKey,
-                    pathId = nearestStop.pathId,
+                    fallbackRouteName = candidate.routeName,
+                ) ?: continue
+                val nearestStop = SmartRouteNotificationSupport.findNearestStop(
+                    location = currentLocation,
+                    routeData = routeData,
+                    pathId = candidate.pathId,
+                ) ?: continue
+                val liveStop = SmartRouteNotificationSupport.fetchLiveStop(
+                    routeId = routeData.routeId,
+                    preferredPathId = nearestStop.pathId,
                     stopId = nearestStop.stopId,
+                ) ?: continue
+                if (!SmartRouteNotificationSupport.shouldNotify(liveStop)) continue
+                if (!SmartRouteNotificationSupport.shouldDeliverNotification(
+                        context = applicationContext,
+                        provider = candidate.provider,
+                        routeKey = candidate.routeKey,
+                        pathId = nearestStop.pathId,
+                        stopId = nearestStop.stopId,
+                        nowMs = now,
+                    )
+                ) continue
+
+                SmartRouteNotificationSupport.showNotification(
+                    context = applicationContext,
+                    profile = candidate,
+                    routeData = routeData,
+                    nearestStop = nearestStop,
+                    liveStop = liveStop,
+                    distanceMeters = nearestStop.distanceMeters,
                     nowMs = now,
                 )
-            ) {
-                return Result.success()
+                break
             }
-
-            SmartRouteNotificationSupport.showNotification(
-                context = applicationContext,
-                profile = candidate,
-                routeData = routeData,
-                nearestStop = nearestStop,
-                liveStop = liveStop,
-                distanceMeters = nearestStop.distanceMeters,
-                nowMs = now,
-            )
             Result.success()
         } catch (_: Exception) {
             Result.retry()
@@ -109,7 +108,7 @@ class SmartRouteNotificationWorker(
     }
 }
 
-private object SmartRouteNotificationSupport {
+internal object SmartRouteNotificationSupport {
     private const val MIN_TOTAL_OPENS_FOR_RECOMMENDATION = 3
     private const val MIN_RELEVANT_INTERACTIONS_FOR_RECOMMENDATION = 2
     private const val FLUTTER_PREFERENCES_NAME = "FlutterSharedPreferences"
@@ -221,10 +220,10 @@ private object SmartRouteNotificationSupport {
         return result
     }
 
-    fun chooseProfileForNow(
+    fun chooseProfilesForNow(
         profiles: List<SmartRouteProfile>,
         nowMs: Long,
-    ): SmartRouteProfile? {
+    ): List<SmartRouteProfile> {
         val now = java.util.Calendar.getInstance().apply {
             timeInMillis = nowMs
         }
@@ -241,8 +240,11 @@ private object SmartRouteNotificationSupport {
                     nextHour = nextHour,
                 )
             }
-            .maxByOrNull { profile ->
+            .sortedByDescending { profile ->
                 scoreProfile(profile, currentHour, previousHour, nextHour, nowMs)
+            }
+            .distinctBy { profile ->
+                listOf(profile.provider, profile.routeKey, profile.pathId)
             }
     }
 
@@ -409,6 +411,9 @@ private object SmartRouteNotificationSupport {
 
     fun shouldNotify(liveStop: SmartLiveStop): Boolean {
         val message = liveStop.msg?.trim().orEmpty()
+        if (isLastBusMessage(message)) {
+            return false
+        }
         if (message.isNotEmpty()) {
             return true
         }
@@ -746,12 +751,12 @@ private object SmartRouteNotificationSupport {
     }
 }
 
-private data class SmartRouteSettings(
+internal data class SmartRouteSettings(
     val provider: String,
     val enableNotifications: Boolean,
 )
 
-private data class SmartRouteProfile(
+internal data class SmartRouteProfile(
     val provider: String,
     val routeKey: Int,
     val pathId: Int,
@@ -785,7 +790,7 @@ private data class SmartRouteProfile(
         }
 }
 
-private data class SmartRouteData(
+internal data class SmartRouteData(
     val provider: String,
     val routeKey: Int,
     val routeId: String,
@@ -794,7 +799,7 @@ private data class SmartRouteData(
     val stops: List<SmartRouteStop>,
 )
 
-private data class SmartRouteStop(
+internal data class SmartRouteStop(
     val pathId: Int,
     val stopId: Int,
     val stopName: String,
@@ -803,14 +808,14 @@ private data class SmartRouteStop(
     val lat: Double,
 )
 
-private data class SmartNearestStop(
+internal data class SmartNearestStop(
     val pathId: Int,
     val stopId: Int,
     val stopName: String,
     val distanceMeters: Double,
 )
 
-private data class SmartLiveStop(
+internal data class SmartLiveStop(
     val sec: Int?,
     val msg: String?,
 )

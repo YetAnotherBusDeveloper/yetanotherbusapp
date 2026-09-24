@@ -200,6 +200,31 @@ double quantizeGoogleBusHeading(double heading) {
   return quantized >= 360 ? 0 : quantized;
 }
 
+/// Identifies reusable stationary markers for one rendered map state.
+String staticBusMarkerCacheKey({
+  required Iterable<String> visibleBusIds,
+  required int dataGeneration,
+  required String viewportKey,
+  required double zoom,
+  required String filterKey,
+  required String selectionKey,
+  required String locale,
+}) {
+  final identities = visibleBusIds.toList()..sort();
+  final encodedIdentities = identities
+      .map((identity) => '${identity.length}:$identity')
+      .join();
+  return [
+    dataGeneration,
+    viewportKey,
+    zoom.toStringAsFixed(2),
+    filterKey,
+    selectionKey,
+    locale,
+    encodedIdentities,
+  ].join('|');
+}
+
 Future<Uint8List> drawGoogleBusIcon(GoogleBusIconRequest request) async {
   final pixelSize = (request.logicalSize * request.pixelRatio).ceil();
   final recorder = ui.PictureRecorder();

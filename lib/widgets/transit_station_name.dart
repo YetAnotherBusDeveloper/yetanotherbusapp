@@ -13,6 +13,7 @@ class TransitStationName extends StatelessWidget {
     this.overflow = TextOverflow.ellipsis,
     this.textAlign = TextAlign.start,
     this.crossAxisAlignment = CrossAxisAlignment.start,
+    this.verticalSpacing = 0,
   });
 
   final TransitName name;
@@ -23,6 +24,7 @@ class TransitStationName extends StatelessWidget {
   final TextOverflow overflow;
   final TextAlign textAlign;
   final CrossAxisAlignment crossAxisAlignment;
+  final double verticalSpacing;
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +57,8 @@ class TransitStationName extends StatelessWidget {
             maxLines: primaryMaxLines,
             overflow: overflow,
           ),
+          if (secondary != null && verticalSpacing > 0)
+            SizedBox(height: verticalSpacing),
           if (secondary != null)
             Text(
               secondary,

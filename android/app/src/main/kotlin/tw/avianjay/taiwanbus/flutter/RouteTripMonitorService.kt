@@ -243,11 +243,12 @@ class RouteTripMonitorService : Service() {
                     lastWentBackgroundAtMs = System.currentTimeMillis()
                 }
                 AppRuntimeStateStore.setAppInForeground(this, appInForeground)
-                if (
-                    previousDestination != parsedSession.destinationStopId ||
+                val tripOriginChanged =
                     previousBoarding != parsedSession.boardingStopId ||
-                    previousRouteId != parsedSession.routeId
-                ) {
+                        previousRouteId != parsedSession.routeId
+                val destinationChanged =
+                    previousDestination != parsedSession.destinationStopId
+                if (tripOriginChanged) {
                     boardingAlertSent = false
                     boardingCheckPromptSent = false
                     boardingCheckPromptSentAtMs = 0L
@@ -268,6 +269,14 @@ class RouteTripMonitorService : Service() {
                     lastTransitLikeAtMs = 0L
                     trackedBusId = null
                     trackedBusLastSeenAtMs = 0L
+                    destinationSetupPromptSent = false
+                    arrivalDetectedAtMs = 0L
+                    destinationAlertStage = 0
+                    overshootAlertSent = false
+                } else if (destinationChanged) {
+                    // Choosing a destination after boarding must not unlock the
+                    // current vehicle and fall back to the next bus at the
+                    // boarding stop. Only the destination alert lifecycle is new.
                     destinationSetupPromptSent = false
                     arrivalDetectedAtMs = 0L
                     destinationAlertStage = 0
@@ -775,13 +784,19 @@ class RouteTripMonitorService : Service() {
         // a better stand-in than some other vehicle when the tracked one drops
         // out of the feed.
         val travelIndex = trackedBusIndex ?: nearestIndex
-        val currentStop = session.stops[travelIndex]
-        val currentLiveStop = liveStops[currentStop.stopId]
         val rawRemainingStops = destinationIndex - travelIndex
         val remainingStops = rawRemainingStops.coerceAtLeast(0)
-        val destinationEtaText = displayEtaText(destinationLive, trackedBusId)
-        val destinationEtaShort = displayShortEtaText(destinationLive, trackedBusId)
-        val currentEtaText = displayEtaText(currentLiveStop, trackedBusId)
+        val allowAnyDestinationVehicle = trackedBusId == null
+        val destinationEtaText = displayEtaText(
+            destinationLive,
+            trackedBusId,
+            fallbackToAnyVehicle = allowAnyDestinationVehicle,
+        )
+        val destinationEtaShort = displayShortEtaText(
+            destinationLive,
+            trackedBusId,
+            fallbackToAnyVehicle = allowAnyDestinationVehicle,
+        )
         val destinationDistanceMeters = distanceMeters(
             location.latitude,
             location.longitude,
@@ -800,7 +815,7 @@ class RouteTripMonitorService : Service() {
                 remainingStops == 0 -> "已接近 ${destinationStop.stopName}"
                 else -> "距離 ${destinationStop.stopName} 還有 $remainingStops 站 · $destinationEtaText"
             },
-            subText = "已上車 · 最近站牌 ${nearestStop.stopName} · $nearestEtaText",
+            subText = "已上車 · 最近站牌 ${nearestStop.stopName}",
             progressMax = toProgressMax(journeyPointCount),
             progressValue = toProgressValue(currentProgressPoint, journeyPointCount),
             shortCriticalText = buildShortCriticalText(
@@ -1361,22 +1376,24 @@ class RouteTripMonitorService : Service() {
     private fun displayEtaText(
         liveStopState: LiveStopState?,
         preferredVehicleId: String? = null,
+        fallbackToAnyVehicle: Boolean = true,
     ): String {
         val selectedEta = findEtaForVehicle(liveStopState, preferredVehicleId)
         return composeEtaText(
-            seconds = selectedEta?.seconds ?: liveStopState?.seconds,
-            message = selectedEta?.message ?: liveStopState?.message,
+            seconds = selectedEta?.seconds ?: if (fallbackToAnyVehicle) liveStopState?.seconds else null,
+            message = selectedEta?.message ?: if (fallbackToAnyVehicle) liveStopState?.message else null,
         )
     }
 
     private fun displayShortEtaText(
         liveStopState: LiveStopState?,
         preferredVehicleId: String? = null,
+        fallbackToAnyVehicle: Boolean = true,
     ): String {
         val selectedEta = findEtaForVehicle(liveStopState, preferredVehicleId)
         return composeShortEtaText(
-            seconds = selectedEta?.seconds ?: liveStopState?.seconds,
-            message = selectedEta?.message ?: liveStopState?.message,
+            seconds = selectedEta?.seconds ?: if (fallbackToAnyVehicle) liveStopState?.seconds else null,
+            message = selectedEta?.message ?: if (fallbackToAnyVehicle) liveStopState?.message else null,
         )
     }
 

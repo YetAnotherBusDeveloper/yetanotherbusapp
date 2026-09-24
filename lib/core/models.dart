@@ -812,10 +812,18 @@ class SearchHistoryEntry {
     required this.routeKey,
     required this.routeName,
     this.routeId,
-    this.pathId,
-    this.pathName,
+    int? departurePathId,
+    String? departurePathName,
+    int? pathId,
+    String? pathName,
+    this.boardingStopId,
+    this.boardingStopName,
+    this.destinationPathId,
+    this.destinationStopId,
+    this.destinationStopName,
     required this.timestampMs,
-  });
+  }) : departurePathId = departurePathId ?? pathId,
+       departurePathName = departurePathName ?? pathName;
 
   factory SearchHistoryEntry.fromJson(Map<String, dynamic> json) {
     return SearchHistoryEntry(
@@ -825,9 +833,25 @@ class SearchHistoryEntry {
       routeId: (json['routeId'] as String?)?.trim().isNotEmpty == true
           ? (json['routeId'] as String).trim()
           : null,
-      pathId: (json['pathId'] as num?)?.toInt(),
-      pathName: (json['pathName'] as String?)?.trim().isNotEmpty == true
+      departurePathId:
+          (json['departurePathId'] as num?)?.toInt() ??
+          (json['pathId'] as num?)?.toInt(),
+      departurePathName:
+          (json['departurePathName'] as String?)?.trim().isNotEmpty == true
+          ? (json['departurePathName'] as String).trim()
+          : (json['pathName'] as String?)?.trim().isNotEmpty == true
           ? (json['pathName'] as String).trim()
+          : null,
+      boardingStopId: (json['boardingStopId'] as num?)?.toInt(),
+      boardingStopName:
+          (json['boardingStopName'] as String?)?.trim().isNotEmpty == true
+          ? (json['boardingStopName'] as String).trim()
+          : null,
+      destinationPathId: (json['destinationPathId'] as num?)?.toInt(),
+      destinationStopId: (json['destinationStopId'] as num?)?.toInt(),
+      destinationStopName:
+          (json['destinationStopName'] as String?)?.trim().isNotEmpty == true
+          ? (json['destinationStopName'] as String).trim()
           : null,
       timestampMs: (json['timestampMs'] as num?)?.toInt() ?? 0,
     );
@@ -837,9 +861,17 @@ class SearchHistoryEntry {
   final int routeKey;
   final String routeName;
   final String? routeId;
-  final int? pathId;
-  final String? pathName;
+  final int? departurePathId;
+  final String? departurePathName;
+  final int? boardingStopId;
+  final String? boardingStopName;
+  final int? destinationPathId;
+  final int? destinationStopId;
+  final String? destinationStopName;
   final int timestampMs;
+
+  int? get pathId => departurePathId;
+  String? get pathName => departurePathName;
 
   Map<String, dynamic> toJson() {
     return {
@@ -847,11 +879,129 @@ class SearchHistoryEntry {
       'routeKey': routeKey,
       'routeName': routeName,
       if (routeId != null) 'routeId': routeId,
-      if (pathId != null) 'pathId': pathId,
-      if (pathName != null) 'pathName': pathName,
+      if (departurePathId != null) ...{
+        'departurePathId': departurePathId,
+        'pathId': departurePathId,
+      },
+      if (departurePathName != null) ...{
+        'departurePathName': departurePathName,
+        'pathName': departurePathName,
+      },
+      if (boardingStopId != null) 'boardingStopId': boardingStopId,
+      if (boardingStopName != null) 'boardingStopName': boardingStopName,
+      if (destinationPathId != null) 'destinationPathId': destinationPathId,
+      if (destinationStopId != null) 'destinationStopId': destinationStopId,
+      if (destinationStopName != null)
+        'destinationStopName': destinationStopName,
       'timestampMs': timestampMs,
     };
   }
+}
+
+class DestinationChoiceProfile {
+  static const Duration selectionHistoryRetention = Duration(days: 7);
+
+  const DestinationChoiceProfile({
+    required this.provider,
+    required this.routeKey,
+    required this.departurePathId,
+    required this.boardingStopId,
+    required this.destinationPathId,
+    required this.destinationStopId,
+    this.destinationStopName,
+    this.selectionTimestampsMs = const <int>[],
+  });
+
+  factory DestinationChoiceProfile.fromJson(Map<String, dynamic> json) {
+    return DestinationChoiceProfile(
+      provider: busProviderFromString(json['provider'] as String? ?? 'tpe'),
+      routeKey: (json['routeKey'] as num?)?.toInt() ?? 0,
+      departurePathId:
+          (json['departurePathId'] as num?)?.toInt() ??
+          (json['pathId'] as num?)?.toInt() ??
+          -1,
+      boardingStopId: (json['boardingStopId'] as num?)?.toInt() ?? 0,
+      destinationPathId: (json['destinationPathId'] as num?)?.toInt() ?? -1,
+      destinationStopId: (json['destinationStopId'] as num?)?.toInt() ?? 0,
+      destinationStopName:
+          (json['destinationStopName'] as String?)?.trim().isNotEmpty == true
+          ? (json['destinationStopName'] as String).trim()
+          : null,
+      selectionTimestampsMs: _decodeDestinationChoiceTimestamps(
+        json['selectionTimestampsMs'],
+      ),
+    );
+  }
+
+  final BusProvider provider;
+  final int routeKey;
+  final int departurePathId;
+  final int boardingStopId;
+  final int destinationPathId;
+  final int destinationStopId;
+  final String? destinationStopName;
+  final List<int> selectionTimestampsMs;
+
+  List<int> selectionTimestampsWithin({DateTime? now}) {
+    final cutoffMs = (now ?? DateTime.now())
+        .subtract(selectionHistoryRetention)
+        .millisecondsSinceEpoch;
+    return selectionTimestampsMs.where((value) => value >= cutoffMs).toList()
+      ..sort();
+  }
+
+  int selectionCount({DateTime? now}) =>
+      selectionTimestampsWithin(now: now).length;
+
+  int lastSelectedAtMs({DateTime? now}) {
+    final timestamps = selectionTimestampsWithin(now: now);
+    return timestamps.isEmpty ? 0 : timestamps.last;
+  }
+
+  DestinationChoiceProfile recordSelection(
+    DateTime selectedAt, {
+    String? destinationStopName,
+  }) {
+    return DestinationChoiceProfile(
+      provider: provider,
+      routeKey: routeKey,
+      departurePathId: departurePathId,
+      boardingStopId: boardingStopId,
+      destinationPathId: destinationPathId,
+      destinationStopId: destinationStopId,
+      destinationStopName: destinationStopName?.trim().isNotEmpty == true
+          ? destinationStopName!.trim()
+          : this.destinationStopName,
+      selectionTimestampsMs: <int>[
+        ...selectionTimestampsWithin(now: selectedAt),
+        selectedAt.millisecondsSinceEpoch,
+      ]..sort(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'provider': provider.name,
+    'routeKey': routeKey,
+    'departurePathId': departurePathId,
+    'boardingStopId': boardingStopId,
+    'destinationPathId': destinationPathId,
+    'destinationStopId': destinationStopId,
+    if (destinationStopName != null) 'destinationStopName': destinationStopName,
+    'selectionTimestampsMs': selectionTimestampsWithin(),
+  };
+}
+
+List<int> _decodeDestinationChoiceTimestamps(Object? value) {
+  if (value is! List) return const <int>[];
+  final cutoffMs = DateTime.now()
+      .subtract(DestinationChoiceProfile.selectionHistoryRetention)
+      .millisecondsSinceEpoch;
+  return value
+      .whereType<num>()
+      .map((item) => item.toInt())
+      .where((item) => item >= cutoffMs)
+      .toList()
+    ..sort();
 }
 
 enum FavoriteItemType { route, station, boarding }

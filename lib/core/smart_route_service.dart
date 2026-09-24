@@ -1,6 +1,7 @@
 import 'package:geolocator/geolocator.dart';
 
 import 'bus_repository.dart';
+import 'last_bus_message.dart';
 import 'models.dart';
 
 class SmartRouteService {
@@ -38,6 +39,16 @@ class SmartRouteService {
     DateTime now, {
     int limit = 3,
   }) {
+    return _rankProfilesForTime(
+      profiles,
+      now,
+    ).take(limit).map((entry) => entry.key).toList();
+  }
+
+  static List<MapEntry<RouteUsageProfile, double>> _rankProfilesForTime(
+    Iterable<RouteUsageProfile> profiles,
+    DateTime now,
+  ) {
     final scored = <MapEntry<RouteUsageProfile, double>>[];
     for (final profile in profiles) {
       if (profile.pathId == null) {
@@ -52,7 +63,7 @@ class SmartRouteService {
       }
     }
     scored.sort((a, b) => b.value.compareTo(a.value));
-    return scored.take(limit).map((entry) => entry.key).toList();
+    return scored;
   }
 
   static bool hasEnoughHistoryForRecommendation(
@@ -314,33 +325,16 @@ class SmartRouteService {
     required DateTime now,
     Position? position,
   }) async {
-    final profile = chooseProfileForTime(profiles, now);
-    if (profile == null) {
-      return null;
-    }
-    final score = scoreProfileForTime(profile, now);
-    if (score <= 0) {
-      return null;
-    }
-
-    final detail = await repository.getCompleteBusInfo(
-      profile.routeKey,
-      provider: profile.provider,
-    );
-    final favorite = chooseFavoriteForRoute(
-      routeProfile: profile,
+    final suggestions = await loadSuggestions(
+      repository: repository,
+      profiles: profiles,
       favoriteProfiles: favoriteProfiles,
       favorites: favorites,
       now: now,
-    );
-    return buildSuggestion(
-      profile: profile,
-      score: score,
-      reason: buildReason(profile, now),
-      detail: detail,
-      favorite: favorite,
       position: position,
+      limit: 1,
     );
+    return suggestions.isEmpty ? null : suggestions.first;
   }
 
   static Future<List<SmartRouteSuggestion>> loadSuggestions({
@@ -353,36 +347,69 @@ class SmartRouteService {
     Position? position,
     int limit = 3,
   }) async {
-    final topProfiles = chooseTopProfilesForTime(profiles, now, limit: limit);
-    final suggestions = await Future.wait(
-      topProfiles.map((profile) async {
-        try {
-          final detail = await repository.getCompleteBusInfo(
-            profile.routeKey,
-            provider: profile.provider,
-          );
-          final favorite = chooseFavoriteForRoute(
-            routeProfile: profile,
-            favoriteProfiles: favoriteProfiles,
-            favorites: favorites,
-            now: now,
-          );
-          return buildSuggestion(
-            profile: profile,
-            score: scoreProfileForTime(profile, now),
-            reason: buildReason(profile, now),
-            detail: detail,
-            favorite: favorite,
-            position: position,
-          );
-        } catch (_) {
-          return null;
+    if (limit <= 0) {
+      return const <SmartRouteSuggestion>[];
+    }
+
+    final suggestions = <SmartRouteSuggestion>[];
+    final seen = <String>{};
+    for (final entry in _rankProfilesForTime(profiles, now)) {
+      final profile = entry.key;
+      final identity =
+          '${profile.provider.name}:${profile.routeKey}:${profile.pathId}';
+      if (!seen.add(identity)) {
+        continue;
+      }
+      try {
+        final detail = await repository.getCompleteBusInfo(
+          profile.routeKey,
+          provider: profile.provider,
+        );
+        final favorite = chooseFavoriteForRoute(
+          routeProfile: profile,
+          favoriteProfiles: favoriteProfiles,
+          favorites: favorites,
+          now: now,
+        );
+        final suggestion = buildSuggestion(
+          profile: profile,
+          score: entry.value,
+          reason: buildReason(profile, now),
+          detail: detail,
+          favorite: favorite,
+          position: position,
+        );
+        if (_isLastBusSuggestion(suggestion)) {
+          continue;
         }
-      }),
-    );
-    return suggestions.whereType<SmartRouteSuggestion>().toList(
-      growable: false,
-    );
+        suggestions.add(suggestion);
+        if (suggestions.length == limit) {
+          break;
+        }
+      } catch (_) {
+        // Keep scanning lower-ranked profiles until the requested limit is met.
+      }
+    }
+    return List.unmodifiable(suggestions);
+  }
+
+  static bool _isLastBusSuggestion(SmartRouteSuggestion suggestion) {
+    final recommendedStop = suggestion.recommendedStop;
+    if (recommendedStop != null) {
+      return isLastBusMessage(recommendedStop.msg) ||
+          recommendedStop.etas.any((eta) => isLastBusMessage(eta.msg));
+    }
+
+    final pathId = suggestion.profile.pathId;
+    final stops = pathId == null
+        ? const <StopInfo>[]
+        : suggestion.detail?.stopsByPath[pathId] ?? const <StopInfo>[];
+    return stops.isNotEmpty &&
+        stops.every(
+          (stop) =>
+              isLastBusMessage(stop.msg) ||
+              stop.etas.any((eta) => isLastBusMessage(eta.msg)),
+        );
   }
 
   static StopInfo? _findStopInDetail(

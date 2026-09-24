@@ -1,8 +1,8 @@
 flutter_native_splash:
   color: "#F5F7F2"
   color_dark: "#111418"
-  image: assets/branding/splash_android.png
-  image_dark: assets/branding/splash_android.png
+  image: assets/branding/icon.png
+  image_dark: assets/branding/icon.png
   info_plist_files:
     - ios/YABus/Info.plist
 
@@ -13,5 +13,5 @@ flutter_native_splash:
   android_12:
     color: "#F5F7F2"
     color_dark: "#111418"
-    image: assets/branding/splash_android.png
-    image_dark: assets/branding/splash_android.png
+    image: assets/branding/icon.png
+    image_dark: assets/branding/icon.png

@@ -3,6 +3,70 @@ import 'package:taiwanbus_flutter/core/account_sync_models.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 
 void main() {
+  test('search history round trips route stop and destination identity', () {
+    const entry = SearchHistoryEntry(
+      provider: BusProvider.nwt,
+      routeKey: 307,
+      routeName: '307',
+      routeId: 'NWT307',
+      departurePathId: 8,
+      departurePathName: '往板橋',
+      boardingStopId: 101,
+      boardingStopName: '起點',
+      destinationPathId: 8,
+      destinationStopId: 109,
+      destinationStopName: '終點',
+      timestampMs: 1234,
+    );
+
+    final restored = SearchHistoryEntry.fromJson(entry.toJson());
+
+    expect(restored.departurePathId, 8);
+    expect(restored.pathId, 8);
+    expect(restored.boardingStopId, 101);
+    expect(restored.boardingStopName, '起點');
+    expect(restored.destinationPathId, 8);
+    expect(restored.destinationStopId, 109);
+    expect(restored.destinationStopName, '終點');
+  });
+
+  test('search history accepts old path fields and missing v3 fields', () {
+    final restored = SearchHistoryEntry.fromJson(const {
+      'provider': 'tpe',
+      'routeKey': 12,
+      'routeName': '12',
+      'pathId': 1,
+      'pathName': '返程',
+      'timestampMs': 99,
+    });
+
+    expect(restored.departurePathId, 1);
+    expect(restored.departurePathName, '返程');
+    expect(restored.boardingStopId, isNull);
+    expect(restored.destinationStopId, isNull);
+  });
+
+  test(
+    'destination choices retain only selections from the last seven days',
+    () {
+      final now = DateTime.now();
+      final profile = DestinationChoiceProfile(
+        provider: BusProvider.tpe,
+        routeKey: 12,
+        departurePathId: 1,
+        boardingStopId: 100,
+        destinationPathId: 1,
+        destinationStopId: 200,
+        selectionTimestampsMs: [
+          now.subtract(const Duration(days: 8)).millisecondsSinceEpoch,
+          now.subtract(const Duration(days: 2)).millisecondsSinceEpoch,
+        ],
+      ).recordSelection(now);
+
+      expect(profile.selectionCount(now: now), 2);
+    },
+  );
+
   test('eta presentation keeps seconds when enabled', () {
     final stop = StopInfo(
       routeKey: 1,

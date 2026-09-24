@@ -98,6 +98,25 @@ bool _isFavorite(
   return family.routeIds.any(favoriteRouteIds.contains);
 }
 
+/// A filtered map result, including buses outside the current viewport.
+class VisibleBusesResult {
+  const VisibleBusesResult({required this.buses, required this.matchingCount});
+
+  final List<CityBus> buses;
+  final int matchingCount;
+}
+
+/// Keep every zoom level bounded in case map bounds have not initialized yet.
+int busMarkerLimitForZoom(double zoom) {
+  if (!zoom.isFinite || zoom < 14) {
+    return 150;
+  }
+  if (zoom < 15) {
+    return 300;
+  }
+  return 400;
+}
+
 /// The buses to draw, filtered and then trimmed to what the view can carry.
 ///
 /// [visible] decides what is on screen; [limit] caps how many of those are
@@ -105,19 +124,21 @@ bool _isFavorite(
 /// is looking at it), then favourites, then whatever is nearest the middle of
 /// the screen, so the markers that disappear are the ones least likely to be
 /// missed.
-List<CityBus> visibleBusesFor(
+VisibleBusesResult visibleBusesFor(
   CityBusSnapshot snapshot, {
   required bool favoritesOnly,
   required Set<String> favoriteRouteIds,
   required String query,
   required bool Function(CityBus bus) visible,
   String? selectedGroupKey,
+  String? selectedBusKey,
   int? limit,
   double? centerLat,
   double? centerLon,
 }) {
   final normalizedQuery = normalizeRouteQuery(query);
   final matches = <CityBus>[];
+  var matchingCount = 0;
   for (final bus in snapshot.buses) {
     if (!busMatchesFilters(
       snapshot,
@@ -128,6 +149,7 @@ List<CityBus> visibleBusesFor(
     )) {
       continue;
     }
+    matchingCount++;
     if (!visible(bus)) {
       continue;
     }
@@ -135,27 +157,43 @@ List<CityBus> visibleBusesFor(
   }
 
   if (limit == null || matches.length <= limit) {
-    return matches;
+    return VisibleBusesResult(buses: matches, matchingCount: matchingCount);
   }
 
-  double rank(CityBus bus) {
+  (int, double) rank(CityBus bus) {
+    if (selectedBusKey != null && bus.stateKey == selectedBusKey) {
+      return (0, 0);
+    }
     if (selectedGroupKey != null && bus.groupKey == selectedGroupKey) {
-      return -2;
+      return (1, 0);
     }
     if (_isFavorite(snapshot, bus, favoriteRouteIds)) {
-      return -1;
+      return (2, 0);
     }
     if (centerLat == null || centerLon == null) {
-      return 0;
+      return (3, 0);
     }
     // Squared degrees is enough to order by; no need for real distance here.
     final dLat = bus.bus.lat - centerLat;
     final dLon = bus.bus.lon - centerLon;
-    return dLat * dLat + dLon * dLon;
+    return (3, dLat * dLat + dLon * dLon);
   }
 
-  matches.sort((a, b) => rank(a).compareTo(rank(b)));
-  return matches.sublist(0, limit);
+  final ranks = {for (final bus in matches) bus.stateKey: rank(bus)};
+  matches.sort((a, b) {
+    final aRank = ranks[a.stateKey]!;
+    final bRank = ranks[b.stateKey]!;
+    final priority = aRank.$1.compareTo(bRank.$1);
+    if (priority != 0) {
+      return priority;
+    }
+    final distance = aRank.$2.compareTo(bRank.$2);
+    return distance != 0 ? distance : a.stateKey.compareTo(b.stateKey);
+  });
+  return VisibleBusesResult(
+    buses: matches.sublist(0, limit),
+    matchingCount: matchingCount,
+  );
 }
 
 /// A pile of buses too close together to draw separately.

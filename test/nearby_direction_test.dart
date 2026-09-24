@@ -294,13 +294,66 @@ void main() {
         inboundPathName: '往捷運松山站',
       );
 
-      // One card for the shared stop name, two rows inside it.
+      // One card for the shared stop name, split into two physical sides.
       expect(find.text('市政府'), findsOneWidget);
       expect(find.text('307'), findsNWidgets(2));
 
       expect(find.text('台北市'), findsNWidgets(2));
       expect(find.text('往撫遠街'), findsOneWidget);
       expect(find.text('往捷運松山站'), findsOneWidget);
+      // Direction and distance appear once in each side header, not per route.
+      expect(find.text('20m'), findsOneWidget);
+      expect(find.text('30m'), findsOneWidget);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('routes sharing a physical side share its header', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      await _pumpNearbyScreen(
+        tester,
+        outboundPathName: '',
+        inboundPathName: '',
+        nearbyPayload: [
+          _nearbyRow(
+            routeId: 'TPEA001',
+            routeName: '307',
+            stopId: 'SIDE-A',
+            stopName: '市政府',
+            distance: 20,
+          ),
+          _nearbyRow(
+            routeId: 'TPEA002',
+            routeName: '262',
+            stopId: 'SIDE-A',
+            stopName: '市政府',
+            distance: 21,
+          ),
+          {
+            ..._nearbyRow(
+              routeId: 'TPEB001',
+              routeName: '藍7',
+              stopId: 'SIDE-B',
+              stopName: '市政府',
+              distance: 30,
+            ),
+            'pathid': 1,
+            'path_name': '往另一端',
+          },
+        ],
+      );
+
+      expect(find.byType(Card), findsOneWidget);
+      expect(find.text('往終點站'), findsOneWidget);
+      expect(find.text('20m'), findsOneWidget);
+      expect(find.text('21m'), findsNothing);
+      expect(find.text('往另一端'), findsOneWidget);
+      expect(find.text('30m'), findsOneWidget);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;
@@ -479,10 +532,10 @@ void main() {
         requestedUris: requestedUris,
       );
       await _pumpUntilFound(tester, find.text('A18'));
+      expect(find.text('第一站'), findsOneWidget);
       await tester.scrollUntilVisible(find.text('第二站'), 500);
       await tester.pump();
 
-      expect(find.text('第一站'), findsOneWidget);
       expect(find.text('第二站'), findsOneWidget);
       expect(find.text('B1'), findsOneWidget);
       expect(find.text('B5'), findsOneWidget);

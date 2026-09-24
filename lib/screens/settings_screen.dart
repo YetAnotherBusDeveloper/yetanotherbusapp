@@ -17,6 +17,7 @@ import '../core/models.dart';
 import '../core/wear_os_integration.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
+import '../widgets/app_dropdown.dart';
 import '../widgets/app_update_dialog.dart';
 import 'account_screen.dart';
 import 'database_settings_screen.dart';
@@ -314,7 +315,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 12),
-                        DropdownButtonFormField<AppLanguage>(
+                        AppDropdownFormField<AppLanguage>(
                           isExpanded: true,
                           initialValue: controller.settings.language,
                           decoration: InputDecoration(
@@ -363,7 +364,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onChanged: controller.updateInterfaceScale,
                         ),
                         const SizedBox(height: 4),
-                        DropdownButtonFormField<ThemeMode>(
+                        AppDropdownFormField<ThemeMode>(
                           isExpanded: true,
                           initialValue: controller.settings.themeMode,
                           decoration: InputDecoration(
@@ -406,7 +407,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         if (isAndroid || isIOS) ...[
                           const SizedBox(height: 12),
-                          DropdownButtonFormField<MobileMapProvider>(
+                          AppDropdownFormField<MobileMapProvider>(
                             isExpanded: true,
                             initialValue: controller.settings.mobileMapProvider,
                             decoration: InputDecoration(
@@ -579,7 +580,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   )
                                 else ...[
                                   const SizedBox(height: 8),
-                                  DropdownButtonFormField<String>(
+                                  AppDropdownFormField<String>(
                                     isExpanded: true,
                                     initialValue: selectedValue,
                                     decoration: InputDecoration(
@@ -838,7 +839,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         if (isAndroid) ...[
                           const SizedBox(height: 12),
-                          DropdownButtonFormField<int>(
+                          AppDropdownFormField<int>(
                             isExpanded: true,
                             initialValue: controller
                                 .settings
@@ -924,7 +925,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 12),
-                          DropdownButtonFormField<AppUpdateChannel>(
+                          AppDropdownFormField<AppUpdateChannel>(
                             isExpanded: true,
                             initialValue: controller.settings.appUpdateChannel,
                             decoration: InputDecoration(
@@ -947,7 +948,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             },
                           ),
                           const SizedBox(height: 12),
-                          DropdownButtonFormField<AppUpdateCheckMode>(
+                          AppDropdownFormField<AppUpdateCheckMode>(
                             isExpanded: true,
                             initialValue:
                                 controller.settings.appUpdateCheckMode,

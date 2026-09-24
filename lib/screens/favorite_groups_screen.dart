@@ -4,6 +4,7 @@ import '../app/bus_app.dart';
 import '../core/models.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
+import '../widgets/app_dropdown.dart';
 
 class FavoriteGroupDraft {
   const FavoriteGroupDraft({required this.name, required this.kind});
@@ -43,7 +44,7 @@ Future<FavoriteGroupDraft?> showFavoriteGroupDialog(
                 ),
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<FavoriteGroupKind>(
+              AppDropdownFormField<FavoriteGroupKind>(
                 initialValue: selectedKind,
                 decoration: InputDecoration(
                   labelText: l10n.favoriteGroupCategoryLabel,
