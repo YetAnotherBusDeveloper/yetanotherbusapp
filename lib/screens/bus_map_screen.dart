@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../app/bus_app.dart';
 import '../core/app_controller.dart';
+import '../core/app_motion.dart';
 import '../core/app_route_observer.dart';
 import '../core/bus_map_filter.dart';
 import '../core/http_error_utils.dart';
@@ -872,19 +873,35 @@ class _BusMapScreenState extends State<BusMapScreen>
             right: 12,
             child: _buildStatusChips(theme, drawSet),
           ),
-        if (!useSplitLayout && selectedBus != null)
+        if (!useSplitLayout)
           Positioned.fill(
-            child: _BusMapSelectionSheet(
-              snapshot: _snapshot!,
-              cityBus: selectedBus,
-              state: _busStates[selectedBus.stateKey],
-              stops: _selectedStops,
-              pathId: _selectedPathId,
-              onOpenDetail: () => unawaited(_openRouteDetail(selectedBus)),
-              onShowWholeRoute: _fitSelectedRoute,
-              onClose: _clearSelection,
-              onStopSelected: (stop) =>
-                  unawaited(_openRouteDetail(selectedBus, stop: stop)),
+            child: IgnorePointer(
+              ignoring: selectedBus == null,
+              child: AnimatedSwitcher(
+                key: const ValueKey('bus-map-selection-transition'),
+                duration: AppMotion.duration(context),
+                reverseDuration: AppMotion.duration(context, AppMotion.quick),
+                transitionBuilder: _buildSelectionTransition,
+                child: selectedBus == null || _snapshot == null
+                    ? const SizedBox.shrink(
+                        key: ValueKey('bus-map-no-selection'),
+                      )
+                    : _BusMapSelectionSheet(
+                        key: ValueKey(selectedBus.stateKey),
+                        snapshot: _snapshot!,
+                        cityBus: selectedBus,
+                        state: _busStates[selectedBus.stateKey],
+                        stops: _selectedStops,
+                        pathId: _selectedPathId,
+                        onOpenDetail: () =>
+                            unawaited(_openRouteDetail(selectedBus)),
+                        onShowWholeRoute: _fitSelectedRoute,
+                        onClose: _clearSelection,
+                        onStopSelected: (stop) => unawaited(
+                          _openRouteDetail(selectedBus, stop: stop),
+                        ),
+                      ),
+              ),
             ),
           ),
       ],
@@ -1138,39 +1155,47 @@ class _BusMapScreenState extends State<BusMapScreen>
   Widget _buildSidebar(ThemeData theme, CityBus? selectedBus) {
     final snapshot = _snapshot;
     final l10n = AppLocalizations.of(context);
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (selectedBus != null && snapshot != null) ...[
-          _BusMapSelectionCard(
-            snapshot: snapshot,
-            cityBus: selectedBus,
-            state: _busStates[selectedBus.stateKey],
-            stops: _selectedStops,
-            pathId: _selectedPathId,
-            onOpenDetail: () => unawaited(_openRouteDetail(selectedBus)),
-            onShowWholeRoute: _fitSelectedRoute,
-            onClose: _clearSelection,
-          ),
-          const SizedBox(height: 16),
-          if (_selectedStops.isNotEmpty)
-            Text(l10n.busMapRouteStops, style: theme.textTheme.titleSmall),
-          for (final stop in _selectedStops)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Text('${stop.sequence}'),
-              title: TransitStationName(name: stop.transitName),
-              onTap: () => unawaited(_openRouteDetail(selectedBus, stop: stop)),
+    return AnimatedSwitcher(
+      key: const ValueKey('bus-map-sidebar-selection-transition'),
+      duration: AppMotion.duration(context),
+      reverseDuration: AppMotion.duration(context, AppMotion.quick),
+      transitionBuilder: _buildSelectionTransition,
+      child: ListView(
+        key: ValueKey(selectedBus?.stateKey ?? 'bus-map-no-selection'),
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (selectedBus != null && snapshot != null) ...[
+            _BusMapSelectionCard(
+              snapshot: snapshot,
+              cityBus: selectedBus,
+              state: _busStates[selectedBus.stateKey],
+              stops: _selectedStops,
+              pathId: _selectedPathId,
+              onOpenDetail: () => unawaited(_openRouteDetail(selectedBus)),
+              onShowWholeRoute: _fitSelectedRoute,
+              onClose: _clearSelection,
             ),
-        ] else
-          Text(
-            l10n.busMapSelectionHint,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.outline,
+            const SizedBox(height: 16),
+            if (_selectedStops.isNotEmpty)
+              Text(l10n.busMapRouteStops, style: theme.textTheme.titleSmall),
+            for (final stop in _selectedStops)
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Text('${stop.sequence}'),
+                title: TransitStationName(name: stop.transitName),
+                onTap: () =>
+                    unawaited(_openRouteDetail(selectedBus, stop: stop)),
+              ),
+          ] else
+            Text(
+              l10n.busMapSelectionHint,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1934,6 +1959,7 @@ class _SheetSizes {
 
 class _BusMapSelectionSheet extends StatefulWidget {
   const _BusMapSelectionSheet({
+    super.key,
     required this.snapshot,
     required this.cityBus,
     required this.state,
@@ -2059,6 +2085,18 @@ class _BusMapSelectionSheetState extends State<_BusMapSelectionSheet> {
       },
     );
   }
+}
+
+Widget _buildSelectionTransition(Widget child, Animation<double> animation) {
+  final curvedAnimation = animation.drive(CurveTween(curve: AppMotion.curve));
+  return FadeTransition(
+    opacity: curvedAnimation,
+    child: ScaleTransition(
+      scale: Tween<double>(begin: 0.97, end: 1).animate(curvedAnimation),
+      alignment: Alignment.bottomCenter,
+      child: child,
+    ),
+  );
 }
 
 class _BusMapSelectionCard extends StatelessWidget {

@@ -1397,7 +1397,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
     setState(() {
-      _resetLiveActivityRideState();
+      _resetLiveActivityDestinationState();
       if (_isIOS) {
         _backgroundTripMonitorPaused = false;
       }
@@ -2651,7 +2651,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final boardingStop = _resolvedBoardingStop();
     final pathId = _currentPathId;
     setState(() {
-      _resetLiveActivityRideState();
+      _resetLiveActivityDestinationState();
       if (_isIOS) {
         _backgroundTripMonitorPaused = false;
       }
@@ -3128,6 +3128,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     _iosBoardingCheckPromptSent = false;
     _liveActivityLastNearestStopIndex = null;
     _liveActivityRidingVehicleId = null;
+  }
+
+  void _resetLiveActivityDestinationState() {
+    _liveActivityDestinationSetupAlertSent = false;
+    _liveActivityDestinationAlertStage = 0;
   }
 
   Future<void> _startLiveActivity(

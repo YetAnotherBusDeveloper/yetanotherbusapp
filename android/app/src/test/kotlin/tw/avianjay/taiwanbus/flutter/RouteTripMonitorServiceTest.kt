@@ -149,6 +149,45 @@ class RouteTripMonitorServiceTest {
         assertFalse(shadow.isForegroundStopped)
     }
 
+    @Test
+    fun addingDestinationAfterBoardingKeepsRideAndTrackedVehicle() {
+        val initialSession = sessionPayload() + mapOf(
+            "routeId" to "TXG1",
+            "boardingStopId" to 1,
+            "boardingStopName" to "上車站",
+            "stops" to listOf(
+                mapOf(
+                    "stopId" to 1,
+                    "stopName" to "上車站",
+                    "sequence" to 1,
+                    "lat" to 24.1,
+                    "lon" to 120.6,
+                ),
+                mapOf(
+                    "stopId" to 2,
+                    "stopName" to "下車站",
+                    "sequence" to 2,
+                    "lat" to 24.2,
+                    "lon" to 120.7,
+                ),
+            ),
+        )
+        service.onStartCommand(startIntent(initialSession), 0, 1)
+        ReflectionHelpers.setField(service, "rideConfirmed", true)
+        ReflectionHelpers.setField(service, "trackedBusId", "KKA-1234")
+        ReflectionHelpers.setField(service, "destinationAlertStage", 2)
+
+        val destinationSession = initialSession + mapOf(
+            "destinationStopId" to 2,
+            "destinationStopName" to "下車站",
+        )
+        service.onStartCommand(startIntent(destinationSession), 0, 2)
+
+        assertTrue(ReflectionHelpers.getField(service, "rideConfirmed"))
+        assertEquals("KKA-1234", ReflectionHelpers.getField(service, "trackedBusId"))
+        assertEquals(0, ReflectionHelpers.getField(service, "destinationAlertStage"))
+    }
+
     private fun assertStoppedWithoutNotification() {
         assertTrue(shadow.isStoppedBySelf)
         assertTrue(shadow.isForegroundStopped)
@@ -159,8 +198,9 @@ class RouteTripMonitorServiceTest {
     private fun command(action: String) = Intent(service, RouteTripMonitorService::class.java)
         .setAction("tw.avianjay.taiwanbus.flutter.action.$action")
 
-    private fun startIntent() = command("START_OR_UPDATE_TRIP_MONITOR")
-        .putExtra("session_json", org.json.JSONObject(sessionPayload()).toString())
+    private fun startIntent(payload: Map<String, Any?> = sessionPayload()) =
+        command("START_OR_UPDATE_TRIP_MONITOR")
+            .putExtra("session_json", org.json.JSONObject(payload).toString())
 
     private fun sessionPayload(): Map<String, Any?> = mapOf(
         "provider" to "txg",

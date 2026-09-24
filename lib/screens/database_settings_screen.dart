@@ -7,6 +7,7 @@ import '../core/app_controller.dart';
 import '../core/models.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
+import '../widgets/app_dropdown.dart';
 
 class DatabaseSettingsScreen extends StatelessWidget {
   const DatabaseSettingsScreen({super.key});
@@ -27,9 +28,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
           .where((entry) => entry.value != null)
           .toList();
       if (availableUpdates.isEmpty) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(l10n.databaseUpToDate)),
-        );
+        messenger.showSnackBar(SnackBar(content: Text(l10n.databaseUpToDate)));
         return;
       }
 
@@ -122,7 +121,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                         style: theme.textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<DatabaseAutoUpdateMode>(
+                      AppDropdownFormField<DatabaseAutoUpdateMode>(
                         isExpanded: true,
                         initialValue:
                             controller.settings.databaseAutoUpdateMode,
@@ -176,14 +175,10 @@ class DatabaseSettingsScreen extends StatelessWidget {
                               Text(
                                 controller.pendingDatabaseUpdates.entries
                                     .map(
-                                      (entry) =>
-                                          l10n.databaseRegionVersion(
-                                            localizedBusProvider(
-                                              l10n,
-                                              entry.key,
-                                            ),
-                                            entry.value,
-                                          ),
+                                      (entry) => l10n.databaseRegionVersion(
+                                        localizedBusProvider(l10n, entry.key),
+                                        entry.value,
+                                      ),
                                     )
                                     .join(
                                       l10n.localeName.startsWith('zh')
@@ -302,7 +297,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
                         style: theme.textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<BusProvider>(
+                      AppDropdownFormField<BusProvider>(
                         isExpanded: true,
                         initialValue: controller.settings.provider,
                         decoration: InputDecoration(

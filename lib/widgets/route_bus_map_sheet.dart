@@ -15,6 +15,7 @@ import '../core/models.dart';
 import '../core/transit_name.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
+import 'app_dropdown.dart';
 import 'bus_map_geometry.dart';
 import 'bus_map_markers.dart';
 import 'bus_map_motion.dart';
@@ -1118,39 +1119,26 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
           ),
           if (widget.paths.length > 1) ...[
             const SizedBox(height: 12),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    value: _activePathId,
-                    isExpanded: true,
-                    borderRadius: BorderRadius.circular(16),
-                    items: widget.paths
-                        .map(
-                          (path) => DropdownMenuItem<int>(
-                            value: path.pathId,
-                            child: TransitStationName(
-                              name: path.transitName,
-                              textAlign: TextAlign.center,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      _switchPath(value, notifyParent: true);
-                    },
-                  ),
-                ),
-              ),
+            AppDropdown<int>(
+              value: _activePathId,
+              items: widget.paths
+                  .map(
+                    (path) => DropdownMenuItem<int>(
+                      value: path.pathId,
+                      child: TransitStationName(
+                        name: path.transitName,
+                        textAlign: TextAlign.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                _switchPath(value, notifyParent: true);
+              },
             ),
           ],
           if (_error != null) ...[

@@ -14,6 +14,7 @@ import 'package:taiwanbus_flutter/core/account_sync_service.dart';
 import 'package:taiwanbus_flutter/core/app_analytics.dart';
 import 'package:taiwanbus_flutter/core/app_build_info.dart';
 import 'package:taiwanbus_flutter/core/app_controller.dart';
+import 'package:taiwanbus_flutter/core/app_motion.dart';
 import 'package:taiwanbus_flutter/core/app_route_observer.dart';
 import 'package:taiwanbus_flutter/core/app_update_installer.dart';
 import 'package:taiwanbus_flutter/core/app_update_service.dart';
@@ -738,6 +739,29 @@ void main() {
     expect(find.text('顯示整條路線'), findsOneWidget);
     // On a phone-sized viewport the stops are map pins, not a list.
     expect(find.byTooltip('西門'), findsOneWidget);
+  });
+
+  _mapTest('the selected route card animates into view', (
+    tester,
+    log,
+    controller,
+  ) async {
+    await _pumpMap(tester, controller);
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+    );
+
+    final marker = _busMarker(tester, '234 KKA-1234');
+    (marker.child as GestureDetector).onTap!();
+    await tester.pump();
+
+    final switcher = tester.widget<AnimatedSwitcher>(
+      find.byKey(const ValueKey('bus-map-selection-transition')),
+    );
+    expect(switcher.duration, AppMotion.standard);
+    expect(find.byType(FadeTransition), findsWidgets);
+    expect(find.byType(ScaleTransition), findsWidgets);
   });
 
   _mapTest('polling stops behind another screen and resumes on return', (
