@@ -57,8 +57,16 @@ CityBusSnapshot _snapshot(List<CityBus> buses) {
 bool _always(CityBus bus) => true;
 
 void main() {
-  final resolved = _bus(id: 'KKA-1234', routeId: 'TPE101320', routeUid: 'TPE10132');
-  final other = _bus(id: 'EAL-0001', routeId: 'TPE108440', routeUid: 'TPE10844');
+  final resolved = _bus(
+    id: 'KKA-1234',
+    routeId: 'TPE101320',
+    routeUid: 'TPE10132',
+  );
+  final other = _bus(
+    id: 'EAL-0001',
+    routeId: 'TPE108440',
+    routeUid: 'TPE10844',
+  );
   final ambiguous = _bus(id: 'EAL-0562', routeUid: 'TPE10231');
   final snapshot = _snapshot([resolved, other, ambiguous]);
 
@@ -98,10 +106,10 @@ void main() {
         ],
       };
 
-      expect(
-        favoriteRouteIdsFor(groups, BusProvider.tpe),
-        {'TPE101320', 'TPE108440'},
-      );
+      expect(favoriteRouteIdsFor(groups, BusProvider.tpe), {
+        'TPE101320',
+        'TPE108440',
+      });
     });
   });
 
@@ -236,10 +244,7 @@ void main() {
 
     test('cells stay the same size on screen as zoom changes', () {
       // Each zoom level halves the ground covered by a screen pixel.
-      expect(
-        clusterCellDegrees(12),
-        closeTo(clusterCellDegrees(11) / 2, 1e-9),
-      );
+      expect(clusterCellDegrees(12), closeTo(clusterCellDegrees(11) / 2, 1e-9));
       expect(clusterCellDegrees(11), closeTo(0.0549, 1e-3));
       expect(clusterBuses(const [], clusterCellDegrees(11)), isEmpty);
     });
@@ -259,7 +264,7 @@ void main() {
 
   group('visibleBusesFor', () {
     test('hides what the viewport excludes', () {
-      final buses = visibleBusesFor(
+      final result = visibleBusesFor(
         snapshot,
         favoritesOnly: false,
         favoriteRouteIds: const {},
@@ -267,7 +272,8 @@ void main() {
         visible: (bus) => bus.bus.id != 'EAL-0001',
       );
 
-      expect(buses.map((bus) => bus.bus.id), ['KKA-1234', 'EAL-0562']);
+      expect(result.buses.map((bus) => bus.bus.id), ['KKA-1234', 'EAL-0562']);
+      expect(result.matchingCount, 3);
     });
 
     test('under a cap it keeps the watched route, then favourites', () {
@@ -284,24 +290,47 @@ void main() {
       ];
       final crowded = _snapshot(crowd);
 
-      final kept = visibleBusesFor(
+      final result = visibleBusesFor(
         crowded,
         favoritesOnly: false,
         favoriteRouteIds: const {'TPE162593'},
         query: '',
         visible: _always,
         selectedGroupKey: 'TPE101320',
+        selectedBusKey: resolved.stateKey,
         limit: 2,
         centerLat: 25.03,
         centerLon: 121.56,
       );
 
       // The bus being watched first, then the favourite family.
-      expect(kept.map((bus) => bus.bus.id), ['KKA-1234', 'EAL-0562']);
+      expect(result.buses.map((bus) => bus.bus.id), ['KKA-1234', 'EAL-0562']);
+    });
+
+    test('the selected vehicle outranks other buses on its route', () {
+      final sibling = _bus(
+        id: 'KKA-0001',
+        routeId: 'TPE101320',
+        routeUid: 'TPE10132',
+      );
+      final crowded = _snapshot([sibling, resolved, ambiguous]);
+
+      final result = visibleBusesFor(
+        crowded,
+        favoritesOnly: false,
+        favoriteRouteIds: const {'TPE162593'},
+        query: '',
+        visible: _always,
+        selectedGroupKey: resolved.groupKey,
+        selectedBusKey: resolved.stateKey,
+        limit: 1,
+      );
+
+      expect(result.buses.single.stateKey, resolved.stateKey);
     });
 
     test('without a cap nothing is dropped or reordered', () {
-      final kept = visibleBusesFor(
+      final result = visibleBusesFor(
         snapshot,
         favoritesOnly: false,
         favoriteRouteIds: const {},
@@ -309,8 +338,17 @@ void main() {
         visible: _always,
       );
 
-      expect(kept.length, 3);
-      expect(kept.first.bus.id, 'KKA-1234');
+      expect(result.buses.length, 3);
+      expect(result.buses.first.bus.id, 'KKA-1234');
+      expect(result.matchingCount, 3);
+    });
+
+    test('every zoom has a finite marker cap', () {
+      expect(busMarkerLimitForZoom(12), 150);
+      expect(busMarkerLimitForZoom(14), 300);
+      expect(busMarkerLimitForZoom(15), 400);
+      expect(busMarkerLimitForZoom(22), 400);
+      expect(busMarkerLimitForZoom(double.nan), 150);
     });
   });
 }
