@@ -800,7 +800,7 @@ class RouteTripMonitorService : Service() {
                 remainingStops == 0 -> "已接近 ${destinationStop.stopName}"
                 else -> "距離 ${destinationStop.stopName} 還有 $remainingStops 站 · $destinationEtaText"
             },
-            subText = "已上車 · 最近站牌 ${nearestStop.stopName} · $nearestEtaText",
+            subText = "已上車 · 最近站牌 ${nearestStop.stopName}",
             progressMax = toProgressMax(journeyPointCount),
             progressValue = toProgressValue(currentProgressPoint, journeyPointCount),
             shortCriticalText = buildShortCriticalText(
