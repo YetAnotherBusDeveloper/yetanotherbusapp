@@ -42,7 +42,7 @@ class _SearchScreenState extends State<SearchScreen> {
   int _activeSearchToken = 0;
   int _routeNameLoadToken = 0;
   String? _loadedRouteNameProviders;
-  Set<String> _availableRouteNames = const <String>{};
+  Set<String>? _availableRouteNames;
   late bool _isRouteKeypadVisible;
   bool _isUsingNativeKeyboard = false;
 
@@ -75,6 +75,7 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
     _loadedRouteNameProviders = providerKey;
+    _availableRouteNames = null;
     final token = ++_routeNameLoadToken;
     unawaited(_loadAvailableRouteNames(controller, token));
   }
@@ -91,7 +92,7 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() => _availableRouteNames = routeNames);
     } catch (_) {
       if (mounted && token == _routeNameLoadToken) {
-        setState(() => _availableRouteNames = const <String>{});
+        setState(() => _availableRouteNames = null);
       }
     }
   }
@@ -1128,11 +1129,30 @@ class _SearchScreenState extends State<SearchScreen> {
     unawaited(() async {
       if (saveHistory && route != null) {
         String? pathName;
-        if (initialPathId != null) {
+        String? boardingStopName;
+        String? destinationStopName;
+        if (initialPathId != null ||
+            initialStopId != null ||
+            initialDestinationStopId != null) {
           final topology = await initialTopologyFuture;
           for (final path in topology?.paths ?? const <PathInfo>[]) {
             if (path.pathId == initialPathId) {
               pathName = path.name;
+              break;
+            }
+          }
+          final boardingStops = topology?.stopsByPath[initialPathId];
+          for (final stop in boardingStops ?? const <StopInfo>[]) {
+            if (stop.stopId == initialStopId) {
+              boardingStopName = stop.stopName;
+              break;
+            }
+          }
+          final destinationStops =
+              topology?.stopsByPath[initialDestinationPathId ?? initialPathId];
+          for (final stop in destinationStops ?? const <StopInfo>[]) {
+            if (stop.stopId == initialDestinationStopId) {
+              destinationStopName = stop.stopName;
               break;
             }
           }
@@ -1142,6 +1162,11 @@ class _SearchScreenState extends State<SearchScreen> {
           provider: provider,
           pathId: initialPathId,
           pathName: pathName,
+          boardingStopId: initialStopId,
+          boardingStopName: boardingStopName,
+          destinationPathId: initialDestinationPathId,
+          destinationStopId: initialDestinationStopId,
+          destinationStopName: destinationStopName,
         );
       }
       final autoFavorited = await busController.recordRouteSelection(
@@ -1170,6 +1195,7 @@ class _SearchScreenState extends State<SearchScreen> {
       initialAlertsFuture: initialAlertsFuture,
       initialCancelledDeparturesFuture: initialCancelledDeparturesFuture,
       suppressAutoDestinationSelection: suppressAutoDestinationSelection,
+      updateSearchHistoryOnDestinationChange: true,
     );
   }
 
@@ -1351,6 +1377,11 @@ class _SearchScreenState extends State<SearchScreen> {
                                         routeName: entry.routeName,
                                         routeIdHint: entry.routeId,
                                         initialPathId: entry.pathId,
+                                        initialStopId: entry.boardingStopId,
+                                        initialDestinationPathId:
+                                            entry.destinationPathId,
+                                        initialDestinationStopId:
+                                            entry.destinationStopId,
                                         source: 'search_history',
                                       ),
                                     );

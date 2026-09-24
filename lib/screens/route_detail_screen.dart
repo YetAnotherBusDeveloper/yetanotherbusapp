@@ -39,6 +39,36 @@ import '../widgets/stop_transfer_sheet.dart';
 import '../widgets/transit_station_name.dart';
 import 'favorite_groups_screen.dart';
 
+@visibleForTesting
+StopInfo? resolveLearnedDestinationStop({
+  required List<StopInfo> pathStops,
+  required int pathId,
+  required int boardingStopId,
+  required DestinationChoiceProfile? choice,
+  bool hasExplicitDestinationRequest = false,
+  bool manualDestinationClearInSession = false,
+  bool suppressAutoDestinationSelection = false,
+}) {
+  if (choice == null ||
+      hasExplicitDestinationRequest ||
+      manualDestinationClearInSession ||
+      suppressAutoDestinationSelection ||
+      choice.departurePathId != pathId ||
+      choice.destinationPathId != pathId ||
+      choice.boardingStopId != boardingStopId) {
+    return null;
+  }
+  final boardingIndex = pathStops.indexWhere(
+    (stop) => stop.stopId == boardingStopId,
+  );
+  final destinationIndex = pathStops.indexWhere(
+    (stop) => stop.stopId == choice.destinationStopId,
+  );
+  return boardingIndex >= 0 && destinationIndex > boardingIndex
+      ? pathStops[destinationIndex]
+      : null;
+}
+
 class RouteDetailScreen extends StatefulWidget {
   const RouteDetailScreen({
     required this.routeKey,
@@ -53,6 +83,7 @@ class RouteDetailScreen extends StatefulWidget {
     this.initialAlertsFuture,
     this.initialCancelledDeparturesFuture,
     this.suppressAutoDestinationSelection = false,
+    this.updateSearchHistoryOnDestinationChange = false,
     super.key,
   });
 
@@ -68,6 +99,7 @@ class RouteDetailScreen extends StatefulWidget {
   final Future<List<RouteAlert>>? initialAlertsFuture;
   final Future<List<CancelledDeparture>>? initialCancelledDeparturesFuture;
   final bool suppressAutoDestinationSelection;
+  final bool updateSearchHistoryOnDestinationChange;
 
   @override
   State<RouteDetailScreen> createState() => _RouteDetailScreenState();
@@ -119,6 +151,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   late final AnimationController _countdownProgressController;
   late final AnimationController _initialStopsRevealController;
   late final Animation<double> _initialStopsOpacity;
+  Timer? _initialStopsRevealTimer;
   bool _initialStopsRevealScheduled = false;
   TabController? _tabController;
   StreamSubscription<Position>? _positionSubscription;
@@ -171,6 +204,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   String? _boardingStopName;
   int? _destinationStopId;
   String? _destinationStopName;
+  bool _hasExplicitDestinationRequest = false;
+  bool _manualDestinationClearInSession = false;
   List<RouteAlert> _alerts = const <RouteAlert>[];
   List<CancelledDeparture> _initialCancelledDepartures =
       const <CancelledDeparture>[];
@@ -208,16 +243,25 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       parent: _initialStopsRevealController,
       curve: AppMotion.curve,
     );
+    _initialStopsRevealTimer = Timer(
+      const Duration(milliseconds: 500),
+      _completeInitialStopsRevealAfterTimeout,
+    );
     _requestedPathId = widget.initialPathId;
     _requestedStopId = widget.initialStopId;
     _requestedDestinationPathId = widget.initialDestinationPathId;
     _requestedDestinationStopId = widget.initialDestinationStopId;
+    _boardingStopId = widget.initialStopId;
+    _hasExplicitDestinationRequest = widget.initialDestinationStopId != null;
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (MediaQuery.disableAnimationsOf(context)) {
+      _initialStopsRevealTimer?.cancel();
+      _initialStopsRevealTimer = null;
+      _initialStopsRevealScheduled = true;
       _initialStopsRevealController.value = 1;
     }
     final route = ModalRoute.of(context);
@@ -287,6 +331,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     RouteDetailLaunchBridge.instance.detach(_launchHandler);
     _countdownTimer?.cancel();
     _routeVisitTimer?.cancel();
+    _initialStopsRevealTimer?.cancel();
     _countdownProgressController.dispose();
     _initialStopsRevealController.dispose();
     _selectedMapPathId.dispose();
@@ -484,6 +529,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _scrollToInitialStopIfNeeded();
       _recalculateNearestStops();
       await _applyRequestedDestinationIfPossible();
+      await _applyLearnedDestinationIfPossible();
       if (_isRouteVisible) {
         unawaited(_ensureLocationTracking());
         unawaited(_maybePromptForBackgroundTripMonitor());
@@ -567,6 +613,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     if (_initialStopsRevealScheduled) {
       return;
     }
+    _initialStopsRevealTimer?.cancel();
+    _initialStopsRevealTimer = null;
     _initialStopsRevealScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -576,6 +624,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         unawaited(_initialStopsRevealController.forward());
       }
     });
+  }
+
+  void _completeInitialStopsRevealAfterTimeout() {
+    if (!mounted || _initialStopsRevealScheduled) {
+      return;
+    }
+    _initialStopsRevealTimer = null;
+    _initialStopsRevealScheduled = true;
+    _initialStopsRevealController.value = 1;
   }
 
   void _syncLiveMapData(
@@ -1073,6 +1130,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _scrollToInitialStopIfNeeded();
       _maybeScrollToCurrentLocation();
       unawaited(_configureBackgroundTripMonitorIfNeeded());
+      unawaited(_applyLearnedDestinationIfPossible());
     });
   }
 
@@ -1211,6 +1269,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _requestedStopId = requestedStopId;
       _requestedDestinationPathId = requestedDestinationPathId;
       _requestedDestinationStopId = requestedDestinationStopId;
+      if (requestedDestinationStopId != null) {
+        _hasExplicitDestinationRequest = true;
+      }
       _targetInitialPathId = resolvedPathId;
       _didScrollToInitialStop = requestedStopId == null;
       _autoScrolledPathId = null;
@@ -1327,10 +1388,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
 
-    final boardingStop = _findStopById(
-      pathStops,
-      _nearestStopByPath[resolvedPathId],
-    );
+    final boardingStop =
+        _findStopById(pathStops, _requestedStopId) ??
+        _findStopById(pathStops, _boardingStopId) ??
+        _findStopById(pathStops, _nearestStopByPath[resolvedPathId]);
 
     if (!mounted) {
       return;
@@ -1348,6 +1409,45 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _boardingStopName = boardingStop?.stopName;
     });
 
+    await _configureBackgroundTripMonitorIfNeeded();
+  }
+
+  Future<void> _applyLearnedDestinationIfPossible() async {
+    if (!mounted ||
+        widget.suppressAutoDestinationSelection ||
+        _manualDestinationClearInSession ||
+        _hasExplicitDestinationRequest ||
+        _requestedDestinationStopId != null ||
+        _destinationStopId != null) {
+      return;
+    }
+    final pathId = _currentPathId;
+    final boardingStop = _resolvedBoardingStop();
+    if (pathId == null || boardingStop == null) return;
+
+    final choice = AppControllerScope.read(context).learnedDestinationChoice(
+      provider: widget.provider,
+      routeKey: widget.routeKey,
+      departurePathId: pathId,
+      boardingStopId: boardingStop.stopId,
+    );
+    final pathStops = _currentPathStops;
+    final destinationStop = resolveLearnedDestinationStop(
+      pathStops: pathStops,
+      pathId: pathId,
+      boardingStopId: boardingStop.stopId,
+      choice: choice,
+      hasExplicitDestinationRequest: _hasExplicitDestinationRequest,
+      manualDestinationClearInSession: _manualDestinationClearInSession,
+      suppressAutoDestinationSelection: widget.suppressAutoDestinationSelection,
+    );
+    if (destinationStop == null) return;
+    setState(() {
+      _boardingStopId = boardingStop.stopId;
+      _boardingStopName = boardingStop.stopName;
+      _destinationStopId = destinationStop.stopId;
+      _destinationStopName = destinationStop.stopName;
+    });
     await _configureBackgroundTripMonitorIfNeeded();
   }
 
@@ -2529,6 +2629,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _boardingStopId = stop.stopId;
       _boardingStopName = stop.stopName;
     });
+    await _applyLearnedDestinationIfPossible();
     await _configureBackgroundTripMonitorIfNeeded();
     if (!mounted) {
       return;
@@ -2548,6 +2649,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
   Future<void> _setDestinationStop(StopInfo stop) async {
     final boardingStop = _resolvedBoardingStop();
+    final pathId = _currentPathId;
     setState(() {
       _resetLiveActivityRideState();
       if (_isIOS) {
@@ -2558,6 +2660,30 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _destinationStopId = stop.stopId;
       _destinationStopName = stop.stopName;
     });
+    if (boardingStop != null && pathId != null) {
+      final controller = AppControllerScope.read(context);
+      await controller.recordDestinationChoice(
+        provider: widget.provider,
+        routeKey: widget.routeKey,
+        departurePathId: pathId,
+        boardingStopId: boardingStop.stopId,
+        destinationPathId: pathId,
+        destinationStopId: stop.stopId,
+        destinationStopName: stop.stopName,
+      );
+      if (widget.updateSearchHistoryOnDestinationChange) {
+        await controller.updateLatestHistoryDestination(
+          provider: widget.provider,
+          routeKey: widget.routeKey,
+          departurePathId: pathId,
+          boardingStopId: boardingStop.stopId,
+          boardingStopName: boardingStop.stopName,
+          destinationPathId: pathId,
+          destinationStopId: stop.stopId,
+          destinationStopName: stop.stopName,
+        );
+      }
+    }
     await _configureBackgroundTripMonitorIfNeeded();
     if (!mounted) {
       return;
@@ -2606,6 +2732,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
     setState(() {
+      _manualDestinationClearInSession = true;
+      _requestedDestinationPathId = null;
+      _requestedDestinationStopId = null;
       _resetLiveActivityRideState();
       if (_isIOS) {
         _backgroundTripMonitorPaused = false;
@@ -2887,6 +3016,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           unawaited(_configureBackgroundTripMonitorIfNeeded());
         }
       }
+      unawaited(_applyLearnedDestinationIfPossible());
       _updateDesktopPresence();
     }
     _maybeScrollToCurrentLocation();
@@ -3287,6 +3417,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     required String pathName,
     required StopInfo boardingStop,
     StopInfo? destinationStop,
+    required String boardingEtaText,
     required int? busStopsUntilBoarding,
   }) {
     final parts = <String>[
@@ -3296,6 +3427,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         context,
       ).routeDetailBoardingStopValue(_displayStopName(context, boardingStop)),
     ];
+    if (boardingEtaText != '--') {
+      parts.add(boardingEtaText);
+    }
     if (destinationStop != null &&
         destinationStop.stopId != boardingStop.stopId) {
       parts.add(
@@ -3490,7 +3624,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
 
     final nearestStop = pathStops[nearestIndex];
-    final nearestEtaText = _displayEtaText(nearestStop);
     final busIndex = _findClosestBusIndex(pathStops, nearestIndex);
     final destinationIndex = _destinationStopId == null
         ? null
@@ -3544,6 +3677,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           statusText: _buildWaitingBoardingText(
             pathName: _displayPathName(context, pathInfo),
             boardingStop: boardingStop,
+            boardingEtaText: boardingEtaText,
             busStopsUntilBoarding: busStopsUntilBoarding,
           ),
           etaSeconds: effectiveStopEtaSeconds(boardingStop),
@@ -3637,6 +3771,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           pathName: _displayPathName(context, pathInfo),
           boardingStop: boardingStop,
           destinationStop: destinationStop,
+          boardingEtaText: boardingEtaText,
           busStopsUntilBoarding: busStopsUntilBoarding,
         ),
         etaSeconds: effectiveStopEtaSecondsForVehicle(
@@ -3698,9 +3833,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         context,
       ).routeDetailNearestStopValue(_displayStopName(context, nearestStop)),
     );
-    if (nearestEtaText != '--') {
-      onboardStatusParts.add(nearestEtaText);
-    }
 
     return LiveActivityDisplayState(
       stopId: destinationStop.stopId,
@@ -6017,6 +6149,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
                                             primaryStyle: stopNameStyle,
                                             secondaryStyle:
                                                 stopNameSecondaryStyle,
+                                            verticalSpacing: 3,
                                           ),
                                         ),
                                       ),
@@ -6403,13 +6536,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             ? _buildBackgroundTripMonitorDrawer(context)
             : null,
         appBar: AppBar(
+          actionsPadding: const EdgeInsetsDirectional.only(end: 12),
           title: Text(
             detail?.route.transitName.displayForLocale(
                   Localizations.localeOf(context).toLanguageTag(),
                 ) ??
                 widget.routeNameHint ??
                 l10n.routeDetailTitle,
-            maxLines: 2,
+            maxLines: 1,
+            softWrap: false,
             overflow: TextOverflow.ellipsis,
           ),
           actions: [

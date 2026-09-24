@@ -18,6 +18,7 @@ Route<void> buildRouteDetailRoute({
   Future<List<RouteAlert>>? initialAlertsFuture,
   Future<List<CancelledDeparture>>? initialCancelledDeparturesFuture,
   bool suppressAutoDestinationSelection = false,
+  bool updateSearchHistoryOnDestinationChange = false,
 }) {
   return MaterialPageRoute<void>(
     settings: RouteSettings(
@@ -44,6 +45,8 @@ Route<void> buildRouteDetailRoute({
       initialAlertsFuture: initialAlertsFuture,
       initialCancelledDeparturesFuture: initialCancelledDeparturesFuture,
       suppressAutoDestinationSelection: suppressAutoDestinationSelection,
+      updateSearchHistoryOnDestinationChange:
+          updateSearchHistoryOnDestinationChange,
     ),
   );
 }
@@ -76,6 +79,7 @@ Future<void> openRouteDetailPage(
   Future<List<RouteAlert>>? initialAlertsFuture,
   Future<List<CancelledDeparture>>? initialCancelledDeparturesFuture,
   bool suppressAutoDestinationSelection = false,
+  bool updateSearchHistoryOnDestinationChange = false,
 }) {
   return Navigator.of(context).push(
     buildRouteDetailRoute(
@@ -91,6 +95,8 @@ Future<void> openRouteDetailPage(
       initialAlertsFuture: initialAlertsFuture,
       initialCancelledDeparturesFuture: initialCancelledDeparturesFuture,
       suppressAutoDestinationSelection: suppressAutoDestinationSelection,
+      updateSearchHistoryOnDestinationChange:
+          updateSearchHistoryOnDestinationChange,
     ),
   );
 }

@@ -210,6 +210,7 @@ void _screenTest(
   String name,
   Future<void> Function(WidgetTester, _Repository) body, {
   Locale locale = const Locale('zh', 'TW'),
+  int initialFrameCount = 5,
 }) {
   testWidgets(name, (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -238,7 +239,7 @@ void _screenTest(
           ),
         ),
       );
-      await _frames(tester);
+      await _frames(tester, initialFrameCount);
       await body(tester, repository);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -252,6 +253,96 @@ void _screenTest(
 }
 
 void main() {
+  test('learned destination requires matching path and a later stop', () {
+    final stops = _detail().stopsByPath[0]!;
+    final matching = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 3,
+      destinationPathId: 0,
+      destinationStopId: 8,
+    );
+
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 3,
+        choice: matching,
+      )?.stopId,
+      8,
+    );
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 1,
+        boardingStopId: 3,
+        choice: matching,
+      ),
+      isNull,
+    );
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 9,
+        choice: matching,
+      ),
+      isNull,
+    );
+    final earlier = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 8,
+      destinationPathId: 0,
+      destinationStopId: 3,
+    );
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 8,
+        choice: earlier,
+      ),
+      isNull,
+    );
+  });
+
+  test('explicit request and manual clear suppress learned destination', () {
+    final stops = _detail().stopsByPath[0]!;
+    final choice = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 3,
+      destinationPathId: 0,
+      destinationStopId: 8,
+    );
+
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 3,
+        choice: choice,
+        hasExplicitDestinationRequest: true,
+      ),
+      isNull,
+    );
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 3,
+        choice: choice,
+        manualDestinationClearInSession: true,
+      ),
+      isNull,
+    );
+  });
+
   _screenTest('shows Chinese route, path, and stop names without overflow', (
     tester,
     repository,
@@ -300,6 +391,16 @@ void main() {
       expect(find.text('返程站1'), findsOneWidget);
       expect(find.text('Inbound Stop 1'), findsOneWidget);
       expect(find.byTooltip('Bus map'), findsOneWidget);
+      final appBarTitle = tester.widget<Text>(
+        find.text('Test Route With A Long English Name / 測試路線'),
+      );
+      expect(appBarTitle.maxLines, 1);
+      expect(appBarTitle.softWrap, isFalse);
+      expect(appBarTitle.overflow, TextOverflow.ellipsis);
+      expect(
+        tester.widget<AppBar>(find.byType(AppBar)).actionsPadding,
+        const EdgeInsetsDirectional.only(end: 12),
+      );
       expect(tester.takeException(), isNull);
     },
     locale: const Locale('en'),
@@ -353,6 +454,20 @@ void main() {
     repository.primaryRequests.single.complete(_detail(eta: 120));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
+    expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 1);
+  }, initialFrameCount: 1);
+
+  _screenTest('caps the initial reveal wait at 500ms', (
+    tester,
+    repository,
+  ) async {
+    await tester.pump(const Duration(milliseconds: 500));
+    repository.topologyRequests.single.complete(_detail());
+    await tester.pump();
+    await tester.pump();
+
+    final stopsFade = find.byKey(const ValueKey('route-stops-fade'));
+    expect(stopsFade, findsOneWidget);
     expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 1);
   });
 

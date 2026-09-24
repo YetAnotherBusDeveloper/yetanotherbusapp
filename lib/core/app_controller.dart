@@ -75,6 +75,7 @@ class AppController extends ChangeNotifier {
   static const defaultFavoriteGroupName = '收藏';
   static const autoFavoriteGroupName = '常用';
   static const _autoFavoriteStopVisitThreshold = 3;
+  static const _autoDestinationChoiceThreshold = 3;
   static const Duration _accountSyncDebounce = Duration(seconds: 3);
   static const Duration _foregroundAccountSyncCooldown = Duration(minutes: 1);
 
@@ -104,6 +105,7 @@ class AppController extends ChangeNotifier {
   List<RouteUsageProfile> _routeUsageProfiles = const [];
   List<FavoriteUsageProfile> _favoriteUsageProfiles = const [];
   List<FavoriteUsageProfile> _stopVisitProfiles = const [];
+  List<DestinationChoiceProfile> _destinationChoiceProfiles = const [];
   int? _settingsLastModifiedAtMs;
   int? _favoriteGroupsLastModifiedAtMs;
   bool _initialized = false;
@@ -149,6 +151,8 @@ class AppController extends ChangeNotifier {
   List<String> get favoriteGroupNames => _favoriteGroups.keys.toList();
   List<RouteUsageProfile> get routeUsageProfiles =>
       List.unmodifiable(_routeUsageProfiles);
+  List<DestinationChoiceProfile> get destinationChoiceProfiles =>
+      List.unmodifiable(_destinationChoiceProfiles);
   int get recordedRouteSelections => _routeUsageProfiles.fold(
     0,
     (total, entry) => total + entry.totalSelections,
@@ -319,6 +323,7 @@ class AppController extends ChangeNotifier {
     _routeUsageProfiles = await storage.loadRouteUsageProfiles();
     _favoriteUsageProfiles = await storage.loadFavoriteUsageProfiles();
     _stopVisitProfiles = await storage.loadStopVisitProfiles();
+    _destinationChoiceProfiles = await storage.loadDestinationChoiceProfiles();
     _initialized = true;
     notifyListeners();
   }
@@ -657,8 +662,12 @@ class AppController extends ChangeNotifier {
     ).take(_settings.maxHistory).toList(growable: false);
     _routeUsageProfiles = _profilesFromRouteHistoryDevice(payload)
       ..sort(_compareRouteUsageProfiles);
+    _destinationChoiceProfiles = _destinationChoicesFromRouteHistoryDevice(
+      payload,
+    );
     await storage.saveHistory(_history);
     await storage.saveRouteUsageProfiles(_routeUsageProfiles);
+    await storage.saveDestinationChoiceProfiles(_destinationChoiceProfiles);
   }
 
   Future<void> setAccountSyncEnabled(
@@ -703,6 +712,7 @@ class AppController extends ChangeNotifier {
           ? _buildRouteHistoryDevicePayload(
               history: _history,
               profiles: _routeUsageProfiles,
+              destinationChoices: _destinationChoiceProfiles,
               modifiedAtMs: nowMs,
             )
           : _accountSyncLocalState.routeHistoryDevicePayload,
@@ -2563,6 +2573,11 @@ class AppController extends ChangeNotifier {
     required BusProvider provider,
     int? pathId,
     String? pathName,
+    int? boardingStopId,
+    String? boardingStopName,
+    int? destinationPathId,
+    int? destinationStopId,
+    String? destinationStopName,
   }) async {
     _history = _history
         .where(
@@ -2586,6 +2601,15 @@ class AppController extends ChangeNotifier {
             : route.description.trim().isNotEmpty
             ? route.description.trim()
             : null,
+        boardingStopId: boardingStopId,
+        boardingStopName: boardingStopName?.trim().isNotEmpty == true
+            ? boardingStopName!.trim()
+            : null,
+        destinationPathId: destinationPathId,
+        destinationStopId: destinationStopId,
+        destinationStopName: destinationStopName?.trim().isNotEmpty == true
+            ? destinationStopName!.trim()
+            : null,
         timestampMs: DateTime.now().millisecondsSinceEpoch,
       ),
     );
@@ -2593,6 +2617,165 @@ class AppController extends ChangeNotifier {
     await storage.saveHistory(_history);
     await _recordSyncedHistoryEntry(_history.first);
     notifyListeners();
+  }
+
+  Future<void> updateLatestHistoryDestination({
+    required BusProvider provider,
+    required int routeKey,
+    required int departurePathId,
+    required int boardingStopId,
+    required String boardingStopName,
+    required int destinationPathId,
+    required int destinationStopId,
+    required String destinationStopName,
+  }) async {
+    var index = _history.indexWhere(
+      (entry) =>
+          entry.provider == provider &&
+          entry.routeKey == routeKey &&
+          entry.departurePathId == departurePathId &&
+          entry.boardingStopId == boardingStopId,
+    );
+    index = index != -1
+        ? index
+        : _history.indexWhere(
+            (entry) =>
+                entry.provider == provider &&
+                entry.routeKey == routeKey &&
+                entry.departurePathId == departurePathId &&
+                entry.boardingStopId == null,
+          );
+    if (index == -1) return;
+
+    final previous = _history[index];
+    final updated = SearchHistoryEntry(
+      provider: previous.provider,
+      routeKey: previous.routeKey,
+      routeName: previous.routeName,
+      routeId: previous.routeId,
+      departurePathId: previous.departurePathId,
+      departurePathName: previous.departurePathName,
+      boardingStopId: boardingStopId,
+      boardingStopName: boardingStopName,
+      destinationPathId: destinationPathId,
+      destinationStopId: destinationStopId,
+      destinationStopName: destinationStopName,
+      timestampMs: previous.timestampMs,
+    );
+    _history = [..._history]..[index] = updated;
+    await storage.saveHistory(_history);
+    await _recordSyncedHistoryEntry(updated);
+    notifyListeners();
+  }
+
+  Future<void> recordDestinationChoice({
+    required BusProvider provider,
+    required int routeKey,
+    required int departurePathId,
+    required int boardingStopId,
+    required int destinationPathId,
+    required int destinationStopId,
+    required String destinationStopName,
+    DateTime? selectedAt,
+  }) async {
+    final timestamp = selectedAt ?? DateTime.now();
+    _destinationChoiceProfiles = _buildUpdatedDestinationChoiceProfiles(
+      source: _destinationChoiceProfiles,
+      provider: provider,
+      routeKey: routeKey,
+      departurePathId: departurePathId,
+      boardingStopId: boardingStopId,
+      destinationPathId: destinationPathId,
+      destinationStopId: destinationStopId,
+      destinationStopName: destinationStopName,
+      timestamp: timestamp,
+    );
+    await storage.saveDestinationChoiceProfiles(_destinationChoiceProfiles);
+    await _recordSyncedDestinationChoice(
+      provider: provider,
+      routeKey: routeKey,
+      departurePathId: departurePathId,
+      boardingStopId: boardingStopId,
+      destinationPathId: destinationPathId,
+      destinationStopId: destinationStopId,
+      destinationStopName: destinationStopName,
+      timestamp: timestamp,
+    );
+  }
+
+  List<DestinationChoiceProfile> _buildUpdatedDestinationChoiceProfiles({
+    required List<DestinationChoiceProfile> source,
+    required BusProvider provider,
+    required int routeKey,
+    required int departurePathId,
+    required int boardingStopId,
+    required int destinationPathId,
+    required int destinationStopId,
+    required String destinationStopName,
+    required DateTime timestamp,
+  }) {
+    var found = false;
+    final next = <DestinationChoiceProfile>[];
+    for (final profile in source) {
+      if (profile.provider == provider &&
+          profile.routeKey == routeKey &&
+          profile.departurePathId == departurePathId &&
+          profile.boardingStopId == boardingStopId &&
+          profile.destinationPathId == destinationPathId &&
+          profile.destinationStopId == destinationStopId) {
+        next.add(
+          profile.recordSelection(
+            timestamp,
+            destinationStopName: destinationStopName,
+          ),
+        );
+        found = true;
+      } else {
+        next.add(profile);
+      }
+    }
+    if (!found) {
+      next.add(
+        DestinationChoiceProfile(
+          provider: provider,
+          routeKey: routeKey,
+          departurePathId: departurePathId,
+          boardingStopId: boardingStopId,
+          destinationPathId: destinationPathId,
+          destinationStopId: destinationStopId,
+          destinationStopName: destinationStopName.trim(),
+          selectionTimestampsMs: [timestamp.millisecondsSinceEpoch],
+        ),
+      );
+    }
+    return next;
+  }
+
+  DestinationChoiceProfile? learnedDestinationChoice({
+    required BusProvider provider,
+    required int routeKey,
+    required int departurePathId,
+    required int boardingStopId,
+    DateTime? now,
+  }) {
+    final referenceTime = now ?? DateTime.now();
+    DestinationChoiceProfile? best;
+    for (final profile in _destinationChoiceProfiles) {
+      if (profile.provider != provider ||
+          profile.routeKey != routeKey ||
+          profile.departurePathId != departurePathId ||
+          profile.boardingStopId != boardingStopId ||
+          profile.selectionCount(now: referenceTime) <
+              _autoDestinationChoiceThreshold) {
+        continue;
+      }
+      if (best == null ||
+          profile.lastSelectedAtMs(now: referenceTime) >
+              best.lastSelectedAtMs(now: referenceTime)) {
+        best = profile;
+      }
+    }
+    return best;
   }
 
   Future<void> clearHistory() async {
@@ -2606,8 +2789,13 @@ class AppController extends ChangeNotifier {
     _routeUsageProfiles = const [];
     _favoriteUsageProfiles = const [];
     _stopVisitProfiles = const [];
+    _destinationChoiceProfiles = const [];
     await _persistSmartRouteProfiles();
-    await _updateRouteHistoryDevicePayload(profiles: const []);
+    await storage.saveDestinationChoiceProfiles(const []);
+    await _updateRouteHistoryDevicePayload(
+      profiles: const [],
+      destinationChoices: const [],
+    );
   }
 
   Future<void> clearRouteSelectionHistory() async {
@@ -2619,11 +2807,16 @@ class AppController extends ChangeNotifier {
           ..sort(_compareRouteUsageProfiles);
     _favoriteUsageProfiles = const [];
     _stopVisitProfiles = const [];
+    _destinationChoiceProfiles = const [];
     await _persistSmartRouteProfiles();
+    await storage.saveDestinationChoiceProfiles(const []);
     final deviceProfiles = _profilesFromRouteHistoryDevice(
       _accountSyncLocalState.routeHistoryDevicePayload,
     ).map((profile) => profile.clearSelections()).toList(growable: false);
-    await _updateRouteHistoryDevicePayload(profiles: deviceProfiles);
+    await _updateRouteHistoryDevicePayload(
+      profiles: deviceProfiles,
+      destinationChoices: const [],
+    );
   }
 
   Future<FavoriteStop?> recordRouteSelection({
@@ -3401,7 +3594,8 @@ class AppController extends ChangeNotifier {
     final routeHistoryVersion = (routeHistory?['version'] as num?)?.toInt();
     if (routeHistory != null &&
         routeHistoryVersion != 1 &&
-        routeHistoryVersion != 2) {
+        routeHistoryVersion != 2 &&
+        routeHistoryVersion != 3) {
       throw StateError('雲端路線紀錄版本較新，請更新 App 後再同步。');
     }
     final devices = _stringMap(routeHistory?['devices']) ?? <String, dynamic>{};
@@ -3411,6 +3605,7 @@ class AppController extends ChangeNotifier {
           _buildRouteHistoryDevicePayload(
             history: _history,
             profiles: _routeUsageProfiles,
+            destinationChoices: _destinationChoiceProfiles,
           );
     } else {
       devices.remove(deviceId);
@@ -3418,7 +3613,7 @@ class AppController extends ChangeNotifier {
     if (devices.isEmpty) {
       payload.remove('routeHistory');
     } else {
-      payload['routeHistory'] = {'version': 2, 'devices': devices};
+      payload['routeHistory'] = {'version': 3, 'devices': devices};
     }
     return payload;
   }
@@ -3426,12 +3621,16 @@ class AppController extends ChangeNotifier {
   Map<String, dynamic> _buildRouteHistoryDevicePayload({
     required List<SearchHistoryEntry> history,
     required List<RouteUsageProfile> profiles,
+    required List<DestinationChoiceProfile> destinationChoices,
     int? modifiedAtMs,
   }) {
     return {
       'modifiedAtMs': modifiedAtMs ?? DateTime.now().millisecondsSinceEpoch,
       'history': history.map((entry) => entry.toJson()).toList(growable: false),
       'routeUsageProfiles': profiles
+          .map((profile) => profile.toJson())
+          .toList(growable: false),
+      'destinationChoiceProfiles': destinationChoices
           .map((profile) => profile.toJson())
           .toList(growable: false),
     };
@@ -3472,6 +3671,32 @@ class AppController extends ChangeNotifier {
         }
       } catch (_) {
         // Skip malformed profiles independently from the preferences document.
+      }
+    }
+    return profiles;
+  }
+
+  List<DestinationChoiceProfile> _destinationChoicesFromRouteHistoryDevice(
+    Object? value,
+  ) {
+    final payload = _stringMap(value);
+    final raw = payload?['destinationChoiceProfiles'];
+    if (raw is! List) return const [];
+    final profiles = <DestinationChoiceProfile>[];
+    for (final item in raw.whereType<Map>().take(1000)) {
+      try {
+        final profile = DestinationChoiceProfile.fromJson(
+          item.map((key, value) => MapEntry(key.toString(), value)),
+        );
+        if (profile.routeKey > 0 &&
+            profile.departurePathId >= 0 &&
+            profile.boardingStopId > 0 &&
+            profile.destinationPathId >= 0 &&
+            profile.destinationStopId > 0) {
+          profiles.add(profile);
+        }
+      } catch (_) {
+        // Skip malformed destination choices independently.
       }
     }
     return profiles;
@@ -3533,9 +3758,38 @@ class AppController extends ChangeNotifier {
     await _updateRouteHistoryDevicePayload(profiles: next);
   }
 
+  Future<void> _recordSyncedDestinationChoice({
+    required BusProvider provider,
+    required int routeKey,
+    required int departurePathId,
+    required int boardingStopId,
+    required int destinationPathId,
+    required int destinationStopId,
+    required String destinationStopName,
+    required DateTime timestamp,
+  }) async {
+    if (!_tracksDeviceRouteHistory) return;
+    final current = _destinationChoicesFromRouteHistoryDevice(
+      _accountSyncLocalState.routeHistoryDevicePayload,
+    );
+    final next = _buildUpdatedDestinationChoiceProfiles(
+      source: current,
+      provider: provider,
+      routeKey: routeKey,
+      departurePathId: departurePathId,
+      boardingStopId: boardingStopId,
+      destinationPathId: destinationPathId,
+      destinationStopId: destinationStopId,
+      destinationStopName: destinationStopName,
+      timestamp: timestamp,
+    );
+    await _updateRouteHistoryDevicePayload(destinationChoices: next);
+  }
+
   Future<void> _updateRouteHistoryDevicePayload({
     List<SearchHistoryEntry>? history,
     List<RouteUsageProfile>? profiles,
+    List<DestinationChoiceProfile>? destinationChoices,
   }) async {
     if (!_tracksDeviceRouteHistory) return;
     final current = _accountSyncLocalState.routeHistoryDevicePayload;
@@ -3548,6 +3802,9 @@ class AppController extends ChangeNotifier {
       routeHistoryDevicePayload: _buildRouteHistoryDevicePayload(
         history: history ?? _historyFromRouteHistoryDevice(current),
         profiles: profiles ?? _profilesFromRouteHistoryDevice(current),
+        destinationChoices:
+            destinationChoices ??
+            _destinationChoicesFromRouteHistoryDevice(current),
         modifiedAtMs: nowMs,
       ),
     );
@@ -3568,7 +3825,11 @@ class AppController extends ChangeNotifier {
   }) async {
     final routeHistory = _stringMap(payload?['routeHistory']);
     final routeHistoryVersion = (routeHistory?['version'] as num?)?.toInt();
-    if (routeHistoryVersion != 1 && routeHistoryVersion != 2) return;
+    if (routeHistoryVersion != 1 &&
+        routeHistoryVersion != 2 &&
+        routeHistoryVersion != 3) {
+      return;
+    }
     final devices = _stringMap(routeHistory?['devices']);
     if (devices == null) return;
 
@@ -3580,6 +3841,7 @@ class AppController extends ChangeNotifier {
 
     final historyByRoute = <String, SearchHistoryEntry>{};
     final profileParts = <String, List<RouteUsageProfile>>{};
+    final destinationChoiceParts = <String, List<DestinationChoiceProfile>>{};
     for (final devicePayload in devices.values) {
       for (final entry in _historyFromRouteHistoryDevice(devicePayload)) {
         final key = '${entry.provider.name}:${entry.routeKey}:${entry.pathId}';
@@ -3592,6 +3854,15 @@ class AppController extends ChangeNotifier {
         final key =
             '${profile.provider.name}:${profile.routeKey}:${profile.pathId}';
         (profileParts[key] ??= []).add(profile);
+      }
+      for (final profile in _destinationChoicesFromRouteHistoryDevice(
+        devicePayload,
+      )) {
+        final key =
+            '${profile.provider.name}:${profile.routeKey}:'
+            '${profile.departurePathId}:${profile.boardingStopId}:'
+            '${profile.destinationPathId}:${profile.destinationStopId}';
+        (destinationChoiceParts[key] ??= []).add(profile);
       }
     }
 
@@ -3610,8 +3881,38 @@ class AppController extends ChangeNotifier {
             .map(_mergeRouteUsageProfiles)
             .toList(growable: false)
           ..sort(_compareRouteUsageProfiles);
+    _destinationChoiceProfiles = destinationChoiceParts.values
+        .map(_mergeDestinationChoiceProfiles)
+        .toList(growable: false);
     await storage.saveHistory(_history);
     await storage.saveRouteUsageProfiles(_routeUsageProfiles);
+    await storage.saveDestinationChoiceProfiles(_destinationChoiceProfiles);
+  }
+
+  DestinationChoiceProfile _mergeDestinationChoiceProfiles(
+    List<DestinationChoiceProfile> profiles,
+  ) {
+    final first = profiles.first;
+    final timestamps =
+        profiles
+            .expand((profile) => profile.selectionTimestampsWithin())
+            .toSet()
+            .toList()
+          ..sort();
+    final latest = profiles.reduce(
+      (left, right) =>
+          left.lastSelectedAtMs() >= right.lastSelectedAtMs() ? left : right,
+    );
+    return DestinationChoiceProfile(
+      provider: first.provider,
+      routeKey: first.routeKey,
+      departurePathId: first.departurePathId,
+      boardingStopId: first.boardingStopId,
+      destinationPathId: first.destinationPathId,
+      destinationStopId: first.destinationStopId,
+      destinationStopName: latest.destinationStopName,
+      selectionTimestampsMs: timestamps,
+    );
   }
 
   RouteUsageProfile _mergeRouteUsageProfiles(List<RouteUsageProfile> profiles) {

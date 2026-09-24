@@ -46,4 +46,20 @@ void main() {
       greaterThan(tester.getTopLeft(find.text('台北車站')).dy),
     );
   });
+
+  testWidgets('optional vertical spacing only separates bilingual lines', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        locale: Locale('en'),
+        home: Scaffold(
+          body: TransitStationName(name: name, verticalSpacing: 3),
+        ),
+      ),
+    );
+
+    expect(find.byType(SizedBox), findsOneWidget);
+    expect(tester.widget<SizedBox>(find.byType(SizedBox)).height, 3);
+  });
 }
