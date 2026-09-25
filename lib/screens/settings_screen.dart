@@ -628,8 +628,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     value,
                                   ),
                           ),
+                        // 廣告濃度只在廣告開啟時才有意義，關閉廣告時整項隱藏。
                         if (!kIsWeb &&
-                            defaultTargetPlatform == TargetPlatform.android)
+                            defaultTargetPlatform == TargetPlatform.android &&
+                            controller.settings.enableAds)
                           const AdDensitySetting(),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,

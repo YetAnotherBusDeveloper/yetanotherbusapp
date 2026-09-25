@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,6 +6,7 @@ import 'package:taiwanbus_flutter/app/bus_app.dart';
 import 'package:taiwanbus_flutter/core/ad_service.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/screens/settings_screen.dart';
 import 'package:taiwanbus_flutter/widgets/ad_density_setting.dart';
 
 import 'support/ad_test_controller.dart';
@@ -55,6 +57,49 @@ void main() {
       expect(controller.settings.adDensity, 4);
     },
   );
+
+  testWidgets('density setting is only visible while ads are enabled', (
+    tester,
+  ) async {
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      final controller = await createAdTestController();
+      addTearDown(controller.dispose);
+      // A tall viewport keeps the whole settings list built so the density
+      // section can be found without scrolling.
+      tester.view.physicalSize = const Size(900, 8000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AppControllerScope(
+            controller: controller,
+            child: const SettingsScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.settings.enableAds, isTrue);
+      expect(find.text('廣告濃度'), findsOneWidget);
+
+      await controller.updateEnableAds(false);
+      await tester.pumpAndSettle();
+      expect(find.text('廣告濃度'), findsNothing);
+      expect(find.byType(AdDensitySetting), findsNothing);
+
+      await controller.updateEnableAds(true);
+      await tester.pumpAndSettle();
+      expect(find.text('廣告濃度'), findsOneWidget);
+
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatform;
+    }
+  });
 
   for (final width in [320.0, 780.0]) {
     testWidgets('selector images and text fit at width $width', (tester) async {
