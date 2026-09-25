@@ -648,6 +648,48 @@ void main() {
     expect(after.longitude, greaterThan(before.longitude));
   });
 
+  _mapTest('animation ticks rebuild only the moving marker layer', (
+    tester,
+    log,
+    controller,
+  ) async {
+    await _pumpMap(tester, controller);
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+    );
+    await _selectTheResolvedBus(tester, log);
+
+    final mapBefore = tester.widget<FlutterMap>(find.byType(FlutterMap));
+    final tileLayerBefore = tester.widget<TileLayer>(find.byType(TileLayer));
+    final movingLayerBefore = tester.widget<MarkerLayer>(
+      find.byKey(const ValueKey('bus-map-moving-marker-layer')),
+    );
+
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      identical(tester.widget<FlutterMap>(find.byType(FlutterMap)), mapBefore),
+      isTrue,
+    );
+    expect(
+      identical(
+        tester.widget<TileLayer>(find.byType(TileLayer)),
+        tileLayerBefore,
+      ),
+      isTrue,
+    );
+    expect(
+      identical(
+        tester.widget<MarkerLayer>(
+          find.byKey(const ValueKey('bus-map-moving-marker-layer')),
+        ),
+        movingLayerBefore,
+      ),
+      isFalse,
+    );
+  });
+
   _mapTest('a bus the feed could not pin down is still named', (
     tester,
     log,
