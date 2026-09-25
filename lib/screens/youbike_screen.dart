@@ -165,7 +165,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
             action: SnackBarAction(
               label: serviceDisabled
                   ? l10n.nearbyLocationSettings
-                   : deniedForever
+                  : deniedForever
                   ? l10n.nearbyPermissionSettings
                   : l10n.commonRetry,
               onPressed: serviceDisabled
@@ -397,7 +397,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                   child: _stations.isEmpty
                       ? Center(
                           child: Text(
-                             l10n.youBikeNoNearbyStations,
+                            l10n.youBikeNoNearbyStations,
                             style: theme.textTheme.bodyLarge?.copyWith(
                               color: theme.colorScheme.outline,
                             ),
@@ -435,10 +435,10 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                                   ),
                                 ),
                               ),
-                               title: TransitStationName(
-                                 name: _stationName(station),
-                                 primaryStyle: theme.textTheme.bodyMedium
-                                     ?.copyWith(fontWeight: FontWeight.w600),
+                              title: TransitStationName(
+                                name: _stationName(station),
+                                primaryStyle: theme.textTheme.bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
                               ),
                               subtitle: Text(
                                 _bikeAvailabilitySummary(station),
@@ -564,7 +564,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                 child: _StatItem(
                   icon: Icons.pedal_bike_rounded,
                   color: Colors.green.shade600,
-                   label: l10n.youBikeGeneralBike,
+                  label: l10n.youBikeGeneralBike,
                   value: '${station.availableRentGeneral}',
                 ),
               ),
@@ -577,7 +577,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                 child: _StatItem(
                   icon: Icons.electric_bike_rounded,
                   color: Colors.orange.shade700,
-                   label: l10n.youBikeElectricBike,
+                  label: l10n.youBikeElectricBike,
                   value: '${station.availableRentElectric}',
                 ),
               ),
@@ -590,7 +590,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                 child: _StatItem(
                   icon: Icons.local_parking_rounded,
                   color: Colors.blue.shade600,
-                   label: l10n.youBikeReturnSlots,
+                  label: l10n.youBikeReturnSlots,
                   value: '${station.availableReturn}',
                 ),
               ),
@@ -683,7 +683,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                       children: [
                         Expanded(
                           child: Text(
-                             l10n.youBikeNearbyStations,
+                            l10n.youBikeNearbyStations,
                             style: theme.textTheme.titleMedium,
                           ),
                         ),
@@ -699,7 +699,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                     child: _stations.isEmpty
                         ? Center(
                             child: Text(
-                               l10n.youBikeNoNearbyStations,
+                              l10n.youBikeNoNearbyStations,
                               style: theme.textTheme.bodyLarge?.copyWith(
                                 color: theme.colorScheme.outline,
                               ),
@@ -744,10 +744,10 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                                     ),
                                   ),
                                 ),
-                                 title: TransitStationName(
-                                   name: _stationName(station),
-                                   primaryStyle: theme.textTheme.bodyMedium
-                                       ?.copyWith(fontWeight: FontWeight.w600),
+                                title: TransitStationName(
+                                  name: _stationName(station),
+                                  primaryStyle: theme.textTheme.bodyMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
                                 ),
                                 subtitle: Text(
                                   _bikeAvailabilitySummary(station),
@@ -828,9 +828,9 @@ class _YouBikeScreenState extends State<YouBikeScreen>
             ),
             children: [
               TileLayer(
-                urlTemplate: mapTileUrlTemplate(theme.brightness),
-                subdomains: mapTileSubdomains(theme.brightness),
-                userAgentPackageName: 'tw.avianjay.taiwanbus.flutter',
+                urlTemplate: mapTileUrlTemplate(),
+                userAgentPackageName: mapTileUserAgent,
+                tileBuilder: mapTileBuilder(theme.brightness),
               ),
               if (_userLocation != null)
                 MarkerLayer(
@@ -915,6 +915,8 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                     .whereType<Marker>()
                     .toList(growable: false),
               ),
+              // Bottom-left because the recenter FAB owns bottom-right.
+              mapTileAttribution(alignment: Alignment.bottomLeft),
             ],
           ),
         if (_loadingStations)
@@ -1368,9 +1370,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
   String _formatDist(double meters) {
     final l10n = AppLocalizations.of(context);
     if (meters < 1000) return l10n.distanceMetersValue(meters.round());
-    return l10n.distanceKilometersValue(
-      (meters / 1000).toStringAsFixed(1),
-    );
+    return l10n.distanceKilometersValue((meters / 1000).toStringAsFixed(1));
   }
 
   String _bikeAvailabilitySummary(BikeStation station) {

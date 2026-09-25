@@ -1269,9 +1269,9 @@ class _BusMapScreenState extends State<BusMapScreen>
       ),
       children: [
         TileLayer(
-          urlTemplate: mapTileUrlTemplate(theme.brightness),
-          subdomains: mapTileSubdomains(theme.brightness),
-          userAgentPackageName: 'tw.avianjay.taiwanbus.flutter',
+          urlTemplate: mapTileUrlTemplate(),
+          userAgentPackageName: mapTileUserAgent,
+          tileBuilder: mapTileBuilder(theme.brightness),
           tileProvider: widget.tileProvider,
         ),
         if (geometry != null && geometry.points.length >= 2)
@@ -1354,6 +1354,8 @@ class _BusMapScreenState extends State<BusMapScreen>
             markers: _osmBusMarkers(buses, DateTime.now()),
           ),
         ),
+        // Required by the OSM tile usage policy; kept last so nothing covers it.
+        mapTileAttribution(),
       ],
     );
   }

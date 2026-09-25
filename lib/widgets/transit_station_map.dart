@@ -322,9 +322,9 @@ class _TransitStationMapState extends State<TransitStationMap>
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate: mapTileUrlTemplate(theme.brightness),
-                    subdomains: mapTileSubdomains(theme.brightness),
-                    userAgentPackageName: 'tw.avianjay.taiwanbus.flutter',
+                    urlTemplate: mapTileUrlTemplate(),
+                    userAgentPackageName: mapTileUserAgent,
+                    tileBuilder: mapTileBuilder(theme.brightness),
                   ),
                   MarkerLayer(
                     // Render the selected label last so nearby point dots
@@ -348,6 +348,8 @@ class _TransitStationMapState extends State<TransitStationMap>
                         })
                         .toList(growable: false),
                   ),
+                  // Bottom-left because the centre button owns bottom-right.
+                  mapTileAttribution(alignment: Alignment.bottomLeft),
                 ],
               ),
             Positioned(
@@ -475,9 +477,8 @@ class _TransitPointMarker extends StatelessWidget {
                           Flexible(
                             child: TransitStationName(
                               name: point.name!,
-                              primaryStyle: theme.textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                              primaryStyle: theme.textTheme.labelLarge
+                                  ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                           ),
                         ],
