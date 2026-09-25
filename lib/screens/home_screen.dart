@@ -9,11 +9,12 @@ import '../app/bus_app.dart';
 import '../core/app_motion.dart';
 import '../core/app_routes.dart';
 import '../core/app_controller.dart';
-import '../core/friendly_error.dart';
+import '../core/last_bus_message.dart';
 import '../core/models.dart';
 import '../core/pwa_install_service.dart';
 import '../core/route_direction_label.dart';
-import '../core/smart_route_service.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/eta_badge.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/transit_station_map.dart';
@@ -80,26 +81,41 @@ class _HomeScreenState extends State<HomeScreen> {
     return MediaQuery.removePadding(
       context: context,
       removeBottom: true,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-        children: [
-          const AdBannerWidget(minimumDensity: 2, isInline: true),
-          if (controller.settings.enableSmartRecommendations) ...[
-            _SmartRecommendationCard(
-              controller: controller,
-              compactMode: compactMode,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final minContentHeight = constraints.hasBoundedHeight
+              ? (constraints.maxHeight - 16)
+                    .clamp(0.0, double.infinity)
+                    .toDouble()
+              : 0.0;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: minContentHeight),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const AdBannerWidget(minimumDensity: 2, isInline: true),
+                  if (controller.settings.enableSmartRecommendations) ...[
+                    _SmartRecommendationCard(
+                      controller: controller,
+                      compactMode: compactMode,
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  _buildSearchFeatureCard(context, compactMode: compactMode),
+                  const SizedBox(height: 8),
+                  _buildFavoritesFeatureCard(context, compactMode: compactMode),
+                  const SizedBox(height: 8),
+                  _buildNearbyFeatureCard(context, compactMode: compactMode),
+                  const SizedBox(height: 8),
+                  _buildBusMapFeatureCard(context, compactMode: compactMode),
+                  const AdBannerWidget(isInline: true),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-          ],
-          _buildSearchFeatureCard(context, compactMode: compactMode),
-          const SizedBox(height: 8),
-          _buildFavoritesFeatureCard(context, compactMode: compactMode),
-          const SizedBox(height: 8),
-          _buildNearbyFeatureCard(context, compactMode: compactMode),
-          const SizedBox(height: 8),
-          _buildBusMapFeatureCard(context, compactMode: compactMode),
-          const AdBannerWidget(isInline: true),
-        ],
+          );
+        },
       ),
     );
   }
@@ -170,10 +186,11 @@ class _HomeScreenState extends State<HomeScreen> {
     bool bigIcon = false,
     bool compactMode = false,
   }) {
+    final l10n = AppLocalizations.of(context);
     return _FeatureCard(
       icon: Icons.search_rounded,
-      title: '搜尋路線',
-      subtitle: '輸入公車號碼、路線名稱或客運路線，直接看即時到站資訊。',
+      title: l10n.homeSearchTitle,
+      subtitle: l10n.homeSearchDescription,
       bigIcon: bigIcon,
       compact: compactMode,
       onTap: () {
@@ -192,10 +209,11 @@ class _HomeScreenState extends State<HomeScreen> {
     bool bigIcon = false,
     bool compactMode = false,
   }) {
+    final l10n = AppLocalizations.of(context);
     return _FeatureCard(
       icon: Icons.favorite_outline_rounded,
-      title: '我的最愛',
-      subtitle: '整理常用站牌與群組，快速跳回指定站點。',
+      title: l10n.homeFavoritesTitle,
+      subtitle: l10n.homeFavoritesDescription,
       bigIcon: bigIcon,
       compact: compactMode,
       onTap: () {
@@ -214,10 +232,11 @@ class _HomeScreenState extends State<HomeScreen> {
     bool bigIcon = false,
     bool compactMode = false,
   }) {
+    final l10n = AppLocalizations.of(context);
     return _FeatureCard(
       icon: Icons.near_me_outlined,
-      title: '附近站牌',
-      subtitle: '依照你目前位置找附近的公車站牌。',
+      title: l10n.homeNearbyTitle,
+      subtitle: l10n.homeNearbyDescription,
       bigIcon: bigIcon,
       compact: compactMode,
       onTap: () {
@@ -236,10 +255,11 @@ class _HomeScreenState extends State<HomeScreen> {
     bool bigIcon = false,
     bool compactMode = false,
   }) {
+    final l10n = AppLocalizations.of(context);
     return _FeatureCard(
       icon: Icons.map_outlined,
-      title: '全公車地圖',
-      subtitle: '看整個縣市的公車現在開到哪，點一輛就能看它的路線與站牌。',
+      title: l10n.homeBusMapTitle,
+      subtitle: l10n.homeBusMapDescription,
       bigIcon: bigIcon,
       compact: compactMode,
       onTap: () {
@@ -255,6 +275,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildDesktopSidebar(BuildContext context, AppController controller) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 32, 24, 32),
@@ -268,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '總覽',
+                  l10n.homeOverviewTitle,
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
@@ -291,7 +312,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     Chip(
                       avatar: const Icon(Icons.layers_outlined),
                       label: Text(
-                        '已選 ${controller.selectedProviders.length} 個地區',
+                        l10n.homeSelectedRegions(
+                          controller.selectedProviders.length,
+                        ),
                       ),
                     ),
                   ],
@@ -304,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: FilledButton.tonalIcon(
                     onPressed: () => openAdaptiveSettingsScreen(context),
                     icon: const Icon(Icons.tune_rounded),
-                    label: const Text('開啓設定'),
+                    label: Text(l10n.homeOpenSettings),
                     style: FilledButton.styleFrom(
                       alignment: Alignment.centerLeft,
                     ),
@@ -318,7 +341,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       onPressed: () =>
                           _openDatabaseSettings(context, controller),
                       icon: const Icon(Icons.storage_rounded),
-                      label: const Text('資料庫與下載'),
+                      label: Text(l10n.databaseDownloadsTitle),
                       style: OutlinedButton.styleFrom(
                         alignment: Alignment.centerLeft,
                       ),
@@ -336,6 +359,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDesktop =
@@ -385,7 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (kIsWeb) const _WebPwaInstallButton(),
           if (!kIsWeb && (isDesktop || !_hideDatabaseForWeatherOverflow))
             IconButton(
-              tooltip: '資料庫與下載',
+              tooltip: l10n.databaseDownloadsTitle,
               onPressed: () => _openDatabaseSettings(context, controller),
               icon: controller.downloadingDatabase
                   ? const SizedBox.square(
@@ -402,7 +426,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
             ),
           IconButton(
-            tooltip: '公告',
+            tooltip: l10n.announcementsTitle,
             onPressed: () {
               Navigator.of(context).pushNamed(AppRoutes.announcements);
             },
@@ -419,6 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
           ),
           IconButton(
+            tooltip: l10n.commonSettings,
             onPressed: () => openAdaptiveSettingsScreen(context),
             icon: const Icon(Icons.settings_outlined),
           ),
@@ -493,30 +518,31 @@ class _WebPwaInstallButton extends StatelessWidget {
   const _WebPwaInstallButton();
 
   Future<void> _handlePressed(BuildContext context) async {
+    final l10n = AppLocalizations.of(context);
     final shouldInstall = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('要安裝成應用程式嗎？'),
-          content: const Column(
+          title: Text(l10n.installAppTitle),
+          content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('把 YABus 安裝成應用程式，之後就能像一般應用程式一樣開啓。'),
-              SizedBox(height: 12),
+              Text(l10n.installAppDescription),
+              const SizedBox(height: 12),
               Text(
-                '功能會比原版應用程式少就是了',
-                style: TextStyle(decoration: TextDecoration.lineThrough),
+                l10n.installAppLimitation,
+                style: const TextStyle(decoration: TextDecoration.lineThrough),
               ),
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('先不要'),
+              child: Text(l10n.commonNotNow),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('當然好啊 ＼(^o^)／'),
+              child: Text(l10n.installAppConfirm),
             ),
           ],
         );
@@ -534,18 +560,21 @@ class _WebPwaInstallButton extends StatelessWidget {
     final messenger = ScaffoldMessenger.maybeOf(context);
     switch (outcome) {
       case PwaInstallPromptOutcome.accepted:
-        messenger?.showSnackBar(const SnackBar(content: Text('已送出安裝要求。')));
+        messenger?.showSnackBar(
+          SnackBar(content: Text(l10n.installRequestSent)),
+        );
       case PwaInstallPromptOutcome.dismissed:
-        messenger?.showSnackBar(const SnackBar(content: Text('已取消安裝。')));
+        messenger?.showSnackBar(SnackBar(content: Text(l10n.installCancelled)));
       case PwaInstallPromptOutcome.unavailable:
         messenger?.showSnackBar(
-          const SnackBar(content: Text('這個裝置目前無法顯示安裝提示。')),
+          SnackBar(content: Text(l10n.installUnavailable)),
         );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return ValueListenableBuilder<PwaInstallState>(
       valueListenable: pwaInstallService.stateListenable,
       builder: (context, state, _) {
@@ -553,7 +582,7 @@ class _WebPwaInstallButton extends StatelessWidget {
           return const SizedBox.shrink();
         }
         return IconButton(
-          tooltip: '安裝 App',
+          tooltip: l10n.installAppTooltip,
           onPressed: () => _handlePressed(context),
           icon: const Icon(Icons.download_rounded),
         );
@@ -691,35 +720,13 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     // Smart route suggestions require local database for usage profiles.
     // On web (or when DB not ready), skip to nearby fallback if location is available.
     if (controller.databaseReady && controller.routeUsageProfiles.isNotEmpty) {
+      position = await positionFuture;
       final baseSuggestions = await controller.getSmartRouteSuggestions(
+        position: position,
         limit: widget.maxSuggestions,
       );
       if (baseSuggestions.isNotEmpty) {
-        final allHaveFavoriteStops = baseSuggestions.every(
-          (suggestion) => suggestion.favoriteStop != null,
-        );
-        if (!allHaveFavoriteStops) {
-          position = await positionFuture;
-        }
-        final suggestions = position == null
-            ? baseSuggestions
-            : baseSuggestions
-                  .map((suggestion) {
-                    final detail = suggestion.detail;
-                    if (detail == null) {
-                      return suggestion;
-                    }
-                    return SmartRouteService.buildSuggestion(
-                      profile: suggestion.profile,
-                      score: suggestion.score,
-                      reason: suggestion.reason,
-                      detail: detail,
-                      favorite: suggestion.favorite,
-                      position: position,
-                    );
-                  })
-                  .toList(growable: false);
-        return _SmartCardData.recommended(suggestions);
+        return _SmartCardData.recommended(baseSuggestions);
       }
     }
 
@@ -733,43 +740,60 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
       final nearbyStops = await controller.getNearbyStops(
         latitude: position.latitude,
         longitude: position.longitude,
-        limit: widget.maxSuggestions,
+        limit: widget.maxSuggestions < 20 ? 20 : widget.maxSuggestions,
       );
       if (nearbyStops.isEmpty) {
         return null;
       }
 
-      final nearbyResults = await Future.wait(
-        nearbyStops.take(widget.maxSuggestions).map((nearest) async {
-          try {
-            final routeProvider = busProviderFromString(
-              nearest.route.sourceProvider,
-            );
-            final detail = await controller.getPrimaryRouteDetail(
-              nearest.route.routeKey,
-              provider: routeProvider,
-              routeIdHint: nearest.route.routeId,
-              routeNameHint: nearest.route.routeName,
-            );
-            final liveStop = _findStopInDetail(
-              detail,
-              pathId: nearest.stop.pathId,
-              stopId: nearest.stop.stopId,
-            );
-            return _NearbyFallbackData(
+      final nearbyList = <_NearbyFallbackData>[];
+      final seen = <String>{};
+      for (final nearest in nearbyStops) {
+        final identity = [
+          nearest.route.sourceProvider,
+          nearest.route.routeId,
+          nearest.route.routeKey,
+          nearest.stop.pathId,
+          nearest.stop.stopId,
+        ].join(':');
+        if (!seen.add(identity)) {
+          continue;
+        }
+        try {
+          final routeProvider = busProviderFromString(
+            nearest.route.sourceProvider,
+          );
+          final detail = await controller.getPrimaryRouteDetail(
+            nearest.route.routeKey,
+            provider: routeProvider,
+            routeIdHint: nearest.route.routeId,
+            routeNameHint: nearest.route.routeName,
+          );
+          final liveStop = _findStopInDetail(
+            detail,
+            pathId: nearest.stop.pathId,
+            stopId: nearest.stop.stopId,
+          );
+          final stop = liveStop ?? nearest.stop;
+          if (isLastBusMessage(stop.msg) ||
+              stop.etas.any((eta) => isLastBusMessage(eta.msg))) {
+            continue;
+          }
+          nearbyList.add(
+            _NearbyFallbackData(
               result: nearest,
               detail: detail,
               liveStop: liveStop,
               path: _findPath(detail, nearest.stop.pathId),
-            );
-          } catch (_) {
-            return null;
+            ),
+          );
+          if (nearbyList.length == widget.maxSuggestions) {
+            break;
           }
-        }),
-      );
-      final nearbyList = nearbyResults.whereType<_NearbyFallbackData>().toList(
-        growable: false,
-      );
+        } catch (_) {
+          // Try the next nearby route when one candidate cannot be resolved.
+        }
+      }
       if (nearbyList.isEmpty) {
         return null;
       }
@@ -910,10 +934,11 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
 
   // ignore: unused_element
   Widget _buildDisabledState(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return _SmartRecommendationShell(
-      title: '智慧推薦',
+      title: l10n.smartRecommendationsTitle,
       trailing: IconButton(
-        tooltip: '設定',
+        tooltip: l10n.commonSettings,
         onPressed: _openSettings,
         icon: const Icon(Icons.tune_rounded),
       ),
@@ -921,14 +946,14 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '這個功能目前已關閉。開啓後，YABus 會學習你在不同時段最常點開的路線，並在首頁直接推薦。',
+            l10n.smartRecommendationsDisabled,
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: _openSettings,
             icon: const Icon(Icons.settings_suggest_rounded),
-            label: const Text('前往設定'),
+            label: Text(l10n.smartRecommendationsGoToSettings),
           ),
         ],
       ),
@@ -937,9 +962,10 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
 
   // ignore: unused_element
   Widget _buildNeedDatabaseState(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return _SmartRecommendationShell(
-      title: '智慧推薦',
-      child: Text('請先下載本地資料庫。下載完成後，這張卡片才會開始學習你的使用習慣並顯示附近站牌到站時間。'),
+      title: l10n.smartRecommendationsTitle,
+      child: Text(l10n.smartRecommendationsNeedDatabase),
     );
   }
 
@@ -963,8 +989,8 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     );
   }
 
-  /// ETA is the leading element when available. Route, stop and secondary
-  /// details stay in one vertical text block so narrow phones do not overflow.
+  /// Keep ETA beside the primary route details and place metadata below so the
+  /// square badge does not leave an awkward empty column.
   Widget _buildSmartTileRow({
     required BuildContext context,
     required IconData leadingIcon,
@@ -976,69 +1002,73 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        etaBadge ??
-            Container(
-              width: 56,
-              height: 56,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Icon(leadingIcon, color: colorScheme.onPrimaryContainer),
-            ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            etaBadge ??
+                Container(
+                  width: 56,
+                  height: 56,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Icon(
+                    leadingIcon,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (stopName != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  stopName,
-                  style: theme.textTheme.bodyMedium,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-              if (metadata.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                for (final line in metadata)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 3),
-                    child: Text(
-                      line,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (stopName != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      stopName,
+                      style: theme.textTheme.bodyMedium,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-              ],
-            ],
-          ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ],
         ),
-        const SizedBox(width: 8),
-        Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: Icon(
-            Icons.chevron_right_rounded,
-            color: colorScheme.onSurfaceVariant,
+        if (metadata.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.only(left: 5),
+            child: Text(
+              metadata.join(' · '),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -1048,6 +1078,7 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     SmartRouteSuggestion suggestion,
   ) {
     final controller = widget.controller;
+    final l10n = AppLocalizations.of(context);
     final recommendedStop = suggestion.recommendedStop;
     final favorite = suggestion.favorite;
     final destinationLabel =
@@ -1055,7 +1086,7 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
         ? favorite!.destinationStopName!.trim()
         : favorite?.destinationStopId == null
         ? null
-        : '目的地站牌 ${favorite!.destinationStopId}';
+        : l10n.destinationStopId(favorite!.destinationStopId!);
     final showDistance =
         suggestion.favoriteStop == null && suggestion.distanceMeters != null;
     final leadingIcon = favorite == null
@@ -1068,9 +1099,10 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
       routeName: suggestion.profile.routeName,
     );
     final metadata = [
-      if (direction.isNotEmpty) '方向：$direction',
-      if (destinationLabel != null) '目的地：$destinationLabel',
-      if (showDistance) '距離你約 ${formatDistance(suggestion.distanceMeters!)}',
+      if (direction.isNotEmpty) l10n.directionValue(direction),
+      if (destinationLabel != null) l10n.destinationValue(destinationLabel),
+      if (showDistance)
+        l10n.approximateDistance(formatDistance(suggestion.distanceMeters!)),
     ];
     final etaBadge = recommendedStop != null
         ? EtaBadge(
@@ -1135,10 +1167,11 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     BuildContext context,
     List<SmartRouteSuggestion> suggestions,
   ) {
+    final l10n = AppLocalizations.of(context);
     return _SmartRecommendationShell(
-      title: '智慧推薦',
+      title: l10n.smartRecommendationsTitle,
       trailing: IconButton(
-        tooltip: '重新整理',
+        tooltip: l10n.commonRefresh,
         onPressed: _refresh,
         icon: const Icon(Icons.refresh_rounded),
       ),
@@ -1154,6 +1187,7 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     _NearbyFallbackData nearby,
   ) {
     final controller = widget.controller;
+    final l10n = AppLocalizations.of(context);
     final stop = nearby.liveStop ?? nearby.result.stop;
     final route = nearby.result.route;
     // Prefer the PathInfo when it carries a real destination, but fall back to
@@ -1169,8 +1203,8 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
       routeName: route.routeName,
     );
     final metadata = [
-      '距離你約 ${formatDistance(nearby.result.distanceMeters)}',
-      if (direction.isNotEmpty) '方向：$direction',
+      l10n.approximateDistance(formatDistance(nearby.result.distanceMeters)),
+      if (direction.isNotEmpty) l10n.directionValue(direction),
     ];
     const badgeSize = 64.0;
     final etaBadge = EtaBadge(
@@ -1197,10 +1231,11 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     BuildContext context,
     List<_NearbyFallbackData> nearbyList,
   ) {
+    final l10n = AppLocalizations.of(context);
     return _SmartRecommendationShell(
-      title: '智慧推薦',
+      title: l10n.smartRecommendationsTitle,
       trailing: IconButton(
-        tooltip: '重新整理',
+        tooltip: l10n.commonRefresh,
         onPressed: _refresh,
         icon: const Icon(Icons.refresh_rounded),
       ),
@@ -1221,28 +1256,34 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     return FutureBuilder<_SmartCardData?>(
       future: _future,
       builder: (context, snapshot) {
+        final l10n = AppLocalizations.of(context);
         final Widget state;
         final String stateKey;
         if (snapshot.connectionState == ConnectionState.waiting &&
             !snapshot.hasData) {
           stateKey = 'loading';
           state = _SmartRecommendationShell(
-            title: '智慧推薦',
-            child: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 18),
-              child: LinearProgressIndicator(minHeight: 4),
+            title: l10n.smartRecommendationsTitle,
+            child: const SizedBox(
+              height: 130,
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 28,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
+              ),
             ),
           );
         } else if (snapshot.hasError) {
           stateKey = 'error';
           state = _SmartRecommendationShell(
-            title: '智慧推薦',
+            title: l10n.smartRecommendationsTitle,
             trailing: IconButton(
-              tooltip: '重試',
+              tooltip: l10n.commonRetry,
               onPressed: _refresh,
               icon: const Icon(Icons.refresh_rounded),
             ),
-            child: const Text('請稍後重試。'),
+            child: Text(l10n.tryAgainLater),
           );
         } else if (snapshot.data == null) {
           stateKey = 'empty';
@@ -1347,6 +1388,7 @@ class _DesktopNearbyMapPanelState extends State<_DesktopNearbyMapPanel> {
       .toList(growable: false);
 
   Future<void> _loadNearby() async {
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _loading = true;
       _error = null;
@@ -1354,7 +1396,7 @@ class _DesktopNearbyMapPanelState extends State<_DesktopNearbyMapPanel> {
 
     try {
       if (!await Geolocator.isLocationServiceEnabled()) {
-        throw StateError('定位服務尚未開啓。');
+        throw StateError(l10n.locationServicesDisabled);
       }
 
       var permission = await Geolocator.checkPermission();
@@ -1363,7 +1405,7 @@ class _DesktopNearbyMapPanelState extends State<_DesktopNearbyMapPanel> {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        throw StateError('沒有取得定位權限。');
+        throw StateError(l10n.locationPermissionDenied);
       }
 
       final position = await Geolocator.getCurrentPosition(
@@ -1402,7 +1444,7 @@ class _DesktopNearbyMapPanelState extends State<_DesktopNearbyMapPanel> {
       setState(() {
         _results = const [];
         _selectedPointId = null;
-        _error = friendlyErrorMessage(error);
+        _error = localizedFriendlyError(l10n, error);
       });
     } finally {
       if (mounted) {
@@ -1457,6 +1499,7 @@ class _DesktopNearbyMapPanelState extends State<_DesktopNearbyMapPanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final selected = _selectedResult;
     final selectedDirection = selected == null
         ? ''
@@ -1482,16 +1525,22 @@ class _DesktopNearbyMapPanelState extends State<_DesktopNearbyMapPanel> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('附近地圖', style: theme.textTheme.headlineSmall),
+                      Text(
+                        l10n.nearbyMapTitle,
+                        style: theme.textTheme.headlineSmall,
+                      ),
                       if (!compactMode) ...[
                         const SizedBox(height: 6),
-                        Text('今天想去哪搭公車？', style: theme.textTheme.bodyMedium),
+                        Text(
+                          l10n.nearbyMapSubtitle,
+                          style: theme.textTheme.bodyMedium,
+                        ),
                       ],
                     ],
                   ),
                 ),
                 IconButton(
-                  tooltip: '重整附近站牌',
+                  tooltip: l10n.refreshNearbyStops,
                   onPressed: _loading ? null : _loadNearby,
                   icon: const Icon(Icons.refresh_rounded),
                 ),
@@ -1506,15 +1555,15 @@ class _DesktopNearbyMapPanelState extends State<_DesktopNearbyMapPanel> {
             else if (_error != null)
               _DesktopNearbyMessage(
                 message: _error!,
-                primaryLabel: '重試',
+                primaryLabel: l10n.commonRetry,
                 onPrimaryPressed: _loadNearby,
-                secondaryLabel: '附近站牌',
+                secondaryLabel: l10n.nearbyTitle,
                 onSecondaryPressed: _openNearbyScreen,
               )
             else if (_mapPoints.isEmpty)
               _DesktopNearbyMessage(
-                message: '附近暫時沒有可顯示的站牌。',
-                primaryLabel: '附近站牌',
+                message: l10n.nearbyNoStopsToDisplay,
+                primaryLabel: l10n.nearbyTitle,
                 onPrimaryPressed: _openNearbyScreen,
               )
             else ...[
@@ -1527,7 +1576,7 @@ class _DesktopNearbyMapPanelState extends State<_DesktopNearbyMapPanel> {
                   });
                 },
                 height: 320,
-                emptyLabel: '目前沒有可顯示的站點位置。',
+                emptyLabel: l10n.mapNoLocations,
               ),
               const SizedBox(height: 12),
               if (selected != null)
@@ -1673,6 +1722,7 @@ class _SmartRecommendationShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Card(
       margin: EdgeInsets.zero,
@@ -1692,7 +1742,7 @@ class _SmartRecommendationShell extends StatelessWidget {
             ),
             const SizedBox(height: 1),
             Text(
-              '根據你的使用習慣推薦路線',
+              l10n.smartRecommendationsSubtitle,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

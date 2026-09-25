@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/ad_banner_widget.dart';
-import '../core/friendly_error.dart';
 import '../widgets/app_content_transition.dart';
 import '../widgets/markdown_content_view.dart';
 
@@ -48,7 +49,7 @@ class _LegalMarkdownPageState extends State<LegalMarkdownPage> {
         return;
       }
       setState(() {
-        _error = friendlyErrorMessage(error);
+        _error = localizedFriendlyError(AppLocalizations.of(context), error);
       });
     } finally {
       if (mounted) {
@@ -62,13 +63,14 @@ class _LegalMarkdownPageState extends State<LegalMarkdownPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
         actions: [
           IconButton(
-            tooltip: '重新整理',
+            tooltip: l10n.commonRefresh,
             onPressed: _loading ? null : _loadDocument,
             icon: _loading
                 ? const SizedBox.square(
@@ -102,7 +104,7 @@ class _LegalMarkdownPageState extends State<LegalMarkdownPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '文件更新失敗',
+                                      l10n.legalDocumentUpdateFailed,
                                       style: theme.textTheme.titleMedium,
                                     ),
                                     const SizedBox(height: 8),
@@ -111,7 +113,7 @@ class _LegalMarkdownPageState extends State<LegalMarkdownPage> {
                                     FilledButton.tonalIcon(
                                       onPressed: _loadDocument,
                                       icon: const Icon(Icons.refresh_rounded),
-                                      label: const Text('重試'),
+                                      label: Text(l10n.commonRetry),
                                     ),
                                   ],
                                 ),
@@ -130,7 +132,7 @@ class _LegalMarkdownPageState extends State<LegalMarkdownPage> {
                           child: FilledButton.tonalIcon(
                             onPressed: _loadDocument,
                             icon: const Icon(Icons.refresh_rounded),
-                            label: const Text('重新載入文件'),
+                            label: Text(l10n.legalDocumentReload),
                           ),
                         ),
                       ),

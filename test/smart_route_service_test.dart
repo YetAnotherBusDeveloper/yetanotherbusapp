@@ -35,6 +35,51 @@ class _PartiallyFailingRepository extends BusRepository {
   }
 }
 
+class _LastBusRepository extends BusRepository {
+  final List<int> requestedRouteKeys = <int>[];
+
+  @override
+  Future<RouteDetailData> getCompleteBusInfo(
+    int routeKey, {
+    required BusProvider provider,
+    String? routeIdHint,
+    String? routeNameHint,
+  }) async {
+    requestedRouteKeys.add(routeKey);
+    return RouteDetailData(
+      route: RouteSummary(
+        sourceProvider: provider.name,
+        hashMd5: '',
+        routeKey: routeKey,
+        routeId: '$routeKey',
+        routeName: routeNameHint ?? '$routeKey',
+        officialRouteName: routeNameHint ?? '$routeKey',
+        description: '',
+        category: '',
+        sequence: 0,
+        rtrip: 0,
+      ),
+      paths: [PathInfo(routeKey: routeKey, pathId: 0, name: '往測試站')],
+      stopsByPath: {
+        0: [
+          StopInfo(
+            routeKey: routeKey,
+            pathId: 0,
+            stopId: routeKey,
+            stopName: '測試站$routeKey',
+            sequence: 1,
+            lon: 121.5654,
+            lat: 25.033,
+            sec: 120,
+            msg: routeKey == 1 ? '末班車：已經駛離。' : null,
+          ),
+        ],
+      },
+      hasLiveData: true,
+    );
+  }
+}
+
 void main() {
   test('recordOpen increments total and hourly counters', () {
     const profile = RouteUsageProfile(
@@ -561,10 +606,51 @@ void main() {
           ),
         ],
         now: now,
+        limit: 1,
       );
 
       expect(suggestions, hasLength(1));
       expect(suggestions.single.profile.routeKey, 2);
+    },
+  );
+
+  test(
+    'loadSuggestions skips duplicate last-bus candidates and fills limit',
+    () async {
+      final now = DateTime(2026, 9, 21, 8);
+      final repository = _LastBusRepository();
+      final position = Position(
+        latitude: 25.0331,
+        longitude: 121.5655,
+        timestamp: now,
+        accuracy: 1,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+      RouteUsageProfile profile(int routeKey, int opens) => RouteUsageProfile(
+        provider: BusProvider.nwt,
+        routeKey: routeKey,
+        pathId: 0,
+        routeName: '$routeKey',
+        totalOpens: opens,
+        lastOpenedAtMs: now.millisecondsSinceEpoch,
+        hourlyOpens: <int, int>{8: opens},
+      );
+
+      final suggestions = await SmartRouteService.loadSuggestions(
+        repository: repository,
+        profiles: [profile(1, 5), profile(1, 4), profile(2, 3)],
+        now: now,
+        position: position,
+        limit: 1,
+      );
+
+      expect(suggestions.single.profile.routeKey, 2);
+      expect(repository.requestedRouteKeys, [1, 2]);
     },
   );
 }

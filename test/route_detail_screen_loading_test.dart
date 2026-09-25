@@ -19,6 +19,7 @@ import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/route_detail_screen.dart';
 import 'package:taiwanbus_flutter/widgets/eta_badge.dart';
 
@@ -98,8 +99,10 @@ class _NoLocation extends GeolocatorPlatform {
 RouteDetailData _detail({
   int? eta,
   String name = '測試路線',
+  String? nameEn,
   DateTime? updatedAt,
   List<String> family = const [],
+  bool withBus = false,
 }) => RouteDetailData(
   route: RouteSummary(
     sourceProvider: 'TPE',
@@ -112,10 +115,21 @@ RouteDetailData _detail({
     category: '',
     sequence: 0,
     rtrip: 0,
+    routeNameEn: nameEn,
   ),
-  paths: const [
-    PathInfo(routeKey: 500, pathId: 0, name: '去程'),
-    PathInfo(routeKey: 500, pathId: 1, name: '返程'),
+  paths: [
+    PathInfo(
+      routeKey: 500,
+      pathId: 0,
+      name: '去程',
+      nameEn: nameEn == null ? null : 'Outbound',
+    ),
+    PathInfo(
+      routeKey: 500,
+      pathId: 1,
+      name: '返程',
+      nameEn: nameEn == null ? null : 'Inbound',
+    ),
   ],
   stopsByPath: {
     for (final path in [0, 1])
@@ -126,6 +140,9 @@ RouteDetailData _detail({
             pathId: path,
             stopId: i,
             stopName: '${path == 0 ? '去程' : '返程'}站$i',
+            stopNameEn: nameEn == null
+                ? null
+                : '${path == 0 ? 'Outbound' : 'Inbound'} Stop $i',
             sequence: i,
             lat: 25,
             lon: 121,
@@ -133,6 +150,17 @@ RouteDetailData _detail({
             t: eta == null
                 ? null
                 : (updatedAt ?? DateTime.now()).toIso8601String(),
+            buses: withBus && path == 1 && i == 1
+                ? const [
+                    BusVehicle(
+                      id: 'TEST-001',
+                      type: '0',
+                      note: '',
+                      full: false,
+                      carOnStop: false,
+                    ),
+                  ]
+                : const [],
           ),
       ],
   },
@@ -180,8 +208,10 @@ Future<void> _resumeRoute(WidgetTester tester) async {
 
 void _screenTest(
   String name,
-  Future<void> Function(WidgetTester, _Repository) body,
-) {
+  Future<void> Function(WidgetTester, _Repository) body, {
+  Locale locale = const Locale('zh', 'TW'),
+  int initialFrameCount = 5,
+}) {
   testWidgets(name, (tester) async {
     SharedPreferences.setMockInitialValues({});
     final previousLocation = GeolocatorPlatform.instance;
@@ -194,6 +224,9 @@ void _screenTest(
         AppControllerScope(
           controller: controller,
           child: MaterialApp(
+            locale: locale,
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
             navigatorObservers: [appRouteObserver],
             home: const RouteDetailScreen(
               routeKey: 500,
@@ -206,7 +239,7 @@ void _screenTest(
           ),
         ),
       );
-      await _frames(tester);
+      await _frames(tester, initialFrameCount);
       await body(tester, repository);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -220,6 +253,182 @@ void _screenTest(
 }
 
 void main() {
+  test('learned destination requires matching path and a later stop', () {
+    final stops = _detail().stopsByPath[0]!;
+    final matching = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 3,
+      destinationPathId: 0,
+      destinationStopId: 8,
+    );
+
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 3,
+        choice: matching,
+      )?.stopId,
+      8,
+    );
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 1,
+        boardingStopId: 3,
+        choice: matching,
+      ),
+      isNull,
+    );
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 9,
+        choice: matching,
+      ),
+      isNull,
+    );
+    final earlier = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 8,
+      destinationPathId: 0,
+      destinationStopId: 3,
+    );
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 8,
+        choice: earlier,
+      ),
+      isNull,
+    );
+  });
+
+  test('explicit request and manual clear suppress learned destination', () {
+    final stops = _detail().stopsByPath[0]!;
+    final choice = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 3,
+      destinationPathId: 0,
+      destinationStopId: 8,
+    );
+
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 3,
+        choice: choice,
+        hasExplicitDestinationRequest: true,
+      ),
+      isNull,
+    );
+    expect(
+      resolveLearnedDestinationStop(
+        pathStops: stops,
+        pathId: 0,
+        boardingStopId: 3,
+        choice: choice,
+        manualDestinationClearInSession: true,
+      ),
+      isNull,
+    );
+  });
+
+  _screenTest('shows Chinese route, path, and stop names without overflow', (
+    tester,
+    repository,
+  ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    repository.topologyRequests.single.complete(
+      _detail(nameEn: 'Test Route With A Long English Name'),
+    );
+    await _frames(tester);
+
+    expect(find.text('測試路線'), findsOneWidget);
+    expect(
+      find.text('Test Route With A Long English Name / 測試路線'),
+      findsNothing,
+    );
+    expect(find.text('返程'), findsOneWidget);
+    expect(find.text('Inbound / 返程'), findsNothing);
+    expect(find.text('返程站1'), findsOneWidget);
+    expect(find.text('Inbound Stop 1\n返程站1'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  _screenTest(
+    'localizes route detail in English at narrow width',
+    (tester, repository) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      repository.topologyRequests.single.complete(
+        _detail(nameEn: 'Test Route With A Long English Name'),
+      );
+      await _frames(tester);
+
+      expect(
+        find.text('Test Route With A Long English Name / 測試路線'),
+        findsOneWidget,
+      );
+      expect(find.text('返程'), findsOneWidget);
+      expect(find.text('Inbound'), findsOneWidget);
+      expect(find.text('返程站1'), findsOneWidget);
+      expect(find.text('Inbound Stop 1'), findsOneWidget);
+      expect(find.byTooltip('Bus map'), findsOneWidget);
+      final appBarTitle = tester.widget<Text>(
+        find.text('Test Route With A Long English Name / 測試路線'),
+      );
+      expect(appBarTitle.maxLines, 1);
+      expect(appBarTitle.softWrap, isFalse);
+      expect(appBarTitle.overflow, TextOverflow.ellipsis);
+      expect(
+        tester.widget<AppBar>(find.byType(AppBar)).actionsPadding,
+        const EdgeInsetsDirectional.only(end: 12),
+      );
+      expect(tester.takeException(), isNull);
+    },
+    locale: const Locale('en'),
+  );
+
+  _screenTest('keeps stop status controls aligned to the trailing edge', (
+    tester,
+    repository,
+  ) async {
+    tester.view.physicalSize = const Size(466, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    repository.topologyRequests.single.complete(_detail(withBus: true));
+    await _frames(tester, 10);
+
+    final tile = find.byKey(const ValueKey('route-detail-stop-1-1'));
+    final status = find.byKey(
+      const ValueKey('route-detail-trailing-status-1-1'),
+    );
+    expect(tile, findsOneWidget);
+    expect(status, findsOneWidget);
+    final tileRect = tester.getRect(tile);
+    final statusRect = tester.getRect(status);
+    expect(statusRect.right, closeTo(tileRect.right - 8, 0.1));
+  });
+
   _screenTest('fades in route stops immediately once data is ready', (
     tester,
     repository,
@@ -245,6 +454,20 @@ void main() {
     repository.primaryRequests.single.complete(_detail(eta: 120));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));
+    expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 1);
+  }, initialFrameCount: 1);
+
+  _screenTest('caps the initial reveal wait at 500ms', (
+    tester,
+    repository,
+  ) async {
+    await tester.pump(const Duration(milliseconds: 500));
+    repository.topologyRequests.single.complete(_detail());
+    await tester.pump();
+    await tester.pump();
+
+    final stopsFade = find.byKey(const ValueKey('route-stops-fade'));
+    expect(stopsFade, findsOneWidget);
     expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 1);
   });
 

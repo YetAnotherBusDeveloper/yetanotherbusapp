@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/background_image_wrapper.dart';
 
 /// Preset seed colors for quick selection.
@@ -23,18 +24,14 @@ const _presetColors = <Color>[
   Color(0xFF00897B), // 青綠
 ];
 
-/// Page key → display label
-const _pageLabels = <String, String>{
-  'bus': '全域首頁',
-  'route_detail': '公車資訊',
-  'search': '搜尋',
-  'favorites': '最愛',
-  'nearby': '附近',
-  'settings': '設定',
-};
-
-/// Page key → optional clarifying subtitle shown under the label.
-const _pageSubtitles = <String, String>{'bus': '同時套用於公車、捷運、高鐵、台鐵、YouBike 首頁'};
+const _pageKeys = <String>[
+  'bus',
+  'route_detail',
+  'search',
+  'favorites',
+  'nearby',
+  'settings',
+];
 
 /// Page key → icon
 const _pageIcons = <String, IconData>{
@@ -45,6 +42,17 @@ const _pageIcons = <String, IconData>{
   'nearby': Icons.near_me_outlined,
   'settings': Icons.settings_outlined,
 };
+
+String _localizedPageLabel(AppLocalizations l10n, String pageKey) =>
+    switch (pageKey) {
+      'bus' => l10n.personalizationPageGlobalHome,
+      'route_detail' => l10n.routeDetailTitle,
+      'search' => l10n.personalizationPageSearch,
+      'favorites' => l10n.favoritesTitle,
+      'nearby' => l10n.personalizationPageNearby,
+      'settings' => l10n.settingsTitle,
+      _ => pageKey,
+    };
 
 Future<String?> _pickBackgroundImageValue(ImagePicker picker) async {
   // Keep the original file. Passing resize/quality options makes some platform
@@ -89,12 +97,13 @@ class PersonalizationScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final settings = controller.settings;
+    final l10n = AppLocalizations.of(context);
     final backgroundOpacity = _backgroundOpacityValue(settings);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isAmoled = settings.useAmoledDark && isDark;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('個人化')),
+      appBar: AppBar(title: Text(l10n.personalizationTitle)),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 860),
@@ -134,12 +143,12 @@ class PersonalizationScreen extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                '配色',
+                                l10n.personalizationColorScheme,
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                _colorSubtitle(settings),
+                                _colorSubtitle(l10n, settings),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
@@ -178,15 +187,15 @@ class PersonalizationScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '深色模式',
+                        l10n.personalizationDarkMode,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         secondary: const Icon(Icons.dark_mode_outlined),
-                        title: const Text('純黑 (AMOLED) 深色主題'),
-                        subtitle: const Text('深色模式下使用純黑背景，可省電並提升對比'),
+                        title: Text(l10n.personalizationAmoledTitle),
+                        subtitle: Text(l10n.personalizationAmoledDescription),
                         value: isAmoled,
                         onChanged: !isDark
                             ? null
@@ -208,17 +217,17 @@ class PersonalizationScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '主頁漸層',
+                        l10n.personalizationHomeGradient,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '調整主頁漸層背景的透明度',
+                        l10n.personalizationHomeGradientDescription,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
                       _OpacitySlider(
-                        label: '漸層透明度',
+                        label: l10n.personalizationGradientOpacity,
                         value: settings.homeBackgroundOpacity,
                         onChanged: isAmoled
                             ? null
@@ -240,12 +249,12 @@ class PersonalizationScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '背景圖片',
+                        l10n.personalizationBackgroundImage,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '設定各頁面的背景圖片，首頁背景會同時套用於公車、捷運、高鐵、台鐵、YouBike 等首頁分頁。',
+                        l10n.personalizationBackgroundImageDescription,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
@@ -277,7 +286,9 @@ class PersonalizationScreen extends StatelessWidget {
                                       Icons.add_photo_alternate_outlined,
                                       size: 18,
                                     ),
-                                    label: const Text('選擇圖片'),
+                                    label: Text(
+                                      l10n.personalizationChooseImage,
+                                    ),
                                   ),
                                   const SizedBox(width: 8),
                                   if (settings
@@ -291,7 +302,7 @@ class PersonalizationScreen extends StatelessWidget {
                                         Icons.clear_all,
                                         size: 18,
                                       ),
-                                      label: const Text('清除'),
+                                      label: Text(l10n.commonClear),
                                     ),
                                 ],
                               ),
@@ -300,7 +311,7 @@ class PersonalizationScreen extends StatelessWidget {
                                   .isNotEmpty) ...[
                                 const SizedBox(height: 12),
                                 _OpacitySlider(
-                                  label: '背景透明度',
+                                  label: l10n.personalizationBackgroundOpacity,
                                   value: backgroundOpacity,
                                   onChanged: isAmoled
                                       ? null
@@ -317,8 +328,12 @@ class PersonalizationScreen extends StatelessWidget {
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: const Icon(Icons.tune_outlined),
-                                title: const Text('各頁面設定'),
-                                subtitle: const Text('分別設定每個頁面的背景圖片'),
+                                title: Text(
+                                  l10n.personalizationPerPageSettings,
+                                ),
+                                subtitle: Text(
+                                  l10n.personalizationPerPageDescription,
+                                ),
                                 trailing: const Icon(Icons.chevron_right),
                                 onTap: () {
                                   Navigator.of(context).push(
@@ -347,7 +362,7 @@ class PersonalizationScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '覆蓋層透明度',
+                        l10n.personalizationOverlayOpacityTitle,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
@@ -357,7 +372,7 @@ class PersonalizationScreen extends StatelessWidget {
                       // ),
                       const SizedBox(height: 12),
                       _OpacitySlider(
-                        label: '覆蓋層',
+                        label: l10n.personalizationOverlay,
                         value: settings.overlayOpacity,
                         onChanged: isAmoled
                             ? null
@@ -400,10 +415,10 @@ class PersonalizationScreen extends StatelessWidget {
     return average;
   }
 
-  String _colorSubtitle(AppSettings settings) {
+  String _colorSubtitle(AppLocalizations l10n, AppSettings settings) {
     return switch (settings.colorSource) {
-      AppColorSource.system => '系統',
-      AppColorSource.automatic => '自動（背景圖片）',
+      AppColorSource.system => l10n.personalizationColorSystem,
+      AppColorSource.automatic => l10n.personalizationColorAutomaticBackground,
       AppColorSource.custom => _formatColorValue(settings.seedColor!),
     };
   }
@@ -422,7 +437,7 @@ class PersonalizationScreen extends StatelessWidget {
           builder: (context, _) {
             final settings = controller.settings;
             return AlertDialog(
-              title: const Text('配色'),
+              title: Text(AppLocalizations.of(context).personalizationColorScheme),
               content: SizedBox(
                 width: 420,
                 child: SingleChildScrollView(
@@ -431,7 +446,9 @@ class PersonalizationScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '「自動」會依背景圖片取色；「系統」會使用裝置的動態配色。',
+                        AppLocalizations.of(
+                          context,
+                        ).personalizationColorSourceDescription,
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 12),
@@ -458,7 +475,7 @@ class PersonalizationScreen extends StatelessWidget {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('關閉'),
+                  child: Text(AppLocalizations.of(context).commonClose),
                 ),
               ],
             );
@@ -493,6 +510,7 @@ class _SeedColorPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
 
     return Column(
       children: [
@@ -503,14 +521,14 @@ class _SeedColorPicker extends StatelessWidget {
             _colorChip(
               context,
               color: null,
-              label: '自動',
+              label: l10n.personalizationColorAutomatic,
               selected: colorSource == AppColorSource.automatic,
               onSelected: onAutomaticSelected,
             ),
             _colorChip(
               context,
               color: null,
-              label: '系統',
+              label: l10n.personalizationColorSystem,
               selected: colorSource == AppColorSource.system,
               onSelected: onClear,
             ),
@@ -527,7 +545,7 @@ class _SeedColorPicker extends StatelessWidget {
                 size: 18,
                 color: colorScheme.onSurfaceVariant,
               ),
-              label: const Text('自訂'),
+              label: Text(l10n.personalizationColorCustom),
               onPressed: () async {
                 final picked = await _showColorPickerDialog(
                   context,
@@ -555,7 +573,7 @@ class _SeedColorPicker extends StatelessWidget {
       avatar: color != null
           ? CircleAvatar(backgroundColor: color, radius: 10)
           : null,
-      label: Text(label ?? _colorName(color)),
+      label: Text(label ?? _colorName(context, color)),
       selected: selected,
       selectedColor: color != null
           ? color.withValues(alpha: 0.18)
@@ -570,8 +588,10 @@ class _SeedColorPicker extends StatelessWidget {
     );
   }
 
-  String _colorName(Color? color) {
-    if (color == null) return '自動';
+  String _colorName(BuildContext context, Color? color) {
+    if (color == null) {
+      return AppLocalizations.of(context).personalizationColorAutomatic;
+    }
     return '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
   }
 
@@ -616,8 +636,9 @@ class _CustomColorPickerDialogState extends State<_CustomColorPickerDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AlertDialog(
-      title: const Text('選擇顏色'),
+      title: Text(l10n.personalizationChooseColor),
       content: SizedBox(
         width: 320,
         child: Column(
@@ -638,7 +659,7 @@ class _CustomColorPickerDialogState extends State<_CustomColorPickerDialog> {
                 SizedBox(
                   width: 56,
                   child: Text(
-                    '色相',
+                    l10n.personalizationHue,
                     style: Theme.of(context).textTheme.labelMedium,
                   ),
                 ),
@@ -660,7 +681,7 @@ class _CustomColorPickerDialogState extends State<_CustomColorPickerDialog> {
                 SizedBox(
                   width: 56,
                   child: Text(
-                    '飽和',
+                    l10n.personalizationSaturation,
                     style: Theme.of(context).textTheme.labelMedium,
                   ),
                 ),
@@ -681,7 +702,7 @@ class _CustomColorPickerDialogState extends State<_CustomColorPickerDialog> {
                 SizedBox(
                   width: 56,
                   child: Text(
-                    '明度',
+                    l10n.personalizationBrightness,
                     style: Theme.of(context).textTheme.labelMedium,
                   ),
                 ),
@@ -702,11 +723,11 @@ class _CustomColorPickerDialogState extends State<_CustomColorPickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(l10n.commonCancel),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_currentColor),
-          child: const Text('確定'),
+          child: Text(l10n.commonOkay),
         ),
       ],
     );
@@ -724,12 +745,13 @@ class _PerPageBackgroundScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final settings = controller.settings;
+    final l10n = AppLocalizations.of(context);
     final isAmoled =
         settings.useAmoledDark &&
         Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('各頁面背景設定')),
+      appBar: AppBar(title: Text(l10n.personalizationPerPageBackgroundTitle)),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 860),
@@ -752,11 +774,13 @@ class _PerPageBackgroundScreen extends StatelessWidget {
                   ignoring: isAmoled,
                   child: Column(
                     children: [
-                      for (final pageKey in _pageLabels.keys)
+                      for (final pageKey in _pageKeys)
                         _PageBackgroundRow(
                           pageKey: pageKey,
-                          label: _pageLabels[pageKey]!,
-                          subtitle: _pageSubtitles[pageKey],
+                          label: _localizedPageLabel(l10n, pageKey),
+                          subtitle: pageKey == 'bus'
+                              ? l10n.personalizationGlobalHomeDescription
+                              : null,
                           icon: _pageIcons[pageKey]!,
                           imagePath: settings.pageBackgroundImagePaths[pageKey],
                           imageOpacity:
@@ -815,11 +839,12 @@ class _AppearancePreviewCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isAmoled =
         settings.useAmoledDark && settings.themeMode != ThemeMode.light;
+    final l10n = AppLocalizations.of(context);
     final modeLabel = isAmoled
-        ? 'AMOLED 純黑'
+        ? l10n.personalizationPreviewAmoled
         : theme.brightness == Brightness.dark
-        ? '深色模式'
-        : '淺色模式';
+        ? l10n.themeModeDark
+        : l10n.themeModeLight;
 
     return Card(
       child: Padding(
@@ -827,7 +852,10 @@ class _AppearancePreviewCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('外觀預覽', style: theme.textTheme.titleMedium),
+            Text(
+              l10n.personalizationAppearancePreview,
+              style: theme.textTheme.titleMedium,
+            ),
             const SizedBox(height: 4),
             Text(modeLabel, style: theme.textTheme.bodySmall),
             const SizedBox(height: 14),
@@ -851,6 +879,7 @@ class _HomeAppearancePreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final colors = theme.colorScheme;
     final imagePath = settings.pageBackgroundImagePaths['bus'];
     final hasImage = !isAmoled && imagePath != null && imagePath.isNotEmpty;
@@ -897,7 +926,10 @@ class _HomeAppearancePreview extends StatelessWidget {
                       children: [
                         Icon(Icons.menu_rounded, color: colors.onSurface),
                         const SizedBox(width: 12),
-                        Text('YABus', style: theme.textTheme.titleMedium),
+                        Text(
+                          l10n.personalizationPreviewAppName,
+                          style: theme.textTheme.titleMedium,
+                        ),
                         const Spacer(),
                         Icon(Icons.campaign_outlined, color: colors.onSurface),
                         const SizedBox(width: 12),
@@ -912,16 +944,16 @@ class _HomeAppearancePreview extends StatelessWidget {
                         children: [
                           _HomePreviewFeatureCard(
                             icon: Icons.search_rounded,
-                            title: '搜尋路線',
-                            subtitle: '快速查詢即時到站資訊',
+                            title: l10n.homeSearchTitle,
+                            subtitle: l10n.personalizationPreviewSearchDescription,
                             cardColor: cardColor,
                             lineColor: lineColor,
                           ),
                           const SizedBox(height: 8),
                           _HomePreviewFeatureCard(
                             icon: Icons.favorite_outline_rounded,
-                            title: '我的最愛',
-                            subtitle: '常用站牌與群組',
+                            title: l10n.homeFavoritesTitle,
+                            subtitle: l10n.personalizationPreviewFavoritesDescription,
                             cardColor: cardColor,
                             lineColor: lineColor,
                           ),
@@ -939,7 +971,7 @@ class _HomeAppearancePreview extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(14),
                               ),
                               child: Text(
-                                '開啓設定',
+                                l10n.commonOpenSettings,
                                 style: theme.textTheme.labelMedium?.copyWith(
                                   color: colors.onPrimary,
                                 ),
@@ -1031,7 +1063,7 @@ class _BackgroundPreviewCarousel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final entries = paths.entries
-        .where((e) => e.value.isNotEmpty && _pageLabels.containsKey(e.key))
+        .where((e) => e.value.isNotEmpty && _pageKeys.contains(e.key))
         .toList();
 
     if (entries.isEmpty) return const SizedBox.shrink();
@@ -1047,7 +1079,10 @@ class _BackgroundPreviewCarousel extends StatelessWidget {
           final entry = entries[index];
           return _PreviewPageCard(
             pageKey: entry.key,
-            label: _pageLabels[entry.key] ?? entry.key,
+            label: _localizedPageLabel(
+              AppLocalizations.of(context),
+              entry.key,
+            ),
             imagePath: entry.value,
             imageOpacity: opacities[entry.key] ?? 0.25,
           );
@@ -1741,6 +1776,7 @@ class _PageBackgroundRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasImage = imagePath != null && imagePath!.isNotEmpty;
     final isGif = hasImage && imagePath!.toLowerCase().endsWith('.gif');
+    final l10n = AppLocalizations.of(context);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -1770,7 +1806,7 @@ class _PageBackgroundRow extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    'GIF',
+                    l10n.personalizationGifBadge,
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
@@ -1806,14 +1842,18 @@ class _PageBackgroundRow extends StatelessWidget {
                       : Icons.add_photo_alternate_outlined,
                   size: 18,
                 ),
-                label: Text(hasImage ? '更換' : '選擇圖片'),
+                label: Text(
+                  hasImage
+                      ? l10n.personalizationReplaceImage
+                      : l10n.personalizationChooseImage,
+                ),
               ),
               if (hasImage) ...[
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
                   onPressed: onClear,
                   icon: const Icon(Icons.close, size: 18),
-                  label: const Text('移除'),
+                  label: Text(l10n.personalizationRemoveImage),
                 ),
               ],
             ],
@@ -1823,7 +1863,7 @@ class _PageBackgroundRow extends StatelessWidget {
           if (hasImage) ...[
             const SizedBox(height: 8),
             _OpacitySlider(
-              label: '背景透明度',
+              label: l10n.personalizationBackgroundOpacity,
               value: imageOpacity,
               onChanged: onOpacityChanged,
             ),
@@ -1870,7 +1910,9 @@ class _OpacitySlider extends StatelessWidget {
         SizedBox(
           width: 42,
           child: Text(
-            '${(value * 100).round()}%',
+            AppLocalizations.of(
+              context,
+            ).interfaceScaleValue((value * 100).round()),
             textAlign: TextAlign.end,
             style: Theme.of(context).textTheme.bodySmall,
           ),

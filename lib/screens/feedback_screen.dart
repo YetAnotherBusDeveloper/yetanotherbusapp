@@ -6,7 +6,8 @@ import '../core/app_controller.dart';
 import '../core/app_routes.dart';
 import '../core/auth_token_store.dart';
 import '../core/feedback_service.dart';
-import '../core/friendly_error.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/background_image_wrapper.dart';
 
 class FeedbackScreen extends StatefulWidget {
@@ -45,6 +46,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     });
 
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     try {
       await _feedbackService.submitFeedback(
         title: _titleController.text,
@@ -54,7 +56,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       _contentController.clear();
       formState.reset();
       messenger.showSnackBar(
-        const SnackBar(content: Text('意見回饋已送出，感謝你幫助我們改進。')),
+        SnackBar(content: Text(l10n.feedbackSubmitted)),
       );
       if (!mounted) {
         return;
@@ -65,21 +67,21 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(const SnackBar(content: Text('登入已失效，請重新登入後再送出。')));
-    } on FeedbackRateLimitException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.feedbackSessionExpired)),
+      );
+    } on FeedbackRateLimitException {
       if (!mounted) {
         return;
       }
-      final retryAfter = error.retryAfterSeconds;
-      final message = retryAfter != null && retryAfter > 0
-          ? '你已受到速率限制。'
-          : error.message;
-      messenger.showSnackBar(SnackBar(content: Text(message)));
+      messenger.showSnackBar(SnackBar(content: Text(l10n.errorRateLimited)));
     } catch (error) {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(SnackBar(content: Text(_friendlyError(error))));
+      messenger.showSnackBar(
+        SnackBar(content: Text(_friendlyError(l10n, error))),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -92,6 +94,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
+    final l10n = AppLocalizations.of(context);
     final hasBackgroundImage = hasBackgroundImageForPage(
       controller.settings,
       pageKey: 'feedback',
@@ -101,7 +104,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       pageKey: 'feedback',
       child: Scaffold(
         backgroundColor: hasBackgroundImage ? Colors.transparent : null,
-        appBar: AppBar(title: const Text('意見回饋')),
+        appBar: AppBar(title: Text(l10n.feedbackTitle)),
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
@@ -137,7 +140,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '請先登入',
+                            l10n.feedbackSignInRequired,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 14),
@@ -148,7 +151,7 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                               ).pushNamed(AppRoutes.account);
                             },
                             icon: const Icon(Icons.login_rounded),
-                            label: const Text('前往登入'),
+                            label: Text(l10n.feedbackGoToSignIn),
                           ),
                         ],
                       ),
@@ -169,17 +172,17 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                               enabled: !_submitting,
                               maxLength: 100,
                               textInputAction: TextInputAction.next,
-                              decoration: const InputDecoration(
-                                labelText: '標題',
-                                hintText: '例如：收藏站牌同步失敗',
+                              decoration: InputDecoration(
+                                labelText: l10n.feedbackSubjectLabel,
+                                hintText: l10n.feedbackSubjectHint,
                               ),
                               validator: (value) {
                                 final cleaned = (value ?? '').trim();
                                 if (cleaned.isEmpty) {
-                                  return '請輸入標題';
+                                  return l10n.feedbackSubjectRequired;
                                 }
                                 if (cleaned.length > 100) {
-                                  return '標題最多 100 個字';
+                                  return l10n.feedbackSubjectTooLong(100);
                                 }
                                 return null;
                               },
@@ -191,18 +194,18 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                               maxLength: 4000,
                               minLines: 8,
                               maxLines: 14,
-                              decoration: const InputDecoration(
-                                labelText: '內容',
+                              decoration: InputDecoration(
+                                labelText: l10n.feedbackContentLabel,
                                 alignLabelWithHint: true,
-                                hintText: '描述發生了什麼、你原本預期看到什麼，以及重現步驟。',
+                                hintText: l10n.feedbackContentHint,
                               ),
                               validator: (value) {
                                 final cleaned = (value ?? '').trim();
                                 if (cleaned.isEmpty) {
-                                  return '請輸入內容';
+                                  return l10n.feedbackContentRequired;
                                 }
                                 if (cleaned.length > 4000) {
-                                  return '內文最多 4000 個字';
+                                  return l10n.feedbackContentTooLong(4000);
                                 }
                                 return null;
                               },
@@ -220,7 +223,11 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
                                       ),
                                     )
                                   : const Icon(Icons.send_rounded),
-                              label: Text(_submitting ? '送出中…' : '送出回饋'),
+                              label: Text(
+                                _submitting
+                                    ? l10n.feedbackSubmitting
+                                    : l10n.feedbackSubmit,
+                              ),
                             ),
                           ],
                         ),
@@ -238,10 +245,11 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   }
 }
 
-String _friendlyError(Object error) {
+String _friendlyError(AppLocalizations l10n, Object error) {
   final raw = '$error';
   if (raw.startsWith('Invalid argument')) {
-    return '送出資料格式不正確。';
+    return l10n.feedbackInvalidFormat;
   }
-  return friendlyErrorMessage(error, fallback: '意見回饋送出失敗，請稍後再試。');
+  final message = localizedFriendlyError(l10n, error);
+  return message == l10n.errorGeneric ? l10n.feedbackSubmitFailed : message;
 }

@@ -264,6 +264,17 @@ void main() {
         selectedAt: DateTime.now(),
         pathId: 1,
       );
+      for (var index = 0; index < 3; index++) {
+        await controller.recordDestinationChoice(
+          provider: BusProvider.nwt,
+          routeKey: 12,
+          departurePathId: 0,
+          boardingStopId: 10,
+          destinationPathId: 0,
+          destinationStopId: 20,
+          destinationStopName: '終點',
+        );
+      }
       expect(
         controller.routeUsageProfiles.map((profile) => profile.pathId),
         containsAll(<int?>[0, 1]),
@@ -277,7 +288,7 @@ void main() {
               as Map;
       expect(
         (syncService.preferencePayload!['routeHistory'] as Map)['version'],
-        2,
+        3,
       );
       expect(
         enabledDevices.keys,
@@ -317,6 +328,11 @@ void main() {
         ownProfiles.map((profile) => (profile as Map)['pathId']),
         containsAll([0, 1]),
       );
+      final ownDestinationChoices =
+          (reenabledDevices['test-device'] as Map)['destinationChoiceProfiles']
+              as List;
+      expect(ownDestinationChoices, hasLength(1));
+      expect((ownDestinationChoices.single as Map)['destinationStopId'], 20);
 
       await controller.setAccountSyncEnabled(false);
       syncService.failPreferenceWrites = true;

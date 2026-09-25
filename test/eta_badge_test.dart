@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/widgets/eta_badge.dart';
 
 void main() {
@@ -17,6 +18,9 @@ void main() {
 
   Widget buildBadge({required bool isLoading}) {
     return MaterialApp(
+      locale: const Locale('zh', 'TW'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(
         body: Center(
           child: EtaBadge(
@@ -64,6 +68,9 @@ void main() {
     tester,
   ) async {
     Widget build(int seconds) => MaterialApp(
+      locale: const Locale('zh', 'TW'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: Center(child: GenericEtaBadge(seconds: seconds)),
     );
     await tester.pumpWidget(build(120));
@@ -82,9 +89,12 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
+        locale: const Locale('zh', 'TW'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: Center(
-          child: GenericEtaBadge(seconds: 300, darkBackground: true),
+          child: const GenericEtaBadge(seconds: 300, darkBackground: true),
         ),
       ),
     );

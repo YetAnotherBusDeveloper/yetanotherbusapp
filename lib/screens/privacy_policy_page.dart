@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/legal_document_service.dart';
+import '../l10n/app_localizations.dart';
 import 'legal_markdown_page.dart';
 
 class PrivacyPolicyPage extends StatelessWidget {
@@ -11,7 +12,7 @@ class PrivacyPolicyPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LegalMarkdownPage(
-      title: '隱私權政策',
+      title: AppLocalizations.of(context).privacyPolicy,
       loadDocument: _service.fetchPrivacyPolicy,
     );
   }

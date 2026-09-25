@@ -16,6 +16,7 @@ import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/widgets/app_update_dialog.dart';
 
 void main() {
@@ -60,6 +61,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh', 'TW'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: Builder(
             builder: (context) => FilledButton(
@@ -83,7 +87,7 @@ void main() {
     expect(find.text('目前版本：abcdef0'), findsOneWidget);
     expect(find.text('最新版本：1234567'), findsOneWidget);
     expect(find.text('複製下載連結'), findsOneWidget);
-    expect(find.text('稍後'), findsOneWidget);
+    expect(find.text('稍後再說'), findsOneWidget);
     expect(find.text('下載並安裝'), findsOneWidget);
 
     final visibleText = tester

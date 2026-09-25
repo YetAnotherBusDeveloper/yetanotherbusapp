@@ -40,6 +40,10 @@ const _exceptionPrefixes = [
 String friendlyErrorMessage(
   Object? error, {
   String fallback = genericFriendlyErrorMessage,
+  String networkFallback = networkFriendlyErrorMessage,
+  String timeoutFallback = timeoutFriendlyErrorMessage,
+  String rateLimitedFallback = rateLimitedErrorMessage,
+  bool preserveCjkMessage = true,
 }) {
   if (error == null) {
     return fallback;
@@ -49,20 +53,20 @@ String friendlyErrorMessage(
     return fallback;
   }
   if (isRateLimitedError(error)) {
-    return rateLimitedErrorMessage;
+    return rateLimitedFallback;
   }
   if (error is TimeoutException ||
       raw.contains('TimeoutException') ||
       raw.contains('Connection timed out')) {
-    return timeoutFriendlyErrorMessage;
+    return timeoutFallback;
   }
   for (final marker in _networkErrorMarkers) {
     if (raw.contains(marker)) {
-      return networkFriendlyErrorMessage;
+      return networkFallback;
     }
   }
   final message = _stripExceptionPrefixes(raw);
-  if (_cjkPattern.hasMatch(message)) {
+  if (preserveCjkMessage && _cjkPattern.hasMatch(message)) {
     return message;
   }
   return fallback;

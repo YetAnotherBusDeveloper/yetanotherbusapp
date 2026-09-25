@@ -7,13 +7,16 @@ import '../widgets/ad_banner_widget.dart';
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/bus_repository.dart';
-import '../core/friendly_error.dart';
 import '../core/models.dart';
 import '../core/route_direction_label.dart';
 import '../core/user_location.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import 'adaptive_settings_presenter.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/eta_badge.dart';
+import '../widgets/transit_station_name.dart';
+import 'nearby_stop_grouping.dart';
 import 'route_detail_navigation.dart';
 
 class NearbyScreen extends StatefulWidget {
@@ -21,18 +24,6 @@ class NearbyScreen extends StatefulWidget {
 
   @override
   State<NearbyScreen> createState() => _NearbyScreenState();
-}
-
-class _NearbyStopGroup {
-  const _NearbyStopGroup({
-    required this.stopName,
-    required this.distanceMeters,
-    required this.routes,
-  });
-
-  final String stopName;
-  final double distanceMeters;
-  final List<NearbyRouteRow> routes;
 }
 
 class _NearbyScreenState extends State<NearbyScreen> {
@@ -99,7 +90,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       }
       setState(() {
         _results = const [];
-        _error = friendlyErrorMessage(error);
+        _error = localizedFriendlyError(AppLocalizations.of(context), error);
         _locationFailure = error is LocationFailure ? error : null;
       });
     } finally {
@@ -330,54 +321,20 @@ class _NearbyScreenState extends State<NearbyScreen> {
     return a.route.routeKey.compareTo(b.route.routeKey);
   }
 
-  /// Groups flat results (one per route) into stops, preserving distance
-  /// order. Routes within each group are sorted by ETA once live data is
-  /// available.
-  List<_NearbyStopGroup> _buildGroups() {
-    final groupOrder = <String>[];
-    final groupDistances = <String, double>{};
-    final groupRoutes = <String, List<NearbyStopResult>>{};
+  List<NearbyStopGroup> _buildGroups(String locale) =>
+      groupNearbyStops(_results, locale: locale, compareRoutes: _compareByEta);
 
-    for (final item in _results) {
-      final name = item.stop.stopName;
-      if (!groupRoutes.containsKey(name)) {
-        groupOrder.add(name);
-        groupDistances[name] = item.distanceMeters;
-        groupRoutes[name] = [];
-      }
-      groupRoutes[name]!.add(item);
-    }
-
-    return [
-      for (final name in groupOrder)
-        _NearbyStopGroup(
-          stopName: name,
-          distanceMeters: groupDistances[name]!,
-          // Sort first: the labeller only appends a direction ordinal when two
-          // rows would otherwise read alike, so it has to see the final order.
-          routes: labelNearbyRouteDirections(
-            groupRoutes[name]!..sort(_compareByEta),
-          ),
-        ),
-    ];
-  }
-
-  /// One route row inside a stop-name card.
-  ///
-  /// Two lines rather than one: the group merges both directions of a stop, so
-  /// the direction is the only thing telling two rows apart and must not be the
-  /// first casualty of `TextOverflow.ellipsis` on a narrow screen. The row
-  /// height is still set by the 44px [EtaBadge], so nothing grows.
+  /// One route row inside a physical stop-side section.
   Widget _buildRouteRow(
     ThemeData theme,
     NearbyRouteRow row, {
     required bool alwaysShowSeconds,
   }) {
     final item = row.result;
-    final subtitle = <String>[
-      busProviderFromString(item.route.sourceProvider).label,
-      if (row.directionLabel.isNotEmpty) row.directionLabel,
-    ].join(' · ');
+    final locale = Localizations.localeOf(context).toLanguageTag();
+    final providerLabel = busProviderFromString(
+      item.route.sourceProvider,
+    ).label;
 
     return Material(
       color: Colors.transparent,
@@ -400,7 +357,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      item.route.routeName,
+                      item.route.transitName.displayForLocale(locale),
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
@@ -409,7 +366,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      subtitle,
+                      providerLabel,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -419,6 +376,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
               Icon(
                 Icons.chevron_right_rounded,
                 size: 20,
@@ -427,6 +385,54 @@ class _NearbyScreenState extends State<NearbyScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSideSection(
+    ThemeData theme,
+    NearbyStopSideGroup side, {
+    required bool alwaysShowSeconds,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TransitDirectionLabel(
+                  label: side.directionLabel,
+                  textAlign: TextAlign.start,
+                  primaryStyle: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Chip(
+                avatar: const Icon(Icons.directions_walk_rounded, size: 16),
+                label: Text(formatDistance(side.distanceMeters)),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          for (var index = 0; index < side.routes.length; index++) ...[
+            if (index > 0) const Divider(height: 1),
+            _buildRouteRow(
+              theme,
+              side.routes[index],
+              alwaysShowSeconds: alwaysShowSeconds,
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -462,21 +468,24 @@ class _NearbyScreenState extends State<NearbyScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
     final hasNearbyBackgroundImage = hasBackgroundImageForPage(
       controller.settings,
       pageKey: 'nearby',
     );
-    final groups = _buildGroups();
+    final groups = _buildGroups(locale);
 
     return BackgroundImageWrapper(
       pageKey: 'nearby',
       child: Scaffold(
         backgroundColor: hasNearbyBackgroundImage ? Colors.transparent : null,
         appBar: AppBar(
-          title: const Text('附近站牌'),
+          title: Text(l10n.nearbyTitle),
           actions: [
             IconButton(
+              tooltip: l10n.commonRefresh,
               onPressed: _loading ? null : _loadNearbyStops,
               icon: const Icon(Icons.refresh_rounded),
             ),
@@ -508,7 +517,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                           children: [
                             FilledButton(
                               onPressed: _loadNearbyStops,
-                              child: const Text('重試'),
+                              child: Text(l10n.commonRetry),
                             ),
                             OutlinedButton(
                               onPressed:
@@ -522,10 +531,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                   : () => openAdaptiveSettingsScreen(context),
                               child: Text(
                                 _locationFailure?.serviceDisabled == true
-                                    ? '定位設定'
+                                    ? l10n.nearbyLocationSettings
                                     : _locationFailure?.deniedForever == true
-                                    ? '權限設定'
-                                    : '前往設定',
+                                    ? l10n.nearbyPermissionSettings
+                                    : l10n.commonOpenSettings,
                               ),
                             ),
                           ],
@@ -535,7 +544,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   ),
                 )
               : groups.isEmpty
-              ? const Center(child: Text('附近沒有找到站牌。'))
+              ? Center(child: Text(l10n.nearbyEmpty))
               : Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 760),
@@ -567,24 +576,30 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                               16,
                                             ),
                                           ),
-                                          child: Text(
-                                            formatDistance(
-                                              group.distanceMeters,
-                                            ),
-                                            textAlign: TextAlign.center,
-                                            style: theme.textTheme.labelMedium,
+                                          child: Icon(
+                                            Icons.directions_bus_rounded,
+                                            color: theme
+                                                .colorScheme
+                                                .onPrimaryContainer,
                                           ),
                                         ),
                                         const SizedBox(width: 14),
                                         Expanded(
-                                          child: Text(
-                                            group.stopName,
-                                            style: theme.textTheme.titleMedium
+                                          child: TransitStationName(
+                                            name: group
+                                                .sides
+                                                .first
+                                                .routes
+                                                .first
+                                                .result
+                                                .stop
+                                                .transitName,
+                                            primaryStyle: theme
+                                                .textTheme
+                                                .titleMedium
                                                 ?.copyWith(
                                                   fontWeight: FontWeight.w700,
                                                 ),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
                                       ],
@@ -597,14 +612,15 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                     ],
                                     const SizedBox(height: 8),
                                     for (
-                                      var index = 0;
-                                      index < group.routes.length;
-                                      index++
+                                      var sideIndex = 0;
+                                      sideIndex < group.sides.length;
+                                      sideIndex++
                                     ) ...[
-                                      if (index > 0) const Divider(height: 1),
-                                      _buildRouteRow(
+                                      if (sideIndex > 0)
+                                        const SizedBox(height: 10),
+                                      _buildSideSection(
                                         theme,
-                                        group.routes[index],
+                                        group.sides[sideIndex],
                                         alwaysShowSeconds: controller
                                             .settings
                                             .alwaysShowSeconds,

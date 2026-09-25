@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/app_routes.dart';
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
 import 'route_detail_screen.dart';
 
 Route<void> buildRouteDetailRoute({
@@ -17,6 +18,7 @@ Route<void> buildRouteDetailRoute({
   Future<List<RouteAlert>>? initialAlertsFuture,
   Future<List<CancelledDeparture>>? initialCancelledDeparturesFuture,
   bool suppressAutoDestinationSelection = false,
+  bool updateSearchHistoryOnDestinationChange = false,
 }) {
   return MaterialPageRoute<void>(
     settings: RouteSettings(
@@ -43,6 +45,8 @@ Route<void> buildRouteDetailRoute({
       initialAlertsFuture: initialAlertsFuture,
       initialCancelledDeparturesFuture: initialCancelledDeparturesFuture,
       suppressAutoDestinationSelection: suppressAutoDestinationSelection,
+      updateSearchHistoryOnDestinationChange:
+          updateSearchHistoryOnDestinationChange,
     ),
   );
 }
@@ -50,14 +54,15 @@ Route<void> buildRouteDetailRoute({
 /// Shows a one-off notice when [recordRouteSelection] auto-adds a
 /// frequently-visited stop into the "常用" favorites group.
 void showAutoFavoritedSnackBar(BuildContext context, FavoriteStop favorite) {
+  final l10n = AppLocalizations.of(context);
   final label = favorite.stopName?.trim().isNotEmpty == true
       ? favorite.stopName!.trim()
       : favorite.routeName?.trim().isNotEmpty == true
       ? favorite.routeName!.trim()
-      : '這個站牌';
+      : l10n.autoFavoriteFallback;
   ScaffoldMessenger.of(
     context,
-  ).showSnackBar(SnackBar(content: Text('常搭這班車？已自動把「$label」加入常用最愛。')));
+  ).showSnackBar(SnackBar(content: Text(l10n.autoFavoriteAdded(label))));
 }
 
 Future<void> openRouteDetailPage(
@@ -74,6 +79,7 @@ Future<void> openRouteDetailPage(
   Future<List<RouteAlert>>? initialAlertsFuture,
   Future<List<CancelledDeparture>>? initialCancelledDeparturesFuture,
   bool suppressAutoDestinationSelection = false,
+  bool updateSearchHistoryOnDestinationChange = false,
 }) {
   return Navigator.of(context).push(
     buildRouteDetailRoute(
@@ -89,6 +95,8 @@ Future<void> openRouteDetailPage(
       initialAlertsFuture: initialAlertsFuture,
       initialCancelledDeparturesFuture: initialCancelledDeparturesFuture,
       suppressAutoDestinationSelection: suppressAutoDestinationSelection,
+      updateSearchHistoryOnDestinationChange:
+          updateSearchHistoryOnDestinationChange,
     ),
   );
 }

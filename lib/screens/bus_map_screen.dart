@@ -10,19 +10,20 @@ import 'package:latlong2/latlong.dart';
 
 import '../app/bus_app.dart';
 import '../core/app_controller.dart';
+import '../core/app_motion.dart';
 import '../core/app_route_observer.dart';
 import '../core/bus_map_filter.dart';
-import '../core/friendly_error.dart';
 import '../core/http_error_utils.dart';
 import '../core/models.dart';
-import '../core/relative_time_formatter.dart';
-import '../core/route_direction_label.dart';
 import '../core/user_location.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/ad_banner_widget.dart';
 import '../widgets/bus_map_geometry.dart';
 import '../widgets/bus_map_markers.dart';
 import '../widgets/bus_map_motion.dart';
 import '../widgets/platform_map_provider.dart';
+import '../widgets/transit_station_name.dart';
 import 'route_detail_navigation.dart';
 
 /// Every bus in one city on one map.
@@ -112,6 +113,7 @@ class _BusMapScreenState extends State<BusMapScreen>
   /// A plain `setState` here rebuilt the selection sheet four times a second,
   /// which fought with the rider's drag.
   final ValueNotifier<int> _animationTick = ValueNotifier<int>(0);
+  int _snapshotGeneration = 0;
   String? _osmMarkerCacheKey;
   List<Marker> _cachedOsmMarkers = const [];
   final Map<String, gmaps.BitmapDescriptor> _googleClusterIcons =
@@ -238,13 +240,12 @@ class _BusMapScreenState extends State<BusMapScreen>
 
   void _startSimulationTimer() {
     _simulationTimer?.cancel();
-    if (!_isActive) {
+    _simulationTimer = null;
+    if (!_isActive || _selectedGroupKey == null) {
       return;
     }
     _simulationTimer = Timer.periodic(_simulationTick, (_) {
-      if (!mounted ||
-          !_isActive ||
-          (_isClustered && _selectedGroupKey == null)) {
+      if (!mounted || !_isActive || _selectedGroupKey == null) {
         return;
       }
       _animationTick.value++;
@@ -310,7 +311,7 @@ class _BusMapScreenState extends State<BusMapScreen>
           _busStates = const {};
           _busByKey = const {};
         } else {
-          _error = friendlyErrorMessage(error);
+          _error = localizedFriendlyError(AppLocalizations.of(context), error);
           // Keep the last snapshot on screen: stale buses beat a blank map.
           _backoffSeconds = switch (_backoffSeconds) {
             0 => 15,
@@ -374,6 +375,7 @@ class _BusMapScreenState extends State<BusMapScreen>
     };
 
     final selectedBusKey = _selectedBusKey;
+    _snapshotGeneration++;
     setState(() {
       _snapshot = snapshot;
       _busByKey = byKey;
@@ -381,6 +383,10 @@ class _BusMapScreenState extends State<BusMapScreen>
       if (selectedBusKey != null && !byKey.containsKey(selectedBusKey)) {
         // The bus finished its trip while we were watching it.
         _selectedBusKey = null;
+        _selectedGroupKey = null;
+        _selectedPathId = null;
+        _selectedGeometry = null;
+        _selectedStops = const [];
       }
     });
     _startSimulationTimer();
@@ -436,6 +442,7 @@ class _BusMapScreenState extends State<BusMapScreen>
       _selectedGeometry = null;
       _selectedStops = const [];
     });
+    _startSimulationTimer();
   }
 
   /// Load the line and the stops for the tapped bus's route.
@@ -500,8 +507,13 @@ class _BusMapScreenState extends State<BusMapScreen>
     // the stops arrived is not worth interrupting for.
     final error = failure;
     if (error != null && geometry == null && _selectedStops.isEmpty) {
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('無法載入路線資料：${friendlyErrorMessage(error)}')),
+        SnackBar(
+          content: Text(
+            l10n.busMapRouteDataLoadFailed(localizedFriendlyError(l10n, error)),
+          ),
+        ),
       );
     }
   }
@@ -536,9 +548,13 @@ class _BusMapScreenState extends State<BusMapScreen>
     }
     final detailRouteId = snapshot.detailRouteIdFor(cityBus);
     if (detailRouteId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('這條路線目前沒有可查詢的詳細資料。')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLocalizations.of(context).busMapRouteDetailUnavailable,
+          ),
+        ),
+      );
       return;
     }
     final controller = AppControllerScope.read(context);
@@ -630,6 +646,7 @@ class _BusMapScreenState extends State<BusMapScreen>
         longitude: position.longitude,
       );
       if (nearest != _provider) {
+        final l10n = AppLocalizations.of(context);
         final previous = _provider;
         await _switchProvider(nearest);
         if (!mounted) {
@@ -639,9 +656,9 @@ class _BusMapScreenState extends State<BusMapScreen>
         if (showFeedback) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('已切換至${nearest.label}'),
+              content: Text(l10n.busMapSwitchedRegion(nearest.label)),
               action: SnackBarAction(
-                label: '復原',
+                label: l10n.commonUndo,
                 onPressed: () => unawaited(_switchProvider(previous)),
               ),
             ),
@@ -651,7 +668,7 @@ class _BusMapScreenState extends State<BusMapScreen>
     } catch (error) {
       if (mounted && showFeedback) {
         _showLocationHint(
-          friendlyErrorMessage(error),
+          localizedFriendlyError(AppLocalizations.of(context), error),
           failure: error is LocationFailure ? error : null,
         );
       }
@@ -662,17 +679,18 @@ class _BusMapScreenState extends State<BusMapScreen>
     if (!mounted) {
       return;
     }
+    final l10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
         action: failure?.serviceDisabled == true
             ? SnackBarAction(
-                label: '定位設定',
+                label: l10n.nearbyLocationSettings,
                 onPressed: () => unawaited(Geolocator.openLocationSettings()),
               )
             : failure?.deniedForever == true
             ? SnackBarAction(
-                label: '權限設定',
+                label: l10n.nearbyPermissionSettings,
                 onPressed: () => unawaited(Geolocator.openAppSettings()),
               )
             : null,
@@ -692,15 +710,7 @@ class _BusMapScreenState extends State<BusMapScreen>
   /// The numbers are deliberately modest: every marker is a platform-channel
   /// update on Google Maps, and the app runs on phones where a few hundred of
   /// those drops frames.
-  int? get _markerLimit {
-    if (_zoom >= 15) {
-      return null;
-    }
-    if (_zoom >= 14) {
-      return 300;
-    }
-    return 150;
-  }
+  int get _markerLimit => busMarkerLimitForZoom(_zoom);
 
   bool _isWithinViewport(CityBus bus) {
     final bounds = _visibleBounds;
@@ -718,10 +728,10 @@ class _BusMapScreenState extends State<BusMapScreen>
   /// True when individual buses would be an unreadable smear.
   bool get _isClustered => _zoom < kBusClusterMaxZoom;
 
-  List<CityBus> _visibleBuses(Set<String> favoriteRouteIds) {
+  VisibleBusesResult _visibleBuses(Set<String> favoriteRouteIds) {
     final snapshot = _snapshot;
     if (snapshot == null) {
-      return const [];
+      return const VisibleBusesResult(buses: [], matchingCount: 0);
     }
     final bounds = _visibleBounds;
     return visibleBusesFor(
@@ -731,6 +741,7 @@ class _BusMapScreenState extends State<BusMapScreen>
       query: _nameFilter,
       visible: _isWithinViewport,
       selectedGroupKey: _selectedGroupKey,
+      selectedBusKey: _selectedBusKey,
       limit: _markerLimit,
       centerLat: bounds == null ? null : (bounds.north + bounds.south) / 2,
       centerLon: bounds == null ? null : (bounds.east + bounds.west) / 2,
@@ -742,9 +753,14 @@ class _BusMapScreenState extends State<BusMapScreen>
   /// The watched route is never clustered — the rider is following it — so it
   /// stays as real markers even while everything else collapses into bubbles.
   _BusMapDrawSet _drawSet(Set<String> favoriteRouteIds) {
-    final buses = _visibleBuses(favoriteRouteIds);
+    final result = _visibleBuses(favoriteRouteIds);
+    final buses = result.buses;
     if (!_isClustered) {
-      return _BusMapDrawSet(buses: buses, clusters: const []);
+      return _BusMapDrawSet(
+        buses: buses,
+        clusters: const [],
+        matchingBusCount: result.matchingCount,
+      );
     }
     final selectedGroupKey = _selectedGroupKey;
     final individual = <CityBus>[];
@@ -759,6 +775,7 @@ class _BusMapScreenState extends State<BusMapScreen>
     return _BusMapDrawSet(
       buses: individual,
       clusters: clusterBuses(clusterable, clusterCellDegrees(_zoom)),
+      matchingBusCount: result.matchingCount,
     );
   }
 
@@ -769,28 +786,12 @@ class _BusMapScreenState extends State<BusMapScreen>
     );
   }
 
-  int _matchingBusCount(Set<String> favoriteRouteIds) {
-    final snapshot = _snapshot;
-    if (snapshot == null) {
-      return 0;
-    }
-    final normalizedQuery = normalizeRouteQuery(_nameFilter);
-    return snapshot.buses
-        .where(
-          (bus) => busMatchesFilters(
-            snapshot,
-            bus,
-            favoritesOnly: _favoritesOnly,
-            favoriteRouteIds: favoriteRouteIds,
-            normalizedQuery: normalizedQuery,
-          ),
-        )
-        .length;
-  }
-
   /// Where to draw a bus right now.
   ///
   LatLng _pointFor(CityBus bus, DateTime now) {
+    if (_selectedGroupKey == null || bus.groupKey != _selectedGroupKey) {
+      return LatLng(bus.bus.lat, bus.bus.lon);
+    }
     final state = _busStates[bus.stateKey];
     if (state == null) {
       return LatLng(bus.bus.lat, bus.bus.lon);
@@ -802,6 +803,9 @@ class _BusMapScreenState extends State<BusMapScreen>
   }
 
   double _headingFor(CityBus bus, DateTime now) {
+    if (_selectedGroupKey == null || bus.groupKey != _selectedGroupKey) {
+      return normalizeHeading(bus.bus.azimuth) ?? kDefaultBusHeading;
+    }
     final state = _busStates[bus.stateKey];
     if (state == null) {
       return normalizeHeading(bus.bus.azimuth) ?? kDefaultBusHeading;
@@ -824,12 +828,19 @@ class _BusMapScreenState extends State<BusMapScreen>
     return 0.35;
   }
 
+  String _localeNameFor(CityBus bus) {
+    return _snapshot!
+        .transitNameFor(bus)
+        .displayForLocale(Localizations.localeOf(context).toLanguageTag());
+  }
+
   // -- build ----------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final favoriteRouteIds = favoriteRouteIdsFor(
       controller.favoriteGroups,
       _provider,
@@ -843,14 +854,7 @@ class _BusMapScreenState extends State<BusMapScreen>
 
     final map = _unsupported
         ? _buildUnsupportedNotice(theme)
-        : ValueListenableBuilder<int>(
-            valueListenable: _animationTick,
-            builder: (context, _, _) => _buildMap(
-              theme,
-              drawSet,
-              controller.settings.mobileMapProvider,
-            ),
-          );
+        : _buildMap(theme, drawSet, controller.settings.mobileMapProvider);
 
     final overlay = Stack(
       children: [
@@ -860,21 +864,37 @@ class _BusMapScreenState extends State<BusMapScreen>
             top: 12,
             left: 12,
             right: 12,
-            child: _buildStatusChips(theme, drawSet, favoriteRouteIds),
+            child: _buildStatusChips(theme, drawSet),
           ),
-        if (!useSplitLayout && selectedBus != null)
+        if (!useSplitLayout)
           Positioned.fill(
-            child: _BusMapSelectionSheet(
-              snapshot: _snapshot!,
-              cityBus: selectedBus,
-              state: _busStates[selectedBus.stateKey],
-              stops: _selectedStops,
-              pathId: _selectedPathId,
-              onOpenDetail: () => unawaited(_openRouteDetail(selectedBus)),
-              onShowWholeRoute: _fitSelectedRoute,
-              onClose: _clearSelection,
-              onStopSelected: (stop) =>
-                  unawaited(_openRouteDetail(selectedBus, stop: stop)),
+            child: IgnorePointer(
+              ignoring: selectedBus == null,
+              child: AnimatedSwitcher(
+                key: const ValueKey('bus-map-selection-transition'),
+                duration: AppMotion.duration(context),
+                reverseDuration: AppMotion.duration(context, AppMotion.quick),
+                transitionBuilder: _buildSelectionTransition,
+                child: selectedBus == null || _snapshot == null
+                    ? const SizedBox.shrink(
+                        key: ValueKey('bus-map-no-selection'),
+                      )
+                    : _BusMapSelectionSheet(
+                        key: ValueKey(selectedBus.stateKey),
+                        snapshot: _snapshot!,
+                        cityBus: selectedBus,
+                        state: _busStates[selectedBus.stateKey],
+                        stops: _selectedStops,
+                        pathId: _selectedPathId,
+                        onOpenDetail: () =>
+                            unawaited(_openRouteDetail(selectedBus)),
+                        onShowWholeRoute: _fitSelectedRoute,
+                        onClose: _clearSelection,
+                        onStopSelected: (stop) => unawaited(
+                          _openRouteDetail(selectedBus, stop: stop),
+                        ),
+                      ),
+              ),
             ),
           ),
       ],
@@ -884,10 +904,12 @@ class _BusMapScreenState extends State<BusMapScreen>
       appBar: AppBar(
         title: _showFilterField
             ? _buildFilterField(theme)
-            : Text('全公車地圖 · ${_provider.label}'),
+            : Text(l10n.busMapTitle(_provider.label)),
         actions: [
           IconButton(
-            tooltip: _showFilterField ? '關閉篩選' : '篩選路線',
+            tooltip: _showFilterField
+                ? l10n.busMapCloseFilter
+                : l10n.busMapFilterRoutes,
             icon: Icon(
               _showFilterField ? Icons.close_rounded : Icons.search_rounded,
             ),
@@ -902,7 +924,7 @@ class _BusMapScreenState extends State<BusMapScreen>
             },
           ),
           IconButton(
-            tooltip: '只看最愛路線',
+            tooltip: l10n.busMapFavoritesOnly,
             isSelected: _favoritesOnly,
             icon: const Icon(Icons.favorite_border_rounded),
             selectedIcon: const Icon(Icons.favorite_rounded),
@@ -915,12 +937,12 @@ class _BusMapScreenState extends State<BusMapScreen>
           ),
           if (!kIsWeb)
             IconButton(
-              tooltip: '定位',
+              tooltip: l10n.busMapLocate,
               icon: const Icon(Icons.my_location_rounded),
               onPressed: () => unawaited(_locateMe()),
             ),
           PopupMenuButton<BusProvider>(
-            tooltip: '切換縣市',
+            tooltip: l10n.busMapSwitchRegion,
             icon: const Icon(Icons.location_city_rounded),
             onSelected: (provider) => unawaited(_switchProvider(provider)),
             itemBuilder: (context) => _providerMenuItems(controller),
@@ -989,26 +1011,24 @@ class _BusMapScreenState extends State<BusMapScreen>
   }
 
   Widget _buildFilterField(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return TextField(
       controller: _filterController,
       autofocus: true,
       textInputAction: TextInputAction.search,
-      decoration: const InputDecoration(
-        hintText: '篩選路線名稱或車牌',
+      decoration: InputDecoration(
+        hintText: l10n.busMapFilterHint,
         border: InputBorder.none,
       ),
       onChanged: (value) => setState(() => _nameFilter = value),
     );
   }
 
-  Widget _buildStatusChips(
-    ThemeData theme,
-    _BusMapDrawSet drawSet,
-    Set<String> favoriteRouteIds,
-  ) {
+  Widget _buildStatusChips(ThemeData theme, _BusMapDrawSet drawSet) {
+    final l10n = AppLocalizations.of(context);
     final shownCount = drawSet.buses.length + drawSet.clusteredBusCount;
     final snapshot = _snapshot;
-    final matching = _matchingBusCount(favoriteRouteIds);
+    final matching = drawSet.matchingBusCount;
     final chips = <Widget>[];
 
     if (_error != null) {
@@ -1024,7 +1044,9 @@ class _BusMapScreenState extends State<BusMapScreen>
       chips.add(
         _StatusChip(
           icon: Icons.directions_bus_rounded,
-          label: _hasLoadedOnce ? '目前沒有公車資料' : '正在載入公車位置…',
+          label: _hasLoadedOnce
+              ? l10n.busMapNoData
+              : l10n.busMapLoadingPositions,
         ),
       );
     } else {
@@ -1033,19 +1055,25 @@ class _BusMapScreenState extends State<BusMapScreen>
         _StatusChip(
           icon: Icons.directions_bus_rounded,
           label: updated == null
-              ? '$matching 輛公車'
-              : '$matching 輛公車 · ${formatRelativeTimestamp(updated)}',
+              ? l10n.busMapBusCount(matching)
+              : l10n.busMapBusCountUpdated(
+                  matching,
+                  localizedRelativeTimestamp(l10n, updated),
+                ),
         ),
       );
       if (drawSet.clusters.isNotEmpty) {
         chips.add(
-          const _StatusChip(icon: Icons.zoom_in_rounded, label: '放大或點圓圈看個別公車'),
+          _StatusChip(
+            icon: Icons.zoom_in_rounded,
+            label: l10n.busMapZoomForBuses,
+          ),
         );
       } else if (shownCount < matching) {
         chips.add(
           _StatusChip(
             icon: Icons.zoom_in_rounded,
-            label: '顯示 $shownCount／$matching 輛，放大看更多',
+            label: l10n.busMapShownCount(shownCount, matching),
           ),
         );
       }
@@ -1053,7 +1081,9 @@ class _BusMapScreenState extends State<BusMapScreen>
         chips.add(
           _StatusChip(
             icon: Icons.filter_alt_off_rounded,
-            label: _favoritesOnly ? '最愛中沒有此縣市的路線' : '找不到符合的公車',
+            label: _favoritesOnly
+                ? l10n.busMapNoFavoriteRoutes
+                : l10n.busMapNoMatches,
             onTap: () {
               setState(() {
                 _favoritesOnly = false;
@@ -1066,14 +1096,14 @@ class _BusMapScreenState extends State<BusMapScreen>
       }
       if (snapshot.stale) {
         chips.add(
-          const _StatusChip(icon: Icons.history_rounded, label: '資料可能不是最新'),
+          _StatusChip(icon: Icons.history_rounded, label: l10n.busMapDataStale),
         );
       }
       if (snapshot.truncated) {
         chips.add(
-          const _StatusChip(
+          _StatusChip(
             icon: Icons.warning_amber_rounded,
-            label: '資料可能不完整',
+            label: l10n.busMapDataIncomplete,
           ),
         );
       }
@@ -1083,6 +1113,7 @@ class _BusMapScreenState extends State<BusMapScreen>
   }
 
   Widget _buildUnsupportedNotice(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -1096,13 +1127,13 @@ class _BusMapScreenState extends State<BusMapScreen>
             ),
             const SizedBox(height: 16),
             Text(
-              '此縣市暫不支援全公車地圖',
+              l10n.busMapUnsupportedTitle,
               style: theme.textTheme.titleMedium,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              '可以從右上角切換其他縣市。',
+              l10n.busMapUnsupportedMessage,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.outline,
               ),
@@ -1116,39 +1147,48 @@ class _BusMapScreenState extends State<BusMapScreen>
 
   Widget _buildSidebar(ThemeData theme, CityBus? selectedBus) {
     final snapshot = _snapshot;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (selectedBus != null && snapshot != null) ...[
-          _BusMapSelectionCard(
-            snapshot: snapshot,
-            cityBus: selectedBus,
-            state: _busStates[selectedBus.stateKey],
-            stops: _selectedStops,
-            pathId: _selectedPathId,
-            onOpenDetail: () => unawaited(_openRouteDetail(selectedBus)),
-            onShowWholeRoute: _fitSelectedRoute,
-            onClose: _clearSelection,
-          ),
-          const SizedBox(height: 16),
-          if (_selectedStops.isNotEmpty)
-            Text('沿途站牌', style: theme.textTheme.titleSmall),
-          for (final stop in _selectedStops)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Text('${stop.sequence}'),
-              title: Text(stop.stopName),
-              onTap: () => unawaited(_openRouteDetail(selectedBus, stop: stop)),
+    final l10n = AppLocalizations.of(context);
+    return AnimatedSwitcher(
+      key: const ValueKey('bus-map-sidebar-selection-transition'),
+      duration: AppMotion.duration(context),
+      reverseDuration: AppMotion.duration(context, AppMotion.quick),
+      transitionBuilder: _buildSelectionTransition,
+      child: ListView(
+        key: ValueKey(selectedBus?.stateKey ?? 'bus-map-no-selection'),
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (selectedBus != null && snapshot != null) ...[
+            _BusMapSelectionCard(
+              snapshot: snapshot,
+              cityBus: selectedBus,
+              state: _busStates[selectedBus.stateKey],
+              stops: _selectedStops,
+              pathId: _selectedPathId,
+              onOpenDetail: () => unawaited(_openRouteDetail(selectedBus)),
+              onShowWholeRoute: _fitSelectedRoute,
+              onClose: _clearSelection,
             ),
-        ] else
-          Text(
-            '點一輛公車就能看到它的路線、方向與沿途站牌。',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.outline,
+            const SizedBox(height: 16),
+            if (_selectedStops.isNotEmpty)
+              Text(l10n.busMapRouteStops, style: theme.textTheme.titleSmall),
+            for (final stop in _selectedStops)
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Text('${stop.sequence}'),
+                title: TransitStationName(name: stop.transitName),
+                onTap: () =>
+                    unawaited(_openRouteDetail(selectedBus, stop: stop)),
+              ),
+          ] else
+            Text(
+              l10n.busMapSelectionHint,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1190,14 +1230,19 @@ class _BusMapScreenState extends State<BusMapScreen>
     MobileMapProvider mapProvider,
   ) {
     if (useGoogleMapsProviderFor(mapProvider)) {
-      return _buildGoogleMap(theme, drawSet);
+      // google_maps_flutter updates markers through widget configuration, so
+      // its map still needs the animation tick. The FlutterMap backend below
+      // can isolate ticks to one marker layer instead of rebuilding the map.
+      return ValueListenableBuilder<int>(
+        valueListenable: _animationTick,
+        builder: (context, _, _) => _buildGoogleMap(theme, drawSet),
+      );
     }
     return _buildFlutterMap(theme, drawSet);
   }
 
   Widget _buildFlutterMap(ThemeData theme, _BusMapDrawSet drawSet) {
     final buses = drawSet.buses;
-    final now = DateTime.now();
     final geometry = _selectedGeometry;
     return FlutterMap(
       mapController: _mapController,
@@ -1274,7 +1319,12 @@ class _BusMapScreenState extends State<BusMapScreen>
                           unawaited(_openRouteDetail(selected, stop: stop));
                         }
                       },
-                      child: _RouteStopDot(name: stop.stopName),
+                      child: _RouteStopDot(
+                        name: stop.transitName.stationDisplayForLocale(
+                          Localizations.localeOf(context).toLanguageTag(),
+                          separator: '\n',
+                        ),
+                      ),
                     ),
                   ),
             ],
@@ -1294,29 +1344,44 @@ class _BusMapScreenState extends State<BusMapScreen>
                 ),
             ],
           ),
-        MarkerLayer(markers: _osmBusMarkers(buses, now)),
+        // A selected route animates four times per second. Keep that hot
+        // rebuild below FlutterMap so tiles, route geometry, stop pins and
+        // clusters remain untouched between server snapshots.
+        ValueListenableBuilder<int>(
+          valueListenable: _animationTick,
+          builder: (context, _, _) => MarkerLayer(
+            key: const ValueKey('bus-map-moving-marker-layer'),
+            markers: _osmBusMarkers(buses, DateTime.now()),
+          ),
+        ),
       ],
     );
   }
 
   /// Reuse stationary markers while rebuilding only buses that can move.
   List<Marker> _osmBusMarkers(List<CityBus> buses, DateTime now) {
-    final cacheKey = _staticMarkerCacheKey(buses);
+    final staticBuses = <CityBus>[];
+    final animatedBuses = <CityBus>[];
+    for (final bus in buses) {
+      (_isAnimatedBus(bus) ? animatedBuses : staticBuses).add(bus);
+    }
+    final cacheKey = _staticMarkerCacheKey(staticBuses);
     if (cacheKey != _osmMarkerCacheKey) {
       _osmMarkerCacheKey = cacheKey;
       _cachedOsmMarkers = [
-        for (final bus in buses)
-          if (!_isAnimatedBus(bus)) _osmBusMarker(bus, now),
+        for (final bus in staticBuses) _osmBusMarker(bus, now),
       ];
     }
     return [
       ..._cachedOsmMarkers,
-      for (final bus in buses)
-        if (_isAnimatedBus(bus)) _osmBusMarker(bus, now),
+      for (final bus in animatedBuses) _osmBusMarker(bus, now),
     ];
   }
 
   bool _isAnimatedBus(CityBus bus) {
+    if (_selectedGroupKey == null || bus.groupKey != _selectedGroupKey) {
+      return false;
+    }
     final state = _busStates[bus.stateKey];
     if (state == null || state.speedMps <= 0) {
       return false;
@@ -1329,8 +1394,8 @@ class _BusMapScreenState extends State<BusMapScreen>
     final selected = bus.stateKey == _selectedBusKey;
     return Marker(
       point: _pointFor(bus, now),
-      width: selected ? 48 : 40,
-      height: selected ? 48 : 40,
+      width: selected ? 64 : 56,
+      height: selected ? 64 : 56,
       child: GestureDetector(
         onTap: () => _selectBus(bus.stateKey),
         child: Opacity(
@@ -1338,7 +1403,7 @@ class _BusMapScreenState extends State<BusMapScreen>
           child: BusMapBusMarker(
             color: _colorFor(bus),
             selected: selected,
-            label: '${_snapshot!.displayNameFor(bus)} ${bus.bus.id}',
+            label: '${_localeNameFor(bus)} ${bus.bus.id}',
             heading: _headingFor(bus, now),
           ),
         ),
@@ -1348,16 +1413,25 @@ class _BusMapScreenState extends State<BusMapScreen>
 
   /// Identifies a set of markers that does not move between animation ticks.
   String _staticMarkerCacheKey(List<CityBus> buses) {
-    return [
-      _snapshot?.updatedAt?.millisecondsSinceEpoch ?? 0,
-      buses.length,
-      _selectedGroupKey ?? '',
-      _selectedBusKey ?? '',
-      _favoritesOnly,
-      _nameFilter,
-      _zoom.toStringAsFixed(1),
-      _selectedGeometry?.points.length ?? 0,
-    ].join('|');
+    final bounds = _visibleBounds;
+    final viewportKey = bounds == null
+        ? 'uninitialized'
+        : [
+            bounds.south,
+            bounds.west,
+            bounds.north,
+            bounds.east,
+          ].map((coordinate) => coordinate.toStringAsFixed(6)).join(',');
+    return staticBusMarkerCacheKey(
+      visibleBusIds: buses.map((bus) => bus.stateKey),
+      dataGeneration: _snapshotGeneration,
+      viewportKey: viewportKey,
+      zoom: _zoom,
+      filterKey: '$_favoritesOnly|${normalizeRouteQuery(_nameFilter)}',
+      selectionKey:
+          '${_selectedGroupKey ?? ''}|${_selectedBusKey ?? ''}|${_selectedGeometry?.points.length ?? 0}',
+      locale: Localizations.localeOf(context).toLanguageTag(),
+    );
   }
 
   void _syncFlutterMapViewport() {
@@ -1376,8 +1450,8 @@ class _BusMapScreenState extends State<BusMapScreen>
   }
 
   Widget _buildGoogleMap(ThemeData theme, _BusMapDrawSet drawSet) {
-    _ensureGoogleIcons(theme, drawSet);
     final now = DateTime.now();
+    _ensureGoogleIcons(theme, drawSet, now);
     final geometry = _selectedGeometry;
     final center = _providerCenter(_provider);
 
@@ -1472,7 +1546,11 @@ class _BusMapScreenState extends State<BusMapScreen>
               gmaps.BitmapDescriptor.defaultMarkerWithHue(
                 googleMarkerHueForColor(theme.colorScheme.primaryContainer),
               ),
-          infoWindow: gmaps.InfoWindow(title: '${cluster.count} 輛公車'),
+          infoWindow: gmaps.InfoWindow(
+            title: AppLocalizations.of(
+              context,
+            ).busMapClusterCount(cluster.count),
+          ),
           zIndexInt: 1,
           onTap: () => _zoomIntoCluster(cluster),
         ),
@@ -1512,7 +1590,12 @@ class _BusMapScreenState extends State<BusMapScreen>
           icon: gmaps.BitmapDescriptor.defaultMarkerWithHue(
             gmaps.BitmapDescriptor.hueCyan,
           ),
-          infoWindow: gmaps.InfoWindow(title: stop.stopName),
+          infoWindow: gmaps.InfoWindow(
+            title: stop.transitName.stationDisplayForLocale(
+              Localizations.localeOf(context).toLanguageTag(),
+              separator: '\n',
+            ),
+          ),
           zIndexInt: 1,
           onTap: selectedBus == null
               ? null
@@ -1530,6 +1613,7 @@ class _BusMapScreenState extends State<BusMapScreen>
         color: _colorFor(bus),
         selected: selected,
         pixelRatio: pixelRatio,
+        heading: _headingFor(bus, now),
       );
       final icon = _googleBusIcons[key];
       markers.add(
@@ -1540,7 +1624,6 @@ class _BusMapScreenState extends State<BusMapScreen>
           // Dimming with alpha rather than a second set of rasterised icons
           // keeps the bitmap cache to one entry per colour.
           alpha: _opacityFor(bus),
-          rotation: _headingFor(bus, now),
           flat: true,
           anchor: icon == null ? const Offset(0.5, 1) : const Offset(0.5, 0.5),
           icon:
@@ -1549,7 +1632,7 @@ class _BusMapScreenState extends State<BusMapScreen>
                 googleMarkerHueForColor(_colorFor(bus)),
               ),
           infoWindow: gmaps.InfoWindow(
-            title: _snapshot!.displayNameFor(bus),
+            title: _localeNameFor(bus),
             snippet: bus.bus.id,
           ),
           zIndexInt: selected ? 3 : 2,
@@ -1560,7 +1643,11 @@ class _BusMapScreenState extends State<BusMapScreen>
     return markers;
   }
 
-  void _ensureGoogleIcons(ThemeData theme, _BusMapDrawSet drawSet) {
+  void _ensureGoogleIcons(
+    ThemeData theme,
+    _BusMapDrawSet drawSet,
+    DateTime now,
+  ) {
     final pixelRatio = MediaQuery.of(
       context,
     ).devicePixelRatio.clamp(1.0, 3.0).toDouble();
@@ -1591,6 +1678,7 @@ class _BusMapScreenState extends State<BusMapScreen>
           color: _colorFor(bus),
           selected: selected,
           pixelRatio: pixelRatio,
+          heading: _headingFor(bus, now),
         );
         if (_googleBusIcons.containsKey(key) ||
             _pendingGoogleBusIconKeys.contains(key)) {
@@ -1603,6 +1691,7 @@ class _BusMapScreenState extends State<BusMapScreen>
             color: _colorFor(bus),
             selected: selected,
             pixelRatio: pixelRatio,
+            heading: _headingFor(bus, now),
           ),
         );
       }
@@ -1705,10 +1794,15 @@ class _BusMapScreenState extends State<BusMapScreen>
 /// Zoomed in these are all individual buses; zoomed out most of them collapse
 /// into [clusters] and only the watched route stays drawn bus by bus.
 class _BusMapDrawSet {
-  const _BusMapDrawSet({required this.buses, required this.clusters});
+  const _BusMapDrawSet({
+    required this.buses,
+    required this.clusters,
+    required this.matchingBusCount,
+  });
 
   final List<CityBus> buses;
   final List<BusCluster> clusters;
+  final int matchingBusCount;
 
   int get clusteredBusCount =>
       clusters.fold(0, (total, cluster) => total + cluster.count);
@@ -1779,7 +1873,12 @@ class _StatusChip extends StatelessWidget {
               Icon(icon, size: 16, color: foreground),
               const SizedBox(width: 6),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 260),
+                constraints: BoxConstraints(
+                  maxWidth: math.min(
+                    260,
+                    math.max(0, MediaQuery.sizeOf(context).width - 100),
+                  ),
+                ),
                 child: Text(
                   label,
                   overflow: TextOverflow.ellipsis,
@@ -1867,6 +1966,7 @@ class _SheetSizes {
 
 class _BusMapSelectionSheet extends StatefulWidget {
   const _BusMapSelectionSheet({
+    super.key,
     required this.snapshot,
     required this.cityBus,
     required this.state,
@@ -1912,6 +2012,7 @@ class _BusMapSelectionSheetState extends State<_BusMapSelectionSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final stops = widget.stops;
     final textScaler = MediaQuery.textScalerOf(context);
     final titleHeight = textScaler.scale(
@@ -1969,13 +2070,16 @@ class _BusMapSelectionSheetState extends State<_BusMapSelectionSheet> {
                   if (stops.isNotEmpty) ...[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                      child: Text('沿途站牌', style: theme.textTheme.titleSmall),
+                      child: Text(
+                        l10n.busMapRouteStops,
+                        style: theme.textTheme.titleSmall,
+                      ),
                     ),
                     for (final stop in stops)
                       ListTile(
                         dense: true,
                         leading: Text('${stop.sequence}'),
-                        title: Text(stop.stopName),
+                        title: TransitStationName(name: stop.transitName),
                         onTap: () => widget.onStopSelected(stop),
                       ),
                     const SizedBox(height: 12),
@@ -1988,6 +2092,18 @@ class _BusMapSelectionSheetState extends State<_BusMapSelectionSheet> {
       },
     );
   }
+}
+
+Widget _buildSelectionTransition(Widget child, Animation<double> animation) {
+  final curvedAnimation = animation.drive(CurveTween(curve: AppMotion.curve));
+  return FadeTransition(
+    opacity: curvedAnimation,
+    child: ScaleTransition(
+      scale: Tween<double>(begin: 0.97, end: 1).animate(curvedAnimation),
+      alignment: Alignment.bottomCenter,
+      child: child,
+    ),
+  );
 }
 
 class _BusMapSelectionCard extends StatelessWidget {
@@ -2018,12 +2134,17 @@ class _BusMapSelectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final name = snapshot.displayNameFor(cityBus);
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
+    final name = snapshot.transitNameFor(cityBus).displayForLocale(locale);
     final status = state?.status ?? describeBusStatus(cityBus.bus.statusCode);
     final family = snapshot.families[cityBus.routeUid];
     final ambiguous = snapshot.isAmbiguous(cityBus);
-    final direction = routeDirectionLabel(
-      pathName: stops.isEmpty ? null : stops.last.stopName,
+    final direction = localizedRouteDirection(
+      l10n,
+      pathName: stops.isEmpty
+          ? null
+          : stops.last.transitName.displayForLocale(locale),
       pathId: pathId ?? cityBus.bus.pathId,
       routeName: name,
     );
@@ -2049,7 +2170,7 @@ class _BusMapSelectionCard extends StatelessWidget {
                 ),
               ),
               IconButton(
-                tooltip: '取消選取',
+                tooltip: l10n.busMapClearSelection,
                 icon: const Icon(Icons.close_rounded),
                 onPressed: onClose,
               ),
@@ -2070,7 +2191,7 @@ class _BusMapSelectionCard extends StatelessWidget {
                 visualDensity: VisualDensity.compact,
                 backgroundColor: status.color,
                 label: Text(
-                  status.label,
+                  localizedBusStatus(l10n, status),
                   style: TextStyle(
                     color: status.color.computeLuminance() > 0.45
                         ? Colors.black87
@@ -2082,26 +2203,28 @@ class _BusMapSelectionCard extends StatelessWidget {
               if (speedKph != null)
                 Chip(
                   visualDensity: VisualDensity.compact,
-                  label: Text('${speedKph.round()} km/h'),
+                  label: Text(l10n.speedKilometersPerHour(speedKph.round())),
                 ),
               if (updatedAt != null)
                 Chip(
                   visualDensity: VisualDensity.compact,
-                  label: Text(formatRelativeTimestamp(updatedAt)),
+                  label: Text(localizedRelativeTimestamp(l10n, updatedAt)),
                 ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
-            '同路線 ${snapshot.siblingCountFor(cityBus)} 輛行駛中',
+            l10n.busMapSameRouteRunning(snapshot.siblingCountFor(cityBus)),
             style: theme.textTheme.bodySmall,
           ),
           if (ambiguous && family != null) ...[
             const SizedBox(height: 6),
             Text(
               family.isBareCode
-                  ? '這輛車的路線代碼是 ${cityBus.routeUid}，尚無路線名稱。'
-                  : '這輛車屬於「${family.name}」路線群，無法判定是哪個區間班次。',
+                  ? l10n.busMapBareRouteCode(cityBus.routeUid)
+                  : l10n.busMapAmbiguousFamily(
+                      family.transitName.displayForLocale(locale),
+                    ),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.outline,
               ),
@@ -2115,12 +2238,12 @@ class _BusMapSelectionCard extends StatelessWidget {
               FilledButton.tonalIcon(
                 onPressed: onOpenDetail,
                 icon: const Icon(Icons.list_alt_rounded),
-                label: const Text('路線詳情'),
+                label: Text(l10n.busMapRouteDetails),
               ),
               OutlinedButton.icon(
                 onPressed: onShowWholeRoute,
                 icon: const Icon(Icons.route_rounded),
-                label: const Text('顯示整條路線'),
+                label: Text(l10n.busMapShowWholeRoute),
               ),
             ],
           ),

@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../app/bus_app.dart';
 import '../core/weather_service.dart';
+import '../l10n/app_localizations.dart';
 
 typedef PassiveLocationResolver = Future<Position?> Function();
 
@@ -293,6 +294,7 @@ class _WeatherChipHostState extends State<_WeatherChipHost>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final snapshot = _snapshot;
     if (snapshot == null) {
       return widget.titleWidget ?? Text(widget.title);
@@ -305,7 +307,7 @@ class _WeatherChipHostState extends State<_WeatherChipHost>
     );
     final textScaler = MediaQuery.textScalerOf(context);
     final textDirection = Directionality.of(context);
-    final label = '${snapshot.displayTemperature}°C';
+    final label = l10n.temperatureCelsius(snapshot.displayTemperature);
 
     final titleWidth =
         widget.titleWidth ??
@@ -342,13 +344,16 @@ class _WeatherChipHostState extends State<_WeatherChipHost>
 
     final chip = Semantics(
       button: onTap != null,
-      label:
-          '目前天氣 ${weatherConditionLabel(snapshot.condition)}'
-          ' ${snapshot.displayTemperature} 度',
+      label: l10n.weatherCurrentSemantics(
+        weatherConditionLabel(snapshot.condition),
+        snapshot.displayTemperature,
+      ),
       child: Tooltip(
         message: onTap == null
             ? weatherConditionLabel(snapshot.condition)
-            : '${weatherConditionLabel(snapshot.condition)} · 查看天氣',
+            : l10n.weatherViewTooltip(
+                weatherConditionLabel(snapshot.condition),
+              ),
         child: onTap == null
             ? chipBody
             : InkWell(

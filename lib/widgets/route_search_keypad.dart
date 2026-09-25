@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/haptic_feedback_service.dart';
+import '../l10n/app_localizations.dart';
 
 /// A compact, route-oriented keypad used by the mobile search screen.
 ///
@@ -248,6 +249,7 @@ class RouteSearchKeypad extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final surfaceColor =
@@ -273,11 +275,14 @@ class RouteSearchKeypad extends StatelessWidget {
                 children: [
                   const SizedBox(width: 4),
                   Expanded(
-                    child: Text('路線字首與號碼', style: theme.textTheme.titleSmall),
+                    child: Text(
+                      l10n.searchKeypadTitle,
+                      style: theme.textTheme.titleSmall,
+                    ),
                   ),
                   IconButton(
                     key: const ValueKey<String>('route-keypad-collapse'),
-                    tooltip: '收合快捷鍵盤',
+                    tooltip: l10n.searchKeypadCollapseTooltip,
                     onPressed: _collapse,
                     icon: const Icon(Icons.keyboard_arrow_down_rounded),
                   ),
@@ -339,6 +344,7 @@ class _PrefixRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final colorScheme = Theme.of(context).colorScheme;
     return SingleChildScrollView(
       key: const ValueKey<String>('route-keypad-prefix-scroll'),
@@ -375,7 +381,12 @@ class _PrefixRail extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 5),
-                  Text(keys[index].label, maxLines: 1),
+                  Text(
+                    keys[index].action == _RouteShortcutAction.category
+                        ? l10n.searchKeypadOther
+                        : keys[index].label,
+                    maxLines: 1,
+                  ),
                 ],
               ),
             ),
@@ -401,6 +412,7 @@ class _NumberGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final colorScheme = Theme.of(context).colorScheme;
     final keyStyle = FilledButton.styleFrom(
       minimumSize: const Size(48, 48),
@@ -419,7 +431,7 @@ class _NumberGrid extends StatelessWidget {
           child: Text(digit),
         ),
       Tooltip(
-        message: '切換文字鍵盤',
+        message: l10n.searchKeypadTextTooltip,
         child: FilledButton.tonal(
           key: const ValueKey<String>('route-keypad-text'),
           onPressed: onTextInputPressed,
@@ -494,7 +506,7 @@ class _RepeatingBackspaceButtonState extends State<_RepeatingBackspaceButton> {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '退格',
+      message: AppLocalizations.of(context).searchKeypadBackspaceTooltip,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onLongPressStart: (_) => _startRepeating(),

@@ -14,6 +14,7 @@ import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/widgets/background_image_wrapper.dart';
 import 'package:taiwanbus_flutter/screens/home_screen.dart';
 import 'package:taiwanbus_flutter/screens/main_transit_shell.dart';
@@ -40,10 +41,6 @@ void main() {
         TransitMode.youbike,
       ]),
     );
-    expect(
-      kTransitModeDestinations.map((destination) => destination.label),
-      orderedEquals(const ['公車', '捷運', '高鐵', '台鐵', 'YouBike']),
-    );
   });
 
   testWidgets('mobile navigation stays below the scrollable page', (
@@ -56,6 +53,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh', 'TW'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: MediaQuery(
           data: const MediaQueryData(
             size: Size(390, 500),
@@ -82,19 +82,20 @@ void main() {
     expect(tester.getBottomLeft(navigation).dy, 476);
     expect(tester.getBottomLeft(navigationSafeArea).dy, 500);
     expect(
-      find.ancestor(of: navigation, matching: find.byType(ListView)),
+      find.ancestor(
+        of: navigation,
+        matching: find.byType(SingleChildScrollView),
+      ),
       findsNothing,
     );
 
     final navigationTop = tester.getTopLeft(navigation);
+    final pageScrollView = find.byType(SingleChildScrollView).first;
     final scrollable = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byType(ListView).first,
-        matching: find.byType(Scrollable),
-      ),
+      find.descendant(of: pageScrollView, matching: find.byType(Scrollable)),
     );
     final initialScrollOffset = scrollable.position.pixels;
-    await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+    await tester.drag(pageScrollView, const Offset(0, -300));
     await tester.pump();
     expect(scrollable.position.pixels, greaterThan(initialScrollOffset));
     expect(tester.getTopLeft(navigation), navigationTop);
@@ -113,6 +114,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh', 'TW'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: AppControllerScope(
           controller: controller,
           child: const MainTransitShell(),
@@ -154,6 +158,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh', 'TW'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: AppControllerScope(
           controller: controller,
           child: const HomeScreen(),
@@ -176,10 +183,16 @@ void main() {
     for (final card in cards) {
       expect(tester.widget<Card>(card).margin, EdgeInsets.zero);
     }
+    final scrollView = find.byType(SingleChildScrollView);
     expect(
-      tester.widget<ListView>(find.byType(ListView)).padding,
+      tester.widget<SingleChildScrollView>(scrollView).padding,
       const EdgeInsets.fromLTRB(16, 8, 16, 8),
     );
+    final cardGroupCenter =
+        (tester.getTopLeft(cards.first).dy +
+            tester.getBottomLeft(cards.last).dy) /
+        2;
+    expect(cardGroupCenter, closeTo(tester.getCenter(scrollView).dy, 0.01));
   });
 
   for (final layout in [
@@ -214,6 +227,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('zh', 'TW'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: MediaQuery(
             data: MediaQueryData(
               size: layout.size,
@@ -230,12 +246,10 @@ void main() {
       await tester.pump();
 
       final navigation = find.byType(NavigationBar);
+      const labels = ['公車', '捷運', '高鐵', '台鐵', 'YouBike'];
       for (var index = 0; index < kTransitModeDestinations.length; index++) {
         await tester.tap(
-          find.descendant(
-            of: navigation,
-            matching: find.text(kTransitModeDestinations[index].label),
-          ),
+          find.descendant(of: navigation, matching: find.text(labels[index])),
         );
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 250));

@@ -14,6 +14,7 @@ import 'package:taiwanbus_flutter/core/account_sync_service.dart';
 import 'package:taiwanbus_flutter/core/app_analytics.dart';
 import 'package:taiwanbus_flutter/core/app_build_info.dart';
 import 'package:taiwanbus_flutter/core/app_controller.dart';
+import 'package:taiwanbus_flutter/core/app_motion.dart';
 import 'package:taiwanbus_flutter/core/app_route_observer.dart';
 import 'package:taiwanbus_flutter/core/app_update_installer.dart';
 import 'package:taiwanbus_flutter/core/app_update_service.dart';
@@ -21,6 +22,7 @@ import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/bus_map_screen.dart';
 import 'package:taiwanbus_flutter/widgets/bus_map_markers.dart';
 
@@ -66,6 +68,7 @@ const _snapshotBody = {
   'families': {
     'TPE10231': {
       'name': '民權幹線',
+      'name_en': 'Minquan Main Line',
       'stops_routeid': 'TPE10231',
       'geometry_routeid': 'TPE10231',
       'routeids': ['TPE10231', 'TPE162593'],
@@ -188,9 +191,13 @@ Future<void> _pumpMap(
   AppController controller, {
   double zoom = 15,
   double textScale = 1.0,
+  Locale locale = const Locale('zh', 'TW'),
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      locale: locale,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       navigatorObservers: [appRouteObserver],
       home: MediaQuery(
         data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
@@ -207,15 +214,15 @@ Future<void> _pumpMap(
   );
 }
 
-/// Taps the bus the fixture names '234' and waits for its sheet.
+/// Selects the fixture's exact '234' marker and waits for its sheet.
 Future<void> _selectTheResolvedBus(WidgetTester tester, _RequestLog log) async {
-  final marker = find.byWidgetPredicate(
-    (widget) => widget is BusMapBusMarker && widget.label == '234 KKA-1234',
-  );
-  await tester.tap(marker, warnIfMissed: false);
+  final marker = _busMarker(tester, '234 KKA-1234');
+  final gesture = marker.child as GestureDetector;
+  gesture.onTap!();
+  await tester.pump();
   await _pumpUntil(
     tester,
-    () => find.text('路線詳情').evaluate().isNotEmpty,
+    () => find.text('234').evaluate().isNotEmpty,
     reason: 'selection sheet never appeared',
   );
   // The stops arrive a moment after the sheet; wait for them so callers can
@@ -423,6 +430,116 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
 
+  testWidgets('rotates the heading indicator without rotating the bus icon', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SizedBox.square(
+            dimension: 64,
+            child: BusMapBusMarker(
+              color: Colors.blue,
+              selected: true,
+              label: 'test bus',
+              heading: 90,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.ancestor(
+        of: find.byIcon(Icons.directions_bus_rounded),
+        matching: find.byType(Transform),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.ancestor(
+        of: find.byIcon(Icons.navigation_rounded),
+        matching: find.byType(Transform),
+      ),
+      findsOneWidget,
+    );
+    final busCenter = tester.getCenter(
+      find.byIcon(Icons.directions_bus_rounded),
+    );
+    final arrowCenter = tester.getCenter(find.byIcon(Icons.navigation_rounded));
+    expect(arrowCenter.dx, greaterThan(busCenter.dx + 20));
+    expect((arrowCenter.dy - busCenter.dy).abs(), lessThan(1));
+  });
+
+  test('Google bus icon headings use bounded cache buckets', () {
+    String key(double heading) => googleBusIconKey(
+      color: Colors.blue,
+      selected: false,
+      pixelRatio: 2,
+      heading: heading,
+    );
+
+    expect(key(1), key(7));
+    expect(key(7), isNot(key(8)));
+    expect(key(-2), key(358));
+    expect(
+      GoogleBusIconRequest(
+        key: 'test',
+        color: Colors.blue,
+        selected: false,
+        pixelRatio: 2,
+        heading: 358,
+      ).heading,
+      0,
+    );
+  });
+
+  test(
+    'static marker cache keys include identities and viewport generation',
+    () {
+      String key({
+        required List<String> ids,
+        required String viewport,
+        int generation = 1,
+        double zoom = 15,
+        String filter = 'false|',
+      }) => staticBusMarkerCacheKey(
+        visibleBusIds: ids,
+        dataGeneration: generation,
+        viewportKey: viewport,
+        zoom: zoom,
+        filterKey: filter,
+        selectionKey: '',
+        locale: 'zh-TW',
+      );
+
+      expect(
+        key(ids: ['route|B', 'route|A'], viewport: 'north'),
+        key(ids: ['route|A', 'route|B'], viewport: 'north'),
+      );
+      expect(
+        key(ids: ['route|A'], viewport: 'north'),
+        isNot(key(ids: ['route|B'], viewport: 'north')),
+      );
+      expect(
+        key(ids: ['route|A'], viewport: 'north'),
+        isNot(key(ids: ['route|A'], viewport: 'south')),
+      );
+      expect(
+        key(ids: ['route|A'], viewport: 'north'),
+        isNot(key(ids: ['route|A'], viewport: 'north', generation: 2)),
+      );
+      expect(
+        key(ids: ['route|A'], viewport: 'north'),
+        isNot(key(ids: ['route|A'], viewport: 'north', zoom: 16)),
+      );
+      expect(
+        key(ids: ['route|A'], viewport: 'north'),
+        isNot(key(ids: ['route|A'], viewport: 'north', filter: 'true|234')),
+      );
+    },
+  );
+
   _mapTest('draws every bus the city feed returned', (
     tester,
     log,
@@ -442,6 +559,35 @@ void main() {
     expect(eastbound.heading, 90);
     expect(find.byType(BusMapHeadingIndicator), findsNWidgets(2));
     expect(log.count('/cities/TPE/buses'), 1);
+  });
+
+  _mapTest('localizes map controls in English at narrow width', (
+    tester,
+    log,
+    controller,
+  ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await _pumpMap(tester, controller, locale: const Locale('en'));
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+      reason: 'bus markers never rendered',
+    );
+
+    expect(find.byTooltip('Filter routes'), findsOneWidget);
+    expect(find.byTooltip('My location'), findsOneWidget);
+    expect(find.textContaining('Live bus map'), findsOneWidget);
+    expect(
+      tester
+          .widgetList<BusMapBusMarker>(find.byType(BusMapBusMarker))
+          .map((marker) => marker.label),
+      contains('Minquan Main Line / 民權幹線 EAL-0562'),
+    );
+    expect(tester.takeException(), isNull);
   });
 
   _mapTest('requests location on open and lets the rider retry', (
@@ -465,7 +611,7 @@ void main() {
     expect(find.text('沒有取得定位權限。'), findsOneWidget);
   });
 
-  _mapTest('moves an unselected bus smoothly between server updates', (
+  _mapTest('keeps unselected buses at their latest reported positions', (
     tester,
     log,
     controller,
@@ -480,7 +626,68 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     final after = _busMarker(tester, '234 KKA-1234').point;
+    expect(after, before);
+  });
+
+  _mapTest('moves a selected route smoothly between server updates', (
+    tester,
+    log,
+    controller,
+  ) async {
+    await _pumpMap(tester, controller);
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+    );
+    await _selectTheResolvedBus(tester, log);
+    final before = _busMarker(tester, '234 KKA-1234').point;
+
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final after = _busMarker(tester, '234 KKA-1234').point;
     expect(after.longitude, greaterThan(before.longitude));
+  });
+
+  _mapTest('animation ticks rebuild only the moving marker layer', (
+    tester,
+    log,
+    controller,
+  ) async {
+    await _pumpMap(tester, controller);
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+    );
+    await _selectTheResolvedBus(tester, log);
+
+    final mapBefore = tester.widget<FlutterMap>(find.byType(FlutterMap));
+    final tileLayerBefore = tester.widget<TileLayer>(find.byType(TileLayer));
+    final movingLayerBefore = tester.widget<MarkerLayer>(
+      find.byKey(const ValueKey('bus-map-moving-marker-layer')),
+    );
+
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      identical(tester.widget<FlutterMap>(find.byType(FlutterMap)), mapBefore),
+      isTrue,
+    );
+    expect(
+      identical(
+        tester.widget<TileLayer>(find.byType(TileLayer)),
+        tileLayerBefore,
+      ),
+      isTrue,
+    );
+    expect(
+      identical(
+        tester.widget<MarkerLayer>(
+          find.byKey(const ValueKey('bus-map-moving-marker-layer')),
+        ),
+        movingLayerBefore,
+      ),
+      isFalse,
+    );
   });
 
   _mapTest('a bus the feed could not pin down is still named', (
@@ -574,6 +781,29 @@ void main() {
     expect(find.text('顯示整條路線'), findsOneWidget);
     // On a phone-sized viewport the stops are map pins, not a list.
     expect(find.byTooltip('西門'), findsOneWidget);
+  });
+
+  _mapTest('the selected route card animates into view', (
+    tester,
+    log,
+    controller,
+  ) async {
+    await _pumpMap(tester, controller);
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+    );
+
+    final marker = _busMarker(tester, '234 KKA-1234');
+    (marker.child as GestureDetector).onTap!();
+    await tester.pump();
+
+    final switcher = tester.widget<AnimatedSwitcher>(
+      find.byKey(const ValueKey('bus-map-selection-transition')),
+    );
+    expect(switcher.duration, AppMotion.standard);
+    expect(find.byType(FadeTransition), findsWidgets);
+    expect(find.byType(ScaleTransition), findsWidgets);
   });
 
   _mapTest('polling stops behind another screen and resumes on return', (

@@ -60,6 +60,29 @@ void main() {
       expect(result.first.routeKey, 1);
     },
   );
+
+  test('English route and path names participate in ranking', () {
+    final englishRoutes = [
+      route(1, '機場快線', routeNameEn: 'Airport Express'),
+      route(2, '其他', pathNameEn: 'Airport Terminal'),
+      route(3, 'Airport Shuttle'),
+    ];
+
+    expect(
+      sortRouteSummariesForQuery(
+        englishRoutes,
+        query: 'Airport Express',
+      ).first.routeKey,
+      1,
+    );
+    expect(
+      sortRouteSummariesForQuery(
+        englishRoutes,
+        query: 'Terminal',
+      ).first.routeKey,
+      2,
+    );
+  });
 }
 
 RouteSummary route(
@@ -68,6 +91,8 @@ RouteSummary route(
   String provider = 'TXG',
   String officialName = '',
   String description = '',
+  String? routeNameEn,
+  String? pathNameEn,
 }) => RouteSummary(
   sourceProvider: provider,
   hashMd5: '',
@@ -75,7 +100,9 @@ RouteSummary route(
   routeId: '$provider$id',
   routeName: name,
   officialRouteName: officialName,
+  routeNameEn: routeNameEn,
   description: description,
+  pathNameEn: pathNameEn,
   category: '',
   sequence: id,
   rtrip: 0,

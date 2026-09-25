@@ -4,14 +4,17 @@ import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
-import '../core/friendly_error.dart';
 import '../core/metro_direction.dart';
 import '../core/request_sequence.dart';
 import '../core/transit_repository.dart';
+import '../core/transit_name.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/eta_badge.dart';
 import '../widgets/transit_station_map.dart';
 import '../widgets/ad_banner_widget.dart';
+import '../widgets/transit_station_name.dart';
 
 enum _MetroPanel { live, map }
 
@@ -117,7 +120,12 @@ class _MetroScreenState extends State<MetroScreen> {
       if (!mounted || !_systemsRequest.isCurrent(request)) {
         return;
       }
-      setState(() => _pageError = friendlyErrorMessage(error));
+      setState(
+        () => _pageError = localizedFriendlyError(
+          AppLocalizations.of(context),
+          error,
+        ),
+      );
     } finally {
       if (mounted && _systemsRequest.isCurrent(request)) {
         setState(() => _loading = false);
@@ -186,7 +194,12 @@ class _MetroScreenState extends State<MetroScreen> {
       if (!mounted || !_systemDataRequest.isCurrent(request)) {
         return;
       }
-      setState(() => _pageError = friendlyErrorMessage(error));
+      setState(
+        () => _pageError = localizedFriendlyError(
+          AppLocalizations.of(context),
+          error,
+        ),
+      );
     } finally {
       if (mounted && _systemDataRequest.isCurrent(request)) {
         setState(() => _loadingSystem = false);
@@ -246,7 +259,12 @@ class _MetroScreenState extends State<MetroScreen> {
       if (!mounted || !_etaRequest.isCurrent(request)) {
         return;
       }
-      setState(() => _lineError = friendlyErrorMessage(error));
+      setState(
+        () => _lineError = localizedFriendlyError(
+          AppLocalizations.of(context),
+          error,
+        ),
+      );
     } finally {
       if (mounted && _etaRequest.isCurrent(request)) {
         setState(() => _loadingEta = false);
@@ -473,7 +491,10 @@ class _MetroScreenState extends State<MetroScreen> {
     }
     final cleaned = hex.replaceAll('#', '');
     if (cleaned.length == 6) {
-      return Color(int.parse('FF$cleaned', radix: 16));
+      final value = int.tryParse('FF$cleaned', radix: 16);
+      if (value != null) {
+        return Color(value);
+      }
     }
     return Colors.grey;
   }
@@ -481,6 +502,7 @@ class _MetroScreenState extends State<MetroScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final hasBackgroundImage = hasBackgroundImageForPage(
       AppControllerScope.of(context).settings,
       pageKey: 'bus',
@@ -488,11 +510,11 @@ class _MetroScreenState extends State<MetroScreen> {
     return Scaffold(
       backgroundColor: hasBackgroundImage ? Colors.transparent : null,
       appBar: AppBar(
-        title: const Text('捷運'),
+        title: Text(l10n.transitMetro),
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
-            tooltip: '重新整理',
+            tooltip: l10n.commonRefresh,
             onPressed: _selectedSystem == null
                 ? () => _loadSystems(refresh: true)
                 : () =>
@@ -544,8 +566,10 @@ class _MetroScreenState extends State<MetroScreen> {
                                 ),
                                 const SizedBox(height: 16),
                               ],
-                              _buildSourceBanner(theme),
-                              const SizedBox(height: 16),
+                              if (_selectedLine != null) ...[
+                                _buildSourceBanner(theme),
+                                const SizedBox(height: 16),
+                              ],
                               _MetroPanelButtons(
                                 current: _panel,
                                 onChanged: (panel) =>
@@ -577,6 +601,7 @@ class _MetroScreenState extends State<MetroScreen> {
   }
 
   Widget _buildSystemSelector(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -584,18 +609,20 @@ class _MetroScreenState extends State<MetroScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '捷運系統',
+              l10n.metroSystem,
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
-            // const SizedBox(height: 6),
-            // Text(
-            //   '先切城市，再切路線；同一頁就能看即時到站與站點地圖。',
-            //   style: theme.textTheme.bodySmall?.copyWith(
-            //     color: theme.colorScheme.onSurfaceVariant,
-            //   ),
-            // ),
+            const SizedBox(height: 4),
+            Text(
+              _selectedSystem == null
+                  ? '先選擇城市，再挑選路線。'
+                  : '${_selectedSystem!.city} · ${_selectedSystem!.name}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
             const SizedBox(height: 14),
             Wrap(
               spacing: 10,
@@ -625,6 +652,7 @@ class _MetroScreenState extends State<MetroScreen> {
   }
 
   Widget _buildLineSelector(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -635,7 +663,9 @@ class _MetroScreenState extends State<MetroScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    _selectedLine == null ? '尚未選擇路線' : _selectedLine!.name,
+                    _selectedLine == null
+                        ? l10n.metroNoLineSelected
+                        : _selectedLine!.name,
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -645,7 +675,7 @@ class _MetroScreenState extends State<MetroScreen> {
                   FilledButton.tonalIcon(
                     onPressed: _loadingEta ? null : () => _loadLineEta(),
                     icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('更新 ETA'),
+                    label: Text(l10n.metroUpdateEta),
                   ),
               ],
             ),
@@ -660,30 +690,26 @@ class _MetroScreenState extends State<MetroScreen> {
             ],
             const SizedBox(height: 14),
             if (_lines.isEmpty)
-              const _EmptyPanel(
+              _EmptyPanel(
                 icon: Icons.directions_transit_rounded,
-                label: '這個捷運系統目前沒有可用路線。',
+                label: l10n.metroNoLines,
               )
             else
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: _lines
-                      .map((line) {
-                        final selected = line.lineId == _selectedLine?.lineId;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 10),
-                          child: _LinePill(
-                            line: line,
-                            selected: selected,
-                            onTap: _loadingSystem
-                                ? null
-                                : () => _loadLineEta(line: line),
-                          ),
-                        );
-                      })
-                      .toList(growable: false),
-                ),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _lines
+                    .map((line) {
+                      final selected = line.lineId == _selectedLine?.lineId;
+                      return _LinePill(
+                        line: line,
+                        selected: selected,
+                        onTap: _loadingSystem
+                            ? null
+                            : () => _loadLineEta(line: line),
+                      );
+                    })
+                    .toList(growable: false),
               ),
             if (_loadingEta) ...[
               const SizedBox(height: 12),
@@ -696,14 +722,18 @@ class _MetroScreenState extends State<MetroScreen> {
   }
 
   Widget _buildSourceBanner(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final currentHeadway = _currentHeadway;
     final message = switch (_etaSource) {
-      'timetable' => _etaMessage ?? '目前改用時刻表推估到站。',
+      'timetable' => _etaMessage ?? l10n.metroTimetableEstimate,
       'frequency' =>
         currentHeadway == null
-            ? (_etaMessage ?? '目前只有班距資訊。')
-            : '目前以班距估算，約 ${currentHeadway.minHeadway}-${currentHeadway.maxHeadway} 分鐘。',
-      _ => _etaMessage ?? '目前 ETA 來源未標示。',
+            ? (_etaMessage ?? l10n.metroFrequencyOnly)
+            : l10n.metroFrequencyEstimate(
+                currentHeadway.minHeadway,
+                currentHeadway.maxHeadway,
+              ),
+      _ => _etaMessage ?? l10n.metroEtaUnknown,
     };
 
     return Container(
@@ -717,8 +747,10 @@ class _MetroScreenState extends State<MetroScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            Icons.info_outline_rounded,
-            color: theme.colorScheme.onSurfaceVariant,
+            _etaSource == 'liveboard'
+                ? Icons.wifi_tethering_rounded
+                : Icons.schedule_rounded,
+            color: theme.colorScheme.primary,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -735,18 +767,19 @@ class _MetroScreenState extends State<MetroScreen> {
   }
 
   Widget _buildLivePanel(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     if (_selectedLine == null) {
-      return const _EmptyPanel(
-        key: ValueKey('metro_live_empty'),
+      return _EmptyPanel(
+        key: const ValueKey('metro_live_empty'),
         icon: Icons.subway_rounded,
-        label: '先選一條捷運路線。',
+        label: l10n.metroChooseLine,
       );
     }
     if (_lineDirections.isEmpty) {
-      return const _EmptyPanel(
-        key: ValueKey('metro_live_no_stations'),
+      return _EmptyPanel(
+        key: const ValueKey('metro_live_no_stations'),
         icon: Icons.timeline_rounded,
-        label: '這條路線目前沒有站序資料。',
+        label: l10n.metroNoStationSequence,
       );
     }
 
@@ -789,8 +822,12 @@ class _MetroScreenState extends State<MetroScreen> {
               lineColor: _parseLineColor(_selectedLine!.color),
               frequencyLabel: _currentHeadway == null
                   ? null
-                  : '${_currentHeadway!.minHeadway}-${_currentHeadway!.maxHeadway}分',
+                  : l10n.metroHeadway(
+                      _currentHeadway!.minHeadway,
+                      _currentHeadway!.maxHeadway,
+                    ),
             ),
+            initiallyExpanded: true,
           ),
         ),
       ],
@@ -798,6 +835,7 @@ class _MetroScreenState extends State<MetroScreen> {
   }
 
   Widget _buildMapPanel(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final selectedLine = _selectedLine;
     final lineColor = _parseLineColor(selectedLine?.color ?? '');
     final points = _uniqueStations
@@ -807,6 +845,11 @@ class _MetroScreenState extends State<MetroScreen> {
             id: sequence.stationId,
             label: sequence.name,
             subtitle: sequence.nameEn,
+            name: TransitName(
+              zh: sequence.name,
+              en: sequence.nameEn,
+              stableId: sequence.stationId,
+            ),
             latitude: station?.lat ?? 0,
             longitude: station?.lon ?? 0,
             color: lineColor,
@@ -828,7 +871,7 @@ class _MetroScreenState extends State<MetroScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        '路線地圖',
+                        l10n.metroRouteMap,
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -838,17 +881,17 @@ class _MetroScreenState extends State<MetroScreen> {
                       onPressed: () =>
                           setState(() => _panel = _MetroPanel.live),
                       icon: const Icon(Icons.access_time_filled_rounded),
-                      label: const Text('看 ETA'),
+                      label: Text(l10n.metroViewEta),
                     ),
                   ],
                 ),
-                // const SizedBox(height: 8),
-                // Text(
-                //   '點站點會把下方切到該站最近列車；不需要再進第二層畫面。',
-                //   style: theme.textTheme.bodySmall?.copyWith(
-                //     color: theme.colorScheme.onSurfaceVariant,
-                //   ),
-                // ),
+                const SizedBox(height: 8),
+                Text(
+                  '點選站點即可查看最近班次；拖曳地圖可以瀏覽整條路線。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 TransitStationMap(
                   points: points,
@@ -857,7 +900,7 @@ class _MetroScreenState extends State<MetroScreen> {
                     setState(() => _selectedStationId = point.id);
                   },
                   height: 360,
-                  emptyLabel: '這條捷運路線目前沒有可用站點座標。',
+                  emptyLabel: l10n.metroNoCoordinates,
                 ),
               ],
             ),
@@ -866,8 +909,11 @@ class _MetroScreenState extends State<MetroScreen> {
         const SizedBox(height: 12),
         if (_selectedStationCardData case final data?)
           _SelectedMetroStationCard(
-            title: data.$1.name,
-            subtitle: data.$1.nameEn,
+            name: TransitName(
+              zh: data.$1.name,
+              en: data.$1.nameEn,
+              stableId: data.$1.stationId,
+            ),
             entries: data.$2,
             headway: _currentHeadway,
             onRefresh: _loadLineEta,
@@ -907,12 +953,13 @@ class _MetroPanelButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Row(
       children: [
         Expanded(
           child: _PanelButton(
             icon: Icons.access_time_filled_rounded,
-            label: '即時到站',
+            label: l10n.metroLiveArrivals,
             selected: current == _MetroPanel.live,
             onPressed: () => onChanged(_MetroPanel.live),
           ),
@@ -921,7 +968,7 @@ class _MetroPanelButtons extends StatelessWidget {
         Expanded(
           child: _PanelButton(
             icon: Icons.map_rounded,
-            label: '站點地圖',
+            label: l10n.metroStationMap,
             selected: current == _MetroPanel.map,
             onPressed: () => onChanged(_MetroPanel.map),
           ),
@@ -1023,7 +1070,10 @@ class _LinePill extends StatelessWidget {
   Color _parseLineColor(String hex) {
     final cleaned = hex.replaceAll('#', '');
     if (cleaned.length == 6) {
-      return Color(int.parse('FF$cleaned', radix: 16));
+      final value = int.tryParse('FF$cleaned', radix: 16);
+      if (value != null) {
+        return Color(value);
+      }
     }
     return Colors.grey;
   }
@@ -1044,13 +1094,14 @@ class MetroDirectionSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final buttons = <Widget>[];
     for (final entry in directions.indexed) {
       final index = entry.$1;
       final direction = entry.$2;
-      final destination = direction.stations.isEmpty
-          ? '方向 ${direction.direction + 1}'
-          : direction.stations.last.name;
+      final label = direction.stations.isEmpty
+          ? l10n.directionNumber(direction.direction + 1)
+          : l10n.metroDirectionHeading(direction.stations.last.name);
       if (buttons.isNotEmpty) {
         buttons.add(const SizedBox(width: 12));
       }
@@ -1061,7 +1112,7 @@ class MetroDirectionSelector extends StatelessWidget {
             icon: index == 1
                 ? Icons.arrow_back_rounded
                 : Icons.arrow_forward_rounded,
-            label: '往$destination',
+            label: label,
             selected: direction.direction == selectedDirection,
             onPressed: () => onChanged(direction.direction),
           ),
@@ -1086,7 +1137,7 @@ class MetroDirectionSelector extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '行駛方向',
+                  l10n.metroTravelDirection,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
@@ -1110,6 +1161,7 @@ class _DirectionSection extends StatelessWidget {
     required this.etaSource,
     required this.stationBuilder,
     required this.onStationTap,
+    required this.initiallyExpanded,
     super.key,
   });
 
@@ -1119,49 +1171,51 @@ class _DirectionSection extends StatelessWidget {
   final String etaSource;
   final Widget Function(MetroStationSequence station) stationBuilder;
   final ValueChanged<String> onStationTap;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final destination = direction.stations.isNotEmpty
-        ? direction.stations.last.name
-        : '方向 ${direction.direction + 1}';
+    final l10n = AppLocalizations.of(context);
+    final directionLabel = direction.stations.isNotEmpty
+        ? l10n.metroDirectionHeading(direction.stations.last.name)
+        : l10n.directionNumber(direction.direction + 1);
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: lineColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '往 $destination',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                if (etaSource == 'frequency' && headway != null)
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+        leading: Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(color: lineColor, shape: BoxShape.circle),
+        ),
+        title: Text(
+          directionLabel,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        trailing: etaSource == 'frequency' && headway != null
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Chip(
                     label: Text(
-                      '班距 ${headway!.minHeadway}-${headway!.maxHeadway} 分',
+                      l10n.metroHeadway(
+                        headway!.minHeadway,
+                        headway!.maxHeadway,
+                      ),
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ...direction.stations.map((station) {
+                  const Icon(Icons.expand_more_rounded),
+                ],
+              )
+            : null,
+        children: direction.stations
+            .map((station) {
               return InkWell(
                 borderRadius: BorderRadius.circular(18),
                 onTap: () => onStationTap(station.stationId),
@@ -1170,9 +1224,8 @@ class _DirectionSection extends StatelessWidget {
                   child: stationBuilder(station),
                 ),
               );
-            }),
-          ],
-        ),
+            })
+            .toList(growable: false),
       ),
     );
   }
@@ -1220,10 +1273,17 @@ class _MetroStationRow extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      station.name,
-                      style: theme.textTheme.titleMedium?.copyWith(
+                    TransitStationName(
+                      name: TransitName(
+                        zh: station.name,
+                        en: station.nameEn,
+                        stableId: station.stationId,
+                      ),
+                      primaryStyle: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
+                      ),
+                      secondaryStyle: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                     if (entry != null && entry!.tripHeadSign.isNotEmpty)
@@ -1232,17 +1292,11 @@ class _MetroStationRow extends StatelessWidget {
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
-                      )
-                    else if (station.nameEn.isNotEmpty)
-                      Text(
-                        station.nameEn,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
                       ),
                   ],
                 ),
               ),
+              const Icon(Icons.chevron_right_rounded),
             ],
           ),
         ),
@@ -1253,15 +1307,13 @@ class _MetroStationRow extends StatelessWidget {
 
 class _SelectedMetroStationCard extends StatelessWidget {
   const _SelectedMetroStationCard({
-    required this.title,
-    required this.subtitle,
+    required this.name,
     required this.entries,
     required this.headway,
     required this.onRefresh,
   });
 
-  final String title;
-  final String subtitle;
+  final TransitName name;
   final List<MetroLiveBoardEntry> entries;
   final MetroHeadway? headway;
   final Future<void> Function({MetroLine? line, bool resetTimer}) onRefresh;
@@ -1269,6 +1321,7 @@ class _SelectedMetroStationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -1281,26 +1334,19 @@ class _SelectedMetroStationCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleLarge?.copyWith(
+                      TransitStationName(
+                        name: name,
+                        primaryStyle: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      if (subtitle.isNotEmpty)
-                        Text(
-                          subtitle,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
                     ],
                   ),
                 ),
                 FilledButton.tonalIcon(
                   onPressed: () => onRefresh(),
                   icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('刷新'),
+                  label: Text(l10n.commonRefresh),
                 ),
               ],
             ),
@@ -1308,8 +1354,11 @@ class _SelectedMetroStationCard extends StatelessWidget {
             if (entries.isEmpty)
               Text(
                 headway == null
-                    ? '這個車站目前沒有可顯示的即時班次。'
-                    : '目前僅提供班距估算，約 ${headway!.minHeadway}-${headway!.maxHeadway} 分鐘。',
+                    ? l10n.metroNoLiveArrivals
+                    : l10n.metroFrequencyOnlyEstimate(
+                        headway!.minHeadway,
+                        headway!.maxHeadway,
+                      ),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
@@ -1336,6 +1385,7 @@ class _MetroArrivalTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -1364,7 +1414,7 @@ class _MetroArrivalTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '往 ${entry.destinationName}',
+                  l10n.metroDestination(entry.destinationName),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -1421,6 +1471,7 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -1432,7 +1483,7 @@ class _ErrorState extends StatelessWidget {
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded),
-              label: const Text('重試'),
+              label: Text(l10n.commonRetry),
             ),
           ],
         ),

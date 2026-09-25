@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../core/app_link_handler.dart';
+import '../l10n/app_localizations.dart';
 
 class MarkdownContentView extends StatelessWidget {
   const MarkdownContentView({
@@ -23,9 +24,9 @@ class MarkdownContentView extends StatelessWidget {
     if (!context.mounted || opened) {
       return;
     }
-    ScaffoldMessenger.maybeOf(
-      context,
-    )?.showSnackBar(const SnackBar(content: Text('無法開啓連結。')));
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).linkOpenFailed)),
+    );
   }
 
   @override

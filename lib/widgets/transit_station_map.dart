@@ -6,7 +6,10 @@ import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:latlong2/latlong.dart';
 
 import '../app/bus_app.dart';
+import '../core/transit_name.dart';
+import '../l10n/app_localizations.dart';
 import 'platform_map_provider.dart';
+import 'transit_station_name.dart';
 
 class TransitMapPoint {
   const TransitMapPoint({
@@ -15,6 +18,7 @@ class TransitMapPoint {
     required this.latitude,
     required this.longitude,
     this.subtitle,
+    this.name,
     this.badge,
     this.color,
   });
@@ -24,6 +28,7 @@ class TransitMapPoint {
   final double latitude;
   final double longitude;
   final String? subtitle;
+  final TransitName? name;
   final String? badge;
   final Color? color;
 
@@ -43,7 +48,7 @@ class TransitStationMap extends StatefulWidget {
     this.selectedPointId,
     this.onPointSelected,
     this.height = 320,
-    this.emptyLabel = '目前沒有可顯示的站點位置。',
+    this.emptyLabel,
     super.key,
   });
 
@@ -51,7 +56,7 @@ class TransitStationMap extends StatefulWidget {
   final String? selectedPointId;
   final ValueChanged<TransitMapPoint>? onPointSelected;
   final double height;
-  final String emptyLabel;
+  final String? emptyLabel;
 
   @override
   State<TransitStationMap> createState() => _TransitStationMapState();
@@ -253,6 +258,7 @@ class _TransitStationMapState extends State<TransitStationMap>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final selectedPointId = widget.selectedPointId;
     final orderedPoints = [
       ..._validPoints.where((point) => point.id != selectedPointId),
@@ -263,7 +269,7 @@ class _TransitStationMapState extends State<TransitStationMap>
         height: widget.height,
         child: Center(
           child: Text(
-            widget.emptyLabel,
+            widget.emptyLabel ?? l10n.mapNoLocations,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.colorScheme.outline,
             ),
@@ -350,7 +356,7 @@ class _TransitStationMapState extends State<TransitStationMap>
               child: FilledButton.tonalIcon(
                 onPressed: _fitCamera,
                 icon: const Icon(Icons.center_focus_strong_rounded),
-                label: const Text('置中'),
+                label: Text(l10n.commonCenter),
               ),
             ),
           ],
@@ -360,19 +366,26 @@ class _TransitStationMapState extends State<TransitStationMap>
   }
 
   Set<gmaps.Marker> _buildGoogleMarkers(ThemeData theme) {
+    final locale = Localizations.localeOf(context).toLanguageTag();
     return _validPoints.map((point) {
       final selected = point.id == widget.selectedPointId;
       final markerColor = point.color ?? theme.colorScheme.primary;
+      final pointLabel = point.name?.chinesePrimary ?? point.label;
       final title = point.badge?.isNotEmpty == true
-          ? '${point.badge} ${point.label}'
-          : point.label;
+          ? '${point.badge} $pointLabel'
+          : pointLabel;
       return gmaps.Marker(
         markerId: gmaps.MarkerId(point.id),
         position: toGoogleLatLng(point.latLng),
         icon: gmaps.BitmapDescriptor.defaultMarkerWithHue(
           googleMarkerHueForColor(markerColor),
         ),
-        infoWindow: gmaps.InfoWindow(title: title, snippet: point.subtitle),
+        infoWindow: gmaps.InfoWindow(
+          title: title,
+          snippet: point.name == null
+              ? point.subtitle
+              : point.name!.foreignSecondaryForLocale(locale),
+        ),
         zIndexInt: selected ? 2 : 1,
         onTap: () => widget.onPointSelected?.call(point),
       );
@@ -437,17 +450,38 @@ class _TransitPointMarker extends StatelessWidget {
               const SizedBox(width: 8),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 104),
-                child: Text(
-                  point.badge?.isNotEmpty == true
-                      ? '${point.badge} ${point.label}'
-                      : point.label,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                child: point.name == null
+                    ? Text(
+                        point.badge?.isNotEmpty == true
+                            ? '${point.badge} ${point.label}'
+                            : point.label,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (point.badge?.isNotEmpty == true) ...[
+                            Text(
+                              point.badge!,
+                              style: theme.textTheme.labelSmall,
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                          Flexible(
+                            child: TransitStationName(
+                              name: point.name!,
+                              primaryStyle: theme.textTheme.labelLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
               ),
             ],
           ),

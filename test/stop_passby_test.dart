@@ -10,10 +10,16 @@ import 'package:taiwanbus_flutter/core/stop_route_merge.dart';
 http.Response _passbyResponse({
   required String stopId,
   required String stopName,
+  String stopNameEn = 'Chung Tai University',
   required List<Map<String, Object?>> routes,
 }) {
   return http.Response(
-    jsonEncode({'stopid': stopId, 'stop_name': stopName, 'routes': routes}),
+    jsonEncode({
+      'stopid': stopId,
+      'stop_name': stopName,
+      'stop_name_en': stopNameEn,
+      'routes': routes,
+    }),
     200,
     headers: {'content-type': 'application/json'},
   );
@@ -66,8 +72,11 @@ void main() {
     expect(requestedUrl!.queryParameters['city'], 'TXG');
     expect(results, hasLength(1));
     expect(results.single.route.routeId, 'TXG0001');
+    expect(results.single.route.routeNameEn, '0001');
+    expect(results.single.route.pathNameEn, 'Outbound');
     expect(results.single.matchedStop.sec, 120);
     expect(results.single.matchedStop.stopName, '中臺科技大學');
+    expect(results.single.matchedStop.stopNameEn, 'Chung Tai University');
   });
 
   test(

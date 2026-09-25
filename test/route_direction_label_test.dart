@@ -6,6 +6,8 @@ NearbyStopResult _result({
   required String routeName,
   required String description,
   required int pathId,
+  String? routeNameEn,
+  String? pathNameEn,
   int stopId = 1,
 }) {
   return NearbyStopResult(
@@ -20,6 +22,8 @@ NearbyStopResult _result({
       category: '',
       sequence: pathId,
       rtrip: pathId,
+      routeNameEn: routeNameEn,
+      pathNameEn: pathNameEn,
     ),
     stop: StopInfo(
       routeKey: routeName.hashCode,
@@ -74,10 +78,13 @@ void main() {
       );
     });
 
-    test('returns empty when there is no name and no ordinal to fall back to', () {
-      expect(routeDirectionLabel(pathName: '', pathId: null), '');
-      expect(routeDirectionLabel(pathName: null, pathId: null), '');
-    });
+    test(
+      'returns empty when there is no name and no ordinal to fall back to',
+      () {
+        expect(routeDirectionLabel(pathName: '', pathId: null), '');
+        expect(routeDirectionLabel(pathName: null, pathId: null), '');
+      },
+    );
   });
 
   group('isMeaningfulPathName', () {
@@ -107,6 +114,29 @@ void main() {
   });
 
   group('labelNearbyRouteDirections', () {
+    test('uses the UI display rule for the current locale', () {
+      final result = _result(
+        routeName: '藍1',
+        routeNameEn: 'BL1',
+        description: '往南港',
+        pathNameEn: 'To Nangang',
+        pathId: 0,
+      );
+
+      expect(
+        labelNearbyRouteDirections([
+          result,
+        ], locale: 'zh-TW').single.directionLabel,
+        '往南港',
+      );
+      expect(
+        labelNearbyRouteDirections([
+          result,
+        ], locale: 'en').single.directionLabel,
+        '往南港\nTo Nangang',
+      );
+    });
+
     test('leaves distinct destinations alone', () {
       final rows = labelNearbyRouteDirections([
         _result(routeName: '307', description: '往撫遠街', pathId: 0),
@@ -116,26 +146,32 @@ void main() {
       expect(rows.map((row) => row.directionLabel), ['往撫遠街', '往青年公園']);
     });
 
-    test('appends the ordinal when a circular route repeats its destination', () {
-      final rows = labelNearbyRouteDirections([
-        _result(routeName: '棕20', description: '往捷運麟光新村站', pathId: 0),
-        _result(routeName: '棕20', description: '往捷運麟光新村站', pathId: 1),
-      ]);
+    test(
+      'appends the ordinal when a circular route repeats its destination',
+      () {
+        final rows = labelNearbyRouteDirections([
+          _result(routeName: '棕20', description: '往捷運麟光新村站', pathId: 0),
+          _result(routeName: '棕20', description: '往捷運麟光新村站', pathId: 1),
+        ]);
 
-      expect(rows.map((row) => row.directionLabel), [
-        '往捷運麟光新村站（去程）',
-        '往捷運麟光新村站（返程）',
-      ]);
-    });
+        expect(rows.map((row) => row.directionLabel), [
+          '往捷運麟光新村站（去程）',
+          '往捷運麟光新村站（返程）',
+        ]);
+      },
+    );
 
-    test('does not double up when both rows already fell back to the ordinal', () {
-      final rows = labelNearbyRouteDirections([
-        _result(routeName: '88', description: '', pathId: 0),
-        _result(routeName: '88', description: '', pathId: 1),
-      ]);
+    test(
+      'does not double up when both rows already fell back to the ordinal',
+      () {
+        final rows = labelNearbyRouteDirections([
+          _result(routeName: '88', description: '', pathId: 0),
+          _result(routeName: '88', description: '', pathId: 1),
+        ]);
 
-      expect(rows.map((row) => row.directionLabel), ['去程', '返程']);
-    });
+        expect(rows.map((row) => row.directionLabel), ['去程', '返程']);
+      },
+    );
 
     test('does not treat two different routes as a collision', () {
       final rows = labelNearbyRouteDirections([

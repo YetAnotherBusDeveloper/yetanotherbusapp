@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
+import '../widgets/app_dropdown.dart';
 
 class FavoriteGroupDraft {
   const FavoriteGroupDraft({required this.name, required this.kind});
@@ -16,6 +19,7 @@ Future<FavoriteGroupDraft?> showFavoriteGroupDialog(
   FavoriteItemType? compatibleItemType,
 }) async {
   final textController = TextEditingController();
+  final l10n = AppLocalizations.of(context);
   var selectedKind = initialKind;
   final selectableKinds = compatibleItemType == null
       ? FavoriteGroupKind.values
@@ -27,27 +31,29 @@ Future<FavoriteGroupDraft?> showFavoriteGroupDialog(
     builder: (context) => StatefulBuilder(
       builder: (context, setState) {
         return AlertDialog(
-          title: const Text('新增群組'),
+          title: Text(l10n.favoriteGroupAddTitle),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: textController,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: '群組名稱',
-                  hintText: '例如：回家',
+                decoration: InputDecoration(
+                  labelText: l10n.favoriteGroupNameLabel,
+                  hintText: l10n.favoriteGroupNameHint,
                 ),
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<FavoriteGroupKind>(
+              AppDropdownFormField<FavoriteGroupKind>(
                 initialValue: selectedKind,
-                decoration: const InputDecoration(labelText: '收藏類別'),
+                decoration: InputDecoration(
+                  labelText: l10n.favoriteGroupCategoryLabel,
+                ),
                 items: selectableKinds
                     .map(
                       (kind) => DropdownMenuItem(
                         value: kind,
-                        child: Text(kind.label),
+                        child: Text(localizedFavoriteGroupKind(l10n, kind)),
                       ),
                     )
                     .toList(growable: false),
@@ -62,7 +68,7 @@ Future<FavoriteGroupDraft?> showFavoriteGroupDialog(
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
+              child: Text(l10n.commonCancel),
             ),
             FilledButton(
               onPressed: () {
@@ -74,7 +80,7 @@ Future<FavoriteGroupDraft?> showFavoriteGroupDialog(
                   context,
                 ).pop(FavoriteGroupDraft(name: name, kind: selectedKind));
               },
-              child: const Text('新增'),
+              child: Text(l10n.favoriteGroupAddAction),
             ),
           ],
         );
@@ -90,6 +96,7 @@ class FavoriteGroupsScreen extends StatelessWidget {
 
   Future<void> _showAddGroupDialog(BuildContext context) async {
     final controller = AppControllerScope.read(context);
+    final l10n = AppLocalizations.of(context);
     final draft = await showFavoriteGroupDialog(context);
     if (draft == null) {
       return;
@@ -98,7 +105,7 @@ class FavoriteGroupsScreen extends StatelessWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('已有相同名稱的收藏群組。')));
+        ).showSnackBar(SnackBar(content: Text(l10n.favoriteGroupDuplicate)));
       }
       return;
     }
@@ -108,20 +115,22 @@ class FavoriteGroupsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
+    final l10n = AppLocalizations.of(context);
     final groups = controller.favoriteGroupNames;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('最愛群組'),
+        title: Text(l10n.favoriteGroupsTitle),
         actions: [
           IconButton(
+            tooltip: l10n.favoriteGroupAddAction,
             onPressed: () => _showAddGroupDialog(context),
             icon: const Icon(Icons.add_rounded),
           ),
         ],
       ),
       body: groups.isEmpty
-          ? const Center(child: Text('還沒有群組。'))
+          ? Center(child: Text(l10n.favoriteGroupsEmpty))
           : Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 760),
@@ -153,18 +162,20 @@ class FavoriteGroupsScreen extends StatelessWidget {
                           context: context,
                           builder: (context) {
                             return AlertDialog(
-                              title: const Text('刪除群組'),
-                              content: Text('確定要刪除「$group」嗎？'),
+                              title: Text(l10n.favoriteGroupDeleteTitle),
+                              content: Text(
+                                l10n.favoriteGroupDeletePrompt(group),
+                              ),
                               actions: [
                                 TextButton(
                                   onPressed: () =>
                                       Navigator.of(context).pop(false),
-                                  child: const Text('取消'),
+                                  child: Text(l10n.commonCancel),
                                 ),
                                 FilledButton(
                                   onPressed: () =>
                                       Navigator.of(context).pop(true),
-                                  child: const Text('刪除'),
+                                  child: Text(l10n.commonDelete),
                                 ),
                               ],
                             );
@@ -178,7 +189,12 @@ class FavoriteGroupsScreen extends StatelessWidget {
                       child: Card(
                         child: ListTile(
                           title: Text(group),
-                          subtitle: Text('${kind.label} · $count 個收藏'),
+                          subtitle: Text(
+                            l10n.favoriteGroupSummary(
+                              localizedFavoriteGroupKind(l10n, kind),
+                              count,
+                            ),
+                          ),
                         ),
                       ),
                     );

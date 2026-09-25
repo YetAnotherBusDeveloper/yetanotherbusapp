@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../core/friendly_error.dart';
 import '../core/weather_service.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/weather_app_bar_title.dart';
 
 /// Full weather page: current conditions, 24 hour forecast and a week ahead.
@@ -101,21 +102,30 @@ class _WeatherScreenState extends State<WeatherScreen> {
         _loading = false;
         // Strips exception prefixes and translates network/timeout errors,
         // like every other screen in the app.
-        _error = friendlyErrorMessage(error, fallback: _genericWeatherError);
+        final l10n = AppLocalizations.of(context);
+        _error = friendlyErrorMessage(
+          error,
+          fallback: l10n.weatherLoadFailed,
+          networkFallback: l10n.errorNetwork,
+          timeoutFallback: l10n.errorTimeout,
+          rateLimitedFallback: l10n.errorRateLimited,
+          preserveCjkMessage: l10n.localeName.startsWith('zh'),
+        );
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final forecast = _forecast;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('天氣'),
+        title: Text(l10n.weatherTitle),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: '重新整理',
+            tooltip: l10n.commonRefresh,
             onPressed: _loading ? null : () => _load(force: true),
           ),
         ],
@@ -140,17 +150,18 @@ class _WeatherScreenState extends State<WeatherScreen> {
   }
 
   List<Widget> _content(BuildContext context, WeatherForecast forecast) {
+    final l10n = AppLocalizations.of(context);
     return [
       _currentCard(context, forecast),
       if (forecast.hourly.isNotEmpty) ...[
         const SizedBox(height: 24),
-        _sectionTitle(context, '逐時'),
+        _sectionTitle(context, l10n.weatherHourly),
         const SizedBox(height: 8),
         _hourlyStrip(context, forecast.hourly),
       ],
       if (forecast.daily.isNotEmpty) ...[
         const SizedBox(height: 24),
-        _sectionTitle(context, '一週'),
+        _sectionTitle(context, l10n.weatherWeekly),
         const SizedBox(height: 8),
         _weeklyList(context, forecast.daily),
       ],
@@ -174,6 +185,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
   Widget _currentCard(BuildContext context, WeatherForecast forecast) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final colorScheme = theme.colorScheme;
     final current = forecast.current;
     final today = forecast.daily.isNotEmpty ? forecast.daily.first : null;
@@ -191,7 +203,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              '${current.displayTemperature}°C',
+              l10n.temperatureCelsius(current.displayTemperature),
               style: theme.textTheme.displaySmall?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
@@ -211,7 +223,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
             if (today != null) ...[
               const SizedBox(height: 4),
               Text(
-                '最高 ${today.displayHigh}° · 最低 ${today.displayLow}°',
+                l10n.weatherHighLow(today.displayHigh, today.displayLow),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -227,29 +239,33 @@ class _WeatherScreenState extends State<WeatherScreen> {
                   _metric(
                     context,
                     Icons.thermostat,
-                    '體感',
-                    '${forecast.apparentTemperatureC!.round()}°',
+                    l10n.weatherFeelsLike,
+                    l10n.temperatureDegrees(
+                      forecast.apparentTemperatureC!.round(),
+                    ),
                   ),
                 if (forecast.relativeHumidity != null)
                   _metric(
                     context,
                     Icons.water_drop_outlined,
-                    '濕度',
-                    '${forecast.relativeHumidity}%',
+                    l10n.weatherHumidity,
+                    l10n.commonPercentage(forecast.relativeHumidity!),
                   ),
                 if (forecast.windSpeedKph != null)
                   _metric(
                     context,
                     Icons.air,
-                    '風速',
-                    '${forecast.windSpeedKph!.round()} km/h',
+                    l10n.weatherWindSpeed,
+                    l10n.speedKilometersPerHour(
+                      forecast.windSpeedKph!.round(),
+                    ),
                   ),
                 if (today?.precipitationProbability != null)
                   _metric(
                     context,
                     Icons.umbrella_outlined,
-                    '降雨',
-                    '${today!.precipitationProbability}%',
+                    l10n.weatherPrecipitation,
+                    l10n.commonPercentage(today!.precipitationProbability!),
                   ),
               ],
             ),
@@ -290,6 +306,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
   Widget _hourlyStrip(BuildContext context, List<WeatherHourly> hours) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return SizedBox(
       height: 132,
       child: ListView.separated(
@@ -304,7 +321,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  index == 0 ? '現在' : '${hour.time.hour}時',
+                  index == 0
+                      ? l10n.weatherNow
+                      : l10n.weatherHour(hour.time.hour),
                   style: theme.textTheme.bodySmall,
                 ),
                 const SizedBox(height: 8),
@@ -315,7 +334,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${hour.displayTemperature}°',
+                  l10n.temperatureDegrees(hour.displayTemperature),
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -325,7 +344,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
                   // A blank line keeps every cell the same height.
                   hour.precipitationProbability == null
                       ? ''
-                      : '${hour.precipitationProbability}%',
+                      : l10n.commonPercentage(
+                          hour.precipitationProbability!,
+                        ),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.primary,
                   ),
@@ -368,6 +389,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
     double weekHigh,
   ) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Row(
@@ -375,7 +397,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
           SizedBox(
             width: 44,
             child: Text(
-              dayLabel(day.date, index),
+              _localizedDayLabel(l10n, day.date, index),
               style: theme.textTheme.bodyMedium,
             ),
           ),
@@ -389,7 +411,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
             child: Text(
               day.precipitationProbability == null
                   ? ''
-                  : '${day.precipitationProbability}%',
+                  : l10n.commonPercentage(day.precipitationProbability!),
               textAlign: TextAlign.end,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.primary,
@@ -400,7 +422,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
           SizedBox(
             width: 32,
             child: Text(
-              '${day.displayLow}°',
+              l10n.temperatureDegrees(day.displayLow),
               textAlign: TextAlign.end,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -413,7 +435,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
           SizedBox(
             width: 32,
             child: Text(
-              '${day.displayHigh}°',
+              l10n.temperatureDegrees(day.displayHigh),
               style: theme.textTheme.bodyMedium,
             ),
           ),
@@ -470,6 +492,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
   }
 
   Widget _sunRow(BuildContext context, WeatherForecast forecast) {
+    final l10n = AppLocalizations.of(context);
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -480,13 +503,13 @@ class _WeatherScreenState extends State<WeatherScreen> {
             _metric(
               context,
               Icons.wb_twilight,
-              '日出',
+              l10n.weatherSunrise,
               clockLabel(forecast.sunrise),
             ),
             _metric(
               context,
               Icons.nightlight_outlined,
-              '日落',
+              l10n.weatherSunset,
               clockLabel(forecast.sunset),
             ),
           ],
@@ -497,8 +520,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
   Widget _footer(BuildContext context, WeatherForecast forecast) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Text(
-      '資料來源：中央氣象署 · 更新於 ${clockLabel(forecast.fetchedAt)}',
+      l10n.weatherSourceUpdated(clockLabel(forecast.fetchedAt)),
       textAlign: TextAlign.center,
       style: theme.textTheme.bodySmall?.copyWith(
         color: theme.colorScheme.onSurfaceVariant,
@@ -508,9 +532,10 @@ class _WeatherScreenState extends State<WeatherScreen> {
 
   Widget _placeholder(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final message = _locationUnavailable
-        ? '無法取得目前位置，因此無法顯示天氣。請確認定位服務與定位權限已開啟。'
-        : (_error ?? _genericWeatherError);
+        ? l10n.weatherLocationUnavailable
+        : (_error ?? l10n.weatherLoadFailed);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 72, horizontal: 24),
@@ -532,12 +557,35 @@ class _WeatherScreenState extends State<WeatherScreen> {
           const SizedBox(height: 16),
           FilledButton.tonal(
             onPressed: () => _load(force: true),
-            child: const Text('重試'),
+            child: Text(l10n.commonRetry),
           ),
         ],
       ),
     );
   }
+}
+
+String _localizedDayLabel(
+  AppLocalizations l10n,
+  DateTime date,
+  int index,
+) {
+  if (index == 0) {
+    return l10n.weatherToday;
+  }
+  if (index == 1) {
+    return l10n.weatherTomorrow;
+  }
+  final weekday = switch (date.weekday) {
+    DateTime.monday => l10n.scheduleWeekdayMon,
+    DateTime.tuesday => l10n.scheduleWeekdayTue,
+    DateTime.wednesday => l10n.scheduleWeekdayWed,
+    DateTime.thursday => l10n.scheduleWeekdayThu,
+    DateTime.friday => l10n.scheduleWeekdayFri,
+    DateTime.saturday => l10n.scheduleWeekdaySat,
+    _ => l10n.scheduleWeekdaySun,
+  };
+  return l10n.weatherWeekday(weekday);
 }
 
 /// Zero padded `HH:MM`, or `--:--` when the time is unknown.
@@ -566,5 +614,3 @@ String dayLabel(DateTime date, int index) {
   // DateTime.weekday is 1 (Monday) through 7 (Sunday).
   return '週${_weekdayNames[date.weekday - 1]}';
 }
-
-const String _genericWeatherError = '無法載入天氣資料，請稍後再試。';

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/announcement_content.dart';
 import '../widgets/announcement_reaction_bar.dart';
 
@@ -32,6 +33,7 @@ class _AnnouncementDetailPageState extends State<AnnouncementDetailPage> {
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return AnimatedBuilder(
       animation: controller,
@@ -42,10 +44,10 @@ class _AnnouncementDetailPageState extends State<AnnouncementDetailPage> {
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(announcement?.title ?? '公告'),
+            title: Text(announcement?.title ?? l10n.announcementsTitle),
             actions: [
               IconButton(
-                tooltip: '重新整理',
+                tooltip: l10n.commonRefresh,
                 onPressed: loading ? null : _refresh,
                 icon: loading
                     ? const SizedBox.square(
@@ -75,18 +77,24 @@ class _AnnouncementDetailPageState extends State<AnnouncementDetailPage> {
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          '找不到這則公告。',
+                                          l10n.announcementNotFound,
                                           style: theme.textTheme.titleMedium,
                                         ),
                                         if (error != null) ...[
                                           const SizedBox(height: 8),
-                                          Text(error),
+                                          Text(
+                                            l10n.localeName.startsWith('zh')
+                                                ? error
+                                                : l10n.errorGeneric,
+                                          ),
                                         ],
                                         const SizedBox(height: 12),
                                         FilledButton.tonalIcon(
                                           onPressed: _refresh,
                                           icon: const Icon(Icons.refresh_rounded),
-                                          label: const Text('重新同步公告'),
+                                          label: Text(
+                                            l10n.announcementResync,
+                                          ),
                                         ),
                                       ],
                                     )
@@ -98,7 +106,11 @@ class _AnnouncementDetailPageState extends State<AnnouncementDetailPage> {
                                             color: theme.colorScheme.errorContainer,
                                             child: Padding(
                                               padding: const EdgeInsets.all(16),
-                                              child: Text(error),
+                                              child: Text(
+                                                l10n.localeName.startsWith('zh')
+                                                    ? error
+                                                    : l10n.errorGeneric,
+                                              ),
                                             ),
                                           ),
                                           const SizedBox(height: 16),

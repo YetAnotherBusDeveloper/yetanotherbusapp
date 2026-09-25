@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'transit_name.dart';
+
 enum BusProvider {
   kee('KEE', '基隆市', 25.1283, 121.7419),
   tpe('TPE', '台北市', 25.0330, 121.5654),
@@ -151,6 +153,28 @@ ThemeMode themeModeFromString(String value) {
     (mode) => mode.name == value,
     orElse: () => ThemeMode.system,
   );
+}
+
+enum AppLanguage { system, traditionalChinese, english }
+
+AppLanguage appLanguageFromString(Object? value) {
+  return AppLanguage.values.firstWhere(
+    (language) => language.name == value,
+    orElse: () => AppLanguage.system,
+  );
+}
+
+double _interfaceScaleFromJson(Object? value) {
+  if (value is! num) {
+    return AppSettings.defaultInterfaceScale;
+  }
+  final scale = value.toDouble();
+  if (!scale.isFinite) {
+    return AppSettings.defaultInterfaceScale;
+  }
+  return scale
+      .clamp(AppSettings.minInterfaceScale, AppSettings.maxInterfaceScale)
+      .toDouble();
 }
 
 enum MobileMapProvider {
@@ -327,12 +351,18 @@ class DatabaseStartupCheckResult {
 }
 
 class AppSettings {
+  static const minInterfaceScale = 0.8;
+  static const maxInterfaceScale = 1.3;
+  static const defaultInterfaceScale = 1.0;
+
   const AppSettings({
     required this.provider,
     required this.selectedProviders,
     required this.skipDownloadPromptProviders,
     required this.readRouteAlerts,
     required this.themeMode,
+    required this.language,
+    required double interfaceScale,
     required this.mobileMapProvider,
     required this.useAmoledDark,
     required this.colorSource,
@@ -368,7 +398,13 @@ class AppSettings {
     required this.wearSmartSuggestionsEnabled,
     required this.enableAds,
     this.adDensity = 1,
-  });
+  }) : interfaceScale = interfaceScale != interfaceScale
+           ? defaultInterfaceScale
+           : interfaceScale < minInterfaceScale
+           ? minInterfaceScale
+           : interfaceScale > maxInterfaceScale
+           ? maxInterfaceScale
+           : interfaceScale;
 
   factory AppSettings.defaults() {
     return AppSettings(
@@ -377,6 +413,8 @@ class AppSettings {
       skipDownloadPromptProviders: const [],
       readRouteAlerts: const [],
       themeMode: ThemeMode.system,
+      language: AppLanguage.system,
+      interfaceScale: defaultInterfaceScale,
       mobileMapProvider: MobileMapProvider.googleMaps,
       useAmoledDark: false,
       colorSource: AppColorSource.system,
@@ -468,6 +506,8 @@ class AppSettings {
           )
           .toList(),
       themeMode: themeModeFromString(json['themeMode'] as String? ?? 'system'),
+      language: appLanguageFromString(json['language']),
+      interfaceScale: _interfaceScaleFromJson(json['interfaceScale']),
       mobileMapProvider: mobileMapProviderFromString(
         json['mobileMapProvider'] as String? ?? 'googleMaps',
       ),
@@ -564,6 +604,8 @@ class AppSettings {
   final List<BusProvider> skipDownloadPromptProviders;
   final List<ReadRouteAlert> readRouteAlerts;
   final ThemeMode themeMode;
+  final AppLanguage language;
+  final double interfaceScale;
   final MobileMapProvider mobileMapProvider;
   final bool useAmoledDark;
   final AppColorSource colorSource;
@@ -606,6 +648,8 @@ class AppSettings {
     List<BusProvider>? skipDownloadPromptProviders,
     List<ReadRouteAlert>? readRouteAlerts,
     ThemeMode? themeMode,
+    AppLanguage? language,
+    double? interfaceScale,
     MobileMapProvider? mobileMapProvider,
     bool? useAmoledDark,
     AppColorSource? colorSource,
@@ -650,6 +694,8 @@ class AppSettings {
           skipDownloadPromptProviders ?? this.skipDownloadPromptProviders,
       readRouteAlerts: readRouteAlerts ?? this.readRouteAlerts,
       themeMode: themeMode ?? this.themeMode,
+      language: language ?? this.language,
+      interfaceScale: interfaceScale ?? this.interfaceScale,
       mobileMapProvider: mobileMapProvider ?? this.mobileMapProvider,
       useAmoledDark: useAmoledDark ?? this.useAmoledDark,
       colorSource: colorSource ?? this.colorSource,
@@ -718,6 +764,8 @@ class AppSettings {
           .toList(),
       'read_alerts': readRouteAlerts.map((entry) => entry.toJson()).toList(),
       'themeMode': themeMode.name,
+      'language': language.name,
+      'interfaceScale': interfaceScale,
       'mobileMapProvider': mobileMapProvider.name,
       'useAmoledDark': useAmoledDark,
       'colorSource': colorSource.name,
@@ -764,10 +812,18 @@ class SearchHistoryEntry {
     required this.routeKey,
     required this.routeName,
     this.routeId,
-    this.pathId,
-    this.pathName,
+    int? departurePathId,
+    String? departurePathName,
+    int? pathId,
+    String? pathName,
+    this.boardingStopId,
+    this.boardingStopName,
+    this.destinationPathId,
+    this.destinationStopId,
+    this.destinationStopName,
     required this.timestampMs,
-  });
+  }) : departurePathId = departurePathId ?? pathId,
+       departurePathName = departurePathName ?? pathName;
 
   factory SearchHistoryEntry.fromJson(Map<String, dynamic> json) {
     return SearchHistoryEntry(
@@ -777,9 +833,25 @@ class SearchHistoryEntry {
       routeId: (json['routeId'] as String?)?.trim().isNotEmpty == true
           ? (json['routeId'] as String).trim()
           : null,
-      pathId: (json['pathId'] as num?)?.toInt(),
-      pathName: (json['pathName'] as String?)?.trim().isNotEmpty == true
+      departurePathId:
+          (json['departurePathId'] as num?)?.toInt() ??
+          (json['pathId'] as num?)?.toInt(),
+      departurePathName:
+          (json['departurePathName'] as String?)?.trim().isNotEmpty == true
+          ? (json['departurePathName'] as String).trim()
+          : (json['pathName'] as String?)?.trim().isNotEmpty == true
           ? (json['pathName'] as String).trim()
+          : null,
+      boardingStopId: (json['boardingStopId'] as num?)?.toInt(),
+      boardingStopName:
+          (json['boardingStopName'] as String?)?.trim().isNotEmpty == true
+          ? (json['boardingStopName'] as String).trim()
+          : null,
+      destinationPathId: (json['destinationPathId'] as num?)?.toInt(),
+      destinationStopId: (json['destinationStopId'] as num?)?.toInt(),
+      destinationStopName:
+          (json['destinationStopName'] as String?)?.trim().isNotEmpty == true
+          ? (json['destinationStopName'] as String).trim()
           : null,
       timestampMs: (json['timestampMs'] as num?)?.toInt() ?? 0,
     );
@@ -789,9 +861,17 @@ class SearchHistoryEntry {
   final int routeKey;
   final String routeName;
   final String? routeId;
-  final int? pathId;
-  final String? pathName;
+  final int? departurePathId;
+  final String? departurePathName;
+  final int? boardingStopId;
+  final String? boardingStopName;
+  final int? destinationPathId;
+  final int? destinationStopId;
+  final String? destinationStopName;
   final int timestampMs;
+
+  int? get pathId => departurePathId;
+  String? get pathName => departurePathName;
 
   Map<String, dynamic> toJson() {
     return {
@@ -799,11 +879,129 @@ class SearchHistoryEntry {
       'routeKey': routeKey,
       'routeName': routeName,
       if (routeId != null) 'routeId': routeId,
-      if (pathId != null) 'pathId': pathId,
-      if (pathName != null) 'pathName': pathName,
+      if (departurePathId != null) ...{
+        'departurePathId': departurePathId,
+        'pathId': departurePathId,
+      },
+      if (departurePathName != null) ...{
+        'departurePathName': departurePathName,
+        'pathName': departurePathName,
+      },
+      if (boardingStopId != null) 'boardingStopId': boardingStopId,
+      if (boardingStopName != null) 'boardingStopName': boardingStopName,
+      if (destinationPathId != null) 'destinationPathId': destinationPathId,
+      if (destinationStopId != null) 'destinationStopId': destinationStopId,
+      if (destinationStopName != null)
+        'destinationStopName': destinationStopName,
       'timestampMs': timestampMs,
     };
   }
+}
+
+class DestinationChoiceProfile {
+  static const Duration selectionHistoryRetention = Duration(days: 7);
+
+  const DestinationChoiceProfile({
+    required this.provider,
+    required this.routeKey,
+    required this.departurePathId,
+    required this.boardingStopId,
+    required this.destinationPathId,
+    required this.destinationStopId,
+    this.destinationStopName,
+    this.selectionTimestampsMs = const <int>[],
+  });
+
+  factory DestinationChoiceProfile.fromJson(Map<String, dynamic> json) {
+    return DestinationChoiceProfile(
+      provider: busProviderFromString(json['provider'] as String? ?? 'tpe'),
+      routeKey: (json['routeKey'] as num?)?.toInt() ?? 0,
+      departurePathId:
+          (json['departurePathId'] as num?)?.toInt() ??
+          (json['pathId'] as num?)?.toInt() ??
+          -1,
+      boardingStopId: (json['boardingStopId'] as num?)?.toInt() ?? 0,
+      destinationPathId: (json['destinationPathId'] as num?)?.toInt() ?? -1,
+      destinationStopId: (json['destinationStopId'] as num?)?.toInt() ?? 0,
+      destinationStopName:
+          (json['destinationStopName'] as String?)?.trim().isNotEmpty == true
+          ? (json['destinationStopName'] as String).trim()
+          : null,
+      selectionTimestampsMs: _decodeDestinationChoiceTimestamps(
+        json['selectionTimestampsMs'],
+      ),
+    );
+  }
+
+  final BusProvider provider;
+  final int routeKey;
+  final int departurePathId;
+  final int boardingStopId;
+  final int destinationPathId;
+  final int destinationStopId;
+  final String? destinationStopName;
+  final List<int> selectionTimestampsMs;
+
+  List<int> selectionTimestampsWithin({DateTime? now}) {
+    final cutoffMs = (now ?? DateTime.now())
+        .subtract(selectionHistoryRetention)
+        .millisecondsSinceEpoch;
+    return selectionTimestampsMs.where((value) => value >= cutoffMs).toList()
+      ..sort();
+  }
+
+  int selectionCount({DateTime? now}) =>
+      selectionTimestampsWithin(now: now).length;
+
+  int lastSelectedAtMs({DateTime? now}) {
+    final timestamps = selectionTimestampsWithin(now: now);
+    return timestamps.isEmpty ? 0 : timestamps.last;
+  }
+
+  DestinationChoiceProfile recordSelection(
+    DateTime selectedAt, {
+    String? destinationStopName,
+  }) {
+    return DestinationChoiceProfile(
+      provider: provider,
+      routeKey: routeKey,
+      departurePathId: departurePathId,
+      boardingStopId: boardingStopId,
+      destinationPathId: destinationPathId,
+      destinationStopId: destinationStopId,
+      destinationStopName: destinationStopName?.trim().isNotEmpty == true
+          ? destinationStopName!.trim()
+          : this.destinationStopName,
+      selectionTimestampsMs: <int>[
+        ...selectionTimestampsWithin(now: selectedAt),
+        selectedAt.millisecondsSinceEpoch,
+      ]..sort(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'provider': provider.name,
+    'routeKey': routeKey,
+    'departurePathId': departurePathId,
+    'boardingStopId': boardingStopId,
+    'destinationPathId': destinationPathId,
+    'destinationStopId': destinationStopId,
+    if (destinationStopName != null) 'destinationStopName': destinationStopName,
+    'selectionTimestampsMs': selectionTimestampsWithin(),
+  };
+}
+
+List<int> _decodeDestinationChoiceTimestamps(Object? value) {
+  if (value is! List) return const <int>[];
+  final cutoffMs = DateTime.now()
+      .subtract(DestinationChoiceProfile.selectionHistoryRetention)
+      .millisecondsSinceEpoch;
+  return value
+      .whereType<num>()
+      .map((item) => item.toInt())
+      .where((item) => item >= cutoffMs)
+      .toList()
+    ..sort();
 }
 
 enum FavoriteItemType { route, station, boarding }
@@ -1429,6 +1627,8 @@ class RouteSummary {
     required this.category,
     required this.sequence,
     required this.rtrip,
+    this.routeNameEn,
+    this.pathNameEn,
   });
 
   factory RouteSummary.fromMap(Map<String, Object?> map) {
@@ -1443,6 +1643,10 @@ class RouteSummary {
       category: map['category'] as String? ?? '',
       sequence: (map['sequence'] as num?)?.toInt() ?? 0,
       rtrip: (map['rtrip'] as num?)?.toInt() ?? 0,
+      routeNameEn:
+          normalizeTransitNamePart(map['route_name_en']) ??
+          normalizeTransitNamePart(map['official_route_name']),
+      pathNameEn: normalizeTransitNamePart(map['path_name_en']),
     );
   }
 
@@ -1452,10 +1656,21 @@ class RouteSummary {
   final String routeId;
   final String routeName;
   final String officialRouteName;
+  final String? routeNameEn;
+  final String? pathNameEn;
   final String description;
   final String category;
   final int sequence;
   final int rtrip;
+
+  TransitName get transitName =>
+      TransitName(zh: routeName, en: routeNameEn, stableId: routeId);
+
+  TransitName get transitPathName => TransitName(
+    zh: description,
+    en: pathNameEn,
+    stableId: '$routeId:$sequence',
+  );
 }
 
 class PathInfo {
@@ -1463,6 +1678,7 @@ class PathInfo {
     required this.routeKey,
     required this.pathId,
     required this.name,
+    this.nameEn,
   });
 
   factory PathInfo.fromMap(Map<String, Object?> map) {
@@ -1470,12 +1686,17 @@ class PathInfo {
       routeKey: (map['route_key'] as num?)?.toInt() ?? 0,
       pathId: (map['path_id'] as num?)?.toInt() ?? 0,
       name: map['path_name'] as String? ?? '',
+      nameEn: normalizeTransitNamePart(map['path_name_en']),
     );
   }
 
   final int routeKey;
   final int pathId;
   final String name;
+  final String? nameEn;
+
+  TransitName get transitName =>
+      TransitName(zh: name, en: nameEn, stableId: '$routeKey:$pathId');
 }
 
 class RoutePathPoint {
@@ -1537,11 +1758,16 @@ class CityBusRouteInfo {
     required this.routeId,
     required this.name,
     this.routeUid,
+    this.nameEn,
   });
 
   final String routeId;
   final String name;
   final String? routeUid;
+  final String? nameEn;
+
+  TransitName get transitName =>
+      TransitName(zh: name, en: nameEn, stableId: routeId);
 }
 
 /// A RouteUID whose buses could not be pinned to one variant.
@@ -1555,16 +1781,21 @@ class CityBusFamily {
     required this.routeIds,
     this.stopsRouteId,
     this.geometryRouteId,
+    this.nameEn,
   });
 
   final String routeUid;
   final String name;
+  final String? nameEn;
   final List<String> routeIds;
   final String? stopsRouteId;
   final String? geometryRouteId;
 
   /// True when the server had no readable name for any family member.
   bool get isBareCode => name == routeUid;
+
+  TransitName get transitName =>
+      TransitName(zh: name, en: nameEn, stableId: routeUid);
 }
 
 /// Every live bus in one city at one moment.
@@ -1599,6 +1830,16 @@ class CityBusSnapshot {
       return routes[routeId]?.name ?? routeId;
     }
     return families[bus.routeUid]?.name ?? bus.routeUid;
+  }
+
+  TransitName transitNameFor(CityBus bus) {
+    final routeId = bus.routeId;
+    if (routeId != null) {
+      return routes[routeId]?.transitName ??
+          TransitName(zh: null, en: null, stableId: routeId);
+    }
+    return families[bus.routeUid]?.transitName ??
+        TransitName(zh: null, en: null, stableId: bus.routeUid);
   }
 
   /// The route to open in 路線詳情 and load stops from, if there is one.
@@ -1765,6 +2006,7 @@ class StopInfo {
     required this.lon,
     required this.lat,
     this.rawStopId,
+    this.stopNameEn,
     this.sec,
     this.msg,
     this.t,
@@ -1778,6 +2020,7 @@ class StopInfo {
       pathId: (map['path_id'] as num?)?.toInt() ?? 0,
       stopId: (map['stop_id'] as num?)?.toInt() ?? 0,
       stopName: map['stop_name'] as String? ?? '',
+      stopNameEn: normalizeTransitNamePart(map['stop_name_en']),
       sequence: (map['sequence'] as num?)?.toInt() ?? 0,
       lon: (map['lon'] as num?)?.toDouble() ?? 0,
       lat: (map['lat'] as num?)?.toDouble() ?? 0,
@@ -1788,6 +2031,7 @@ class StopInfo {
   final int pathId;
   final int stopId;
   final String stopName;
+  final String? stopNameEn;
   final int sequence;
   final double lon;
   final double lat;
@@ -1803,6 +2047,12 @@ class StopInfo {
   final String? t;
   final List<BusVehicle> buses;
   final List<StopEta> etas;
+
+  TransitName get transitName => TransitName(
+    zh: stopName,
+    en: stopNameEn,
+    stableId: rawStopId ?? stopId.toString(),
+  );
 
   StopInfo copyWith({
     int? sec,
@@ -1820,6 +2070,7 @@ class StopInfo {
       lon: lon,
       lat: lat,
       rawStopId: rawStopId,
+      stopNameEn: stopNameEn,
       sec: sec ?? this.sec,
       msg: msg ?? this.msg,
       t: t ?? this.t,
@@ -1912,6 +2163,9 @@ class StationPassbyData {
   final double lat;
   final double lon;
   final List<StationSideData> sides;
+
+  TransitName get transitName =>
+      TransitName(zh: stationName, en: stationNameEn, stableId: stationId);
 
   Iterable<StationRouteArrival> get routes =>
       sides.expand((side) => side.routes);
@@ -2133,6 +2387,10 @@ EtaPresentation buildEtaPresentation(
   required bool alwaysShowSeconds,
   Brightness brightness = Brightness.light,
   ColorScheme? colorScheme,
+  String arrivingText = '進站中',
+  String Function(int seconds)? secondsText,
+  String Function(int minutes)? minutesText,
+  String Function(int minutes, int seconds)? minutesSecondsText,
 }) {
   final isDark = brightness == Brightness.dark;
   final cs = colorScheme;
@@ -2160,7 +2418,7 @@ EtaPresentation buildEtaPresentation(
 
   if (seconds <= 0) {
     return EtaPresentation(
-      text: '進站中',
+      text: arrivingText,
       backgroundColor: const Color(0xFF8B1A1A),
       foregroundColor: Colors.white,
     );
@@ -2168,7 +2426,7 @@ EtaPresentation buildEtaPresentation(
 
   if (seconds < 60) {
     return EtaPresentation(
-      text: '$seconds秒',
+      text: secondsText?.call(seconds) ?? '$seconds秒',
       backgroundColor: Colors.red.shade600,
       foregroundColor: Colors.white,
     );
@@ -2179,7 +2437,10 @@ EtaPresentation buildEtaPresentation(
   final urgent = minutes < 3;
 
   return EtaPresentation(
-    text: alwaysShowSeconds ? '$minutes分\n$leftoverSeconds秒' : '$minutes分',
+    text: alwaysShowSeconds
+        ? minutesSecondsText?.call(minutes, leftoverSeconds) ??
+              '$minutes分\n$leftoverSeconds秒'
+        : minutesText?.call(minutes) ?? '$minutes分',
     backgroundColor: urgent
         ? Colors.orange.shade700
         : cs?.primaryContainer ??

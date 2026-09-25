@@ -6,6 +6,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../app/bus_app.dart';
 import '../core/app_motion.dart';
 import '../core/desktop_discord_presence_service.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/transit_drawer.dart';
 import 'home_screen.dart';
@@ -85,12 +86,13 @@ class _MainTransitShellState extends State<MainTransitShell>
 
   Future<void> _syncDesktopPresenceForMode(TransitMode mode) async {
     final controller = AppControllerScope.read(context);
+    final l10n = AppLocalizations.of(context);
     final screenLabel = switch (mode) {
-      TransitMode.bus => '公車首頁',
-      TransitMode.metro => '捷運',
-      TransitMode.thsr => '高鐵',
-      TransitMode.tra => '台鐵',
-      TransitMode.youbike => 'YouBike',
+      TransitMode.bus => l10n.transitBusHomePresence,
+      TransitMode.metro => l10n.transitMetro,
+      TransitMode.thsr => l10n.transitThsr,
+      TransitMode.tra => l10n.transitTra,
+      TransitMode.youbike => l10n.transitYouBike,
     };
     final provider = switch (mode) {
       TransitMode.bus => controller.settings.provider,
@@ -105,6 +107,7 @@ class _MainTransitShellState extends State<MainTransitShell>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final isMobile = screenWidth < kDesktopNavigationRailBreakpoint;
     final screens = kTransitModeDestinations
@@ -184,7 +187,7 @@ class _MainTransitShellState extends State<MainTransitShell>
               NavigationRailDestination(
                 icon: Icon(destination.icon),
                 selectedIcon: Icon(destination.icon),
-                label: Text(destination.label),
+                label: Text(_transitModeLabel(l10n, destination.mode)),
               ),
           ],
         ),
@@ -200,6 +203,7 @@ class _MainTransitShellState extends State<MainTransitShell>
 
   Widget _buildModeNavigation() {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     // NavigationBar has its own SafeArea. The status-bar inset belongs to
     // the page above, not to this bottom bar; keep the other insets intact.
     return MediaQuery.removePadding(
@@ -232,7 +236,7 @@ class _MainTransitShellState extends State<MainTransitShell>
                 NavigationDestination(
                   icon: Icon(destination.icon),
                   selectedIcon: Icon(destination.icon),
-                  label: destination.label,
+                  label: _transitModeLabel(l10n, destination.mode),
                 ),
             ],
           ),
@@ -294,4 +298,14 @@ class _MainTransitShellState extends State<MainTransitShell>
       ),
     );
   }
+}
+
+String _transitModeLabel(AppLocalizations l10n, TransitMode mode) {
+  return switch (mode) {
+    TransitMode.bus => l10n.transitBus,
+    TransitMode.metro => l10n.transitMetro,
+    TransitMode.thsr => l10n.transitThsr,
+    TransitMode.tra => l10n.transitTra,
+    TransitMode.youbike => l10n.transitYouBike,
+  };
 }

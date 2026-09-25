@@ -16,6 +16,7 @@ class StorageService {
   static const _routeUsageProfilesKey = 'route_usage_profiles';
   static const _favoriteUsageProfilesKey = 'favorite_usage_profiles';
   static const _stopVisitProfilesKey = 'stop_visit_profiles';
+  static const _destinationChoiceProfilesKey = 'destination_choice_profiles';
   static const _announcementLocalStateKey = 'announcement_local_state';
   static const _settingsLastModifiedAtKey = 'app_settings_last_modified_at_ms';
   static const _favoritesLastModifiedAtKey =
@@ -193,8 +194,7 @@ class StorageService {
       }
     }
     return {
-      for (final name in names)
-        name: FavoriteGroupKind.fromJson(decoded[name]),
+      for (final name in names) name: FavoriteGroupKind.fromJson(decoded[name]),
     };
   }
 
@@ -309,6 +309,43 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _stopVisitProfilesKey,
+      jsonEncode(profiles.map((entry) => entry.toJson()).toList()),
+    );
+  }
+
+  Future<List<DestinationChoiceProfile>> loadDestinationChoiceProfiles() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_destinationChoiceProfilesKey);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw) as List<dynamic>;
+      return decoded
+          .whereType<Map>()
+          .map(
+            (entry) => DestinationChoiceProfile.fromJson(
+              entry.map((key, value) => MapEntry(key.toString(), value)),
+            ),
+          )
+          .where(
+            (entry) =>
+                entry.routeKey > 0 &&
+                entry.departurePathId >= 0 &&
+                entry.boardingStopId > 0 &&
+                entry.destinationPathId >= 0 &&
+                entry.destinationStopId > 0,
+          )
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> saveDestinationChoiceProfiles(
+    List<DestinationChoiceProfile> profiles,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _destinationChoiceProfilesKey,
       jsonEncode(profiles.map((entry) => entry.toJson()).toList()),
     );
   }

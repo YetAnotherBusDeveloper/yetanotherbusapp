@@ -11,13 +11,17 @@ import 'package:latlong2/latlong.dart';
 
 import '../app/bus_app.dart';
 import '../core/app_motion.dart';
-import '../core/friendly_error.dart';
 import '../core/models.dart';
+import '../core/transit_name.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
+import 'app_dropdown.dart';
 import 'bus_map_geometry.dart';
 import 'bus_map_markers.dart';
 import 'bus_map_motion.dart';
 import 'eta_badge.dart';
 import 'platform_map_provider.dart';
+import 'transit_station_name.dart';
 
 class RouteBusMapSheet extends StatefulWidget {
   const RouteBusMapSheet({
@@ -25,6 +29,7 @@ class RouteBusMapSheet extends StatefulWidget {
     required this.provider,
     required this.routeId,
     required this.routeName,
+    this.routeNameEn,
     required this.paths,
     required this.stopsByPath,
     this.familyRouteIds = const [],
@@ -47,6 +52,7 @@ class RouteBusMapSheet extends StatefulWidget {
   final String routeId;
   final String? routeIdHint;
   final String routeName;
+  final String? routeNameEn;
   final List<PathInfo> paths;
   final Map<int, List<StopInfo>> stopsByPath;
   final List<String> familyRouteIds;
@@ -509,7 +515,10 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
       if (busesResult.error != null) {
         setState(() {
           _isRefreshing = false;
-          _error = friendlyErrorMessage(busesResult.error!);
+          _error = localizedFriendlyError(
+            AppLocalizations.of(context),
+            busesResult.error!,
+          );
         });
         _scheduleNextRefresh();
         return;
@@ -566,7 +575,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
       }
       setState(() {
         _isRefreshing = false;
-        _error = friendlyErrorMessage(error);
+        _error = localizedFriendlyError(AppLocalizations.of(context), error);
       });
       _scheduleNextRefresh();
     }
@@ -945,14 +954,15 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
   }
 
   String _refreshLabel() {
+    final l10n = AppLocalizations.of(context);
     if (_isRefreshing) {
-      return '更新中';
+      return l10n.routeMapRefreshing;
     }
     final secondsRemaining = math.max(
       0,
       ((_refreshSeconds * (1 - _refreshProgressController.value))).ceil(),
     );
-    return '$secondsRemaining 秒後更新';
+    return l10n.routeMapRefreshCountdown(secondsRemaining);
   }
 
   Alignment _selectedPopupAlignment(LatLng point) {
@@ -998,6 +1008,13 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
   }
 
   Widget _buildHeader(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
+    final routeName = TransitName(
+      zh: widget.routeName,
+      en: widget.routeNameEn,
+      stableId: widget.routeId,
+    ).displayForLocale(locale);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Column(
@@ -1022,17 +1039,19 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '公車地圖',
+                      l10n.routeMapTitle,
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      widget.routeName,
+                      routeName,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -1048,7 +1067,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                     }
                   });
                 },
-                tooltip: '公車',
+                tooltip: l10n.routeMapToggleBuses,
                 icon: Icon(
                   Icons.directions_bus_rounded,
                   color: _showBuses
@@ -1068,7 +1087,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                     }
                   });
                 },
-                tooltip: '站牌',
+                tooltip: l10n.routeMapToggleStops,
                 icon: Icon(
                   Icons.signpost_rounded,
                   color: _showStops
@@ -1100,35 +1119,26 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
           ),
           if (widget.paths.length > 1) ...[
             const SizedBox(height: 12),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    value: _activePathId,
-                    isExpanded: true,
-                    borderRadius: BorderRadius.circular(16),
-                    items: widget.paths
-                        .map(
-                          (path) => DropdownMenuItem<int>(
-                            value: path.pathId,
-                            child: Text(path.name),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      _switchPath(value, notifyParent: true);
-                    },
-                  ),
-                ),
-              ),
+            AppDropdown<int>(
+              value: _activePathId,
+              items: widget.paths
+                  .map(
+                    (path) => DropdownMenuItem<int>(
+                      value: path.pathId,
+                      child: TransitStationName(
+                        name: path.transitName,
+                        textAlign: TextAlign.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                _switchPath(value, notifyParent: true);
+              },
             ),
           ],
           if (_error != null) ...[
@@ -1146,6 +1156,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
   }
 
   Widget _buildMapArea(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final geometry = _geometry;
     if (geometry == null) {
       return const Center(child: CircularProgressIndicator());
@@ -1153,18 +1164,20 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
 
     if (geometry.points.isEmpty) {
       return Center(
-        child: Text('目前沒有可顯示的路線地圖資料', style: theme.textTheme.bodyMedium),
+        child: Text(l10n.routeMapNoData, style: theme.textTheme.bodyMedium),
       );
     }
 
     final now = DateTime.now();
-    final displayBuses = _busStates.values
-        .map((busState) {
+    final displayBuses = _busStates.entries
+        .map((entry) {
+          final busState = entry.value;
           final point = busState.positionAt(now, geometry: geometry);
           if (!isValidLatLng(point)) {
             return null;
           }
           return _DisplayedBus(
+            stateId: entry.key,
             state: busState,
             point: point,
             heading: busState.headingAt(now, geometry: geometry),
@@ -1186,7 +1199,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     _DisplayedBus? selectedDisplayBus;
     if (selectedBus != null) {
       for (final bus in displayBuses) {
-        if (bus.state.bus.id == selectedBus.bus.id) {
+        if (bus.stateId == _selectedBusId) {
           selectedDisplayBus = bus;
           break;
         }
@@ -1334,17 +1347,17 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                     if (_showBuses)
                       MarkerLayer(
                         markers: displayBuses.map((bus) {
-                          final selected = _selectedBusId == bus.state.bus.id;
+                          final selected = _selectedBusId == bus.stateId;
                           return Marker(
                             point: bus.point,
-                            width: selected ? 48 : 40,
-                            height: selected ? 48 : 40,
+                            width: selected ? 64 : 56,
+                            height: selected ? 64 : 56,
                             child: GestureDetector(
                               onTap: () {
                                 final nextSelectedBusId =
-                                    _selectedBusId == bus.state.bus.id
+                                    _selectedBusId == bus.stateId
                                     ? null
-                                    : bus.state.bus.id;
+                                    : bus.stateId;
                                 setState(() {
                                   _selectedBusId = nextSelectedBusId;
                                   _selectedStopId = null;
@@ -1467,6 +1480,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                 ? 'route-map-recenter-inline'
                 : 'route-map-recenter-sheet',
             onPressed: _handleRecenterToUser,
+            tooltip: l10n.routeMapRecenter,
             child: const Icon(Icons.my_location_rounded),
           ),
         ),
@@ -1497,6 +1511,10 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
           alwaysShowSeconds: widget.alwaysShowSeconds,
           brightness: theme.brightness,
           colorScheme: theme.colorScheme,
+          arrivingText: AppLocalizations.of(context).etaArriving,
+          secondsText: AppLocalizations.of(context).etaSeconds,
+          minutesText: AppLocalizations.of(context).etaMinutes,
+          minutesSecondsText: AppLocalizations.of(context).etaMinutesSeconds,
         );
         final key = _googleStopIconKey(
           eta: eta,
@@ -1665,14 +1683,12 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     final requests = <GoogleBusIconRequest>[];
 
     for (final bus in displayBuses) {
-      for (final selected in <bool>[
-        false,
-        _selectedBusId == bus.state.bus.id,
-      ]) {
+      for (final selected in <bool>[false, _selectedBusId == bus.stateId]) {
         final key = googleBusIconKey(
           color: bus.state.status.color,
           selected: selected,
           pixelRatio: pixelRatio,
+          heading: bus.heading,
         );
         if (_googleBusIcons.containsKey(key) ||
             _pendingGoogleBusIconKeys.contains(key)) {
@@ -1685,6 +1701,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
             color: bus.state.status.color,
             selected: selected,
             pixelRatio: pixelRatio,
+            heading: bus.heading,
           ),
         );
       }
@@ -1850,6 +1867,10 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
           alwaysShowSeconds: widget.alwaysShowSeconds,
           brightness: theme.brightness,
           colorScheme: theme.colorScheme,
+          arrivingText: AppLocalizations.of(context).etaArriving,
+          secondsText: AppLocalizations.of(context).etaSeconds,
+          minutesText: AppLocalizations.of(context).etaMinutes,
+          minutesSecondsText: AppLocalizations.of(context).etaMinutesSeconds,
         );
         final iconKey = _googleStopIconKey(
           eta: eta,
@@ -1871,7 +1892,10 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                       : gmaps.BitmapDescriptor.hueCyan,
                 ),
             infoWindow: gmaps.InfoWindow(
-              title: stop.stop.stopName,
+              title: stop.stop.transitName.stationDisplayForLocale(
+                Localizations.localeOf(context).toLanguageTag(),
+                separator: '\n',
+              ),
               snippet: eta.text.replaceAll('\n', ' '),
             ),
             zIndexInt: selected ? 3 : 1,
@@ -1891,13 +1915,14 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
 
     if (_showBuses) {
       for (final bus in displayBuses) {
-        final selected = _selectedBusId == bus.state.bus.id;
+        final selected = _selectedBusId == bus.stateId;
         final iconKey = googleBusIconKey(
           color: bus.state.status.color,
           selected: selected,
           pixelRatio: MediaQuery.of(
             context,
           ).devicePixelRatio.clamp(1.0, 3.0).toDouble(),
+          heading: bus.heading,
         );
         final icon = _googleBusIcons[iconKey];
         markers.add(
@@ -1905,7 +1930,6 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
             markerId: gmaps.MarkerId('bus:${bus.state.bus.id}'),
             consumeTapEvents: true,
             position: toGoogleLatLng(bus.point),
-            rotation: bus.heading,
             flat: true,
             anchor: icon == null
                 ? const Offset(0.5, 1)
@@ -1917,13 +1941,16 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                 ),
             infoWindow: gmaps.InfoWindow(
               title: bus.state.bus.id,
-              snippet: bus.state.status.label,
+              snippet: localizedBusStatus(
+                AppLocalizations.of(context),
+                bus.state.status,
+              ),
             ),
             zIndexInt: selected ? 5 : 2,
             onTap: () {
-              final nextSelectedBusId = _selectedBusId == bus.state.bus.id
+              final nextSelectedBusId = _selectedBusId == bus.stateId
                   ? null
-                  : bus.state.bus.id;
+                  : bus.stateId;
               setState(() {
                 _selectedBusId = nextSelectedBusId;
                 _selectedStopId = null;
@@ -1984,26 +2011,32 @@ class _StopMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: AppMotion.duration(context, AppMotion.quick),
-      curve: AppMotion.curve,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white, width: selected ? 2.5 : 1.8),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
+    return Tooltip(
+      message: stop.transitName.stationDisplayForLocale(
+        Localizations.localeOf(context).toLanguageTag(),
+        separator: '\n',
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(999),
-        child: EtaBadge(
-          stop: stop,
-          alwaysShowSeconds: alwaysShowSeconds,
-          size: 32,
+      child: AnimatedContainer(
+        duration: AppMotion.duration(context, AppMotion.quick),
+        curve: AppMotion.curve,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.white, width: selected ? 2.5 : 1.8),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: EtaBadge(
+            stop: stop,
+            alwaysShowSeconds: alwaysShowSeconds,
+            size: 32,
+          ),
         ),
       ),
     );
@@ -2018,6 +2051,7 @@ class _BusInfoPopup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final status = busState.status;
     final statusForeground = status.color.computeLuminance() > 0.45
         ? Colors.black87
@@ -2056,7 +2090,7 @@ class _BusInfoPopup extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    status.label,
+                    localizedBusStatus(l10n, status),
                     style: theme.textTheme.labelMedium?.copyWith(
                       color: statusForeground,
                       fontWeight: FontWeight.w800,
@@ -2071,26 +2105,30 @@ class _BusInfoPopup extends StatelessWidget {
               runSpacing: 5,
               children: [
                 _InfoChip(
-                  label: '速度',
+                  label: l10n.routeMapSpeed,
                   value: busState.bus.speedKph == null
                       ? '--'
-                      : '${busState.bus.speedKph!.round()} km/h',
+                      : l10n.speedKilometersPerHour(
+                          busState.bus.speedKph!.round(),
+                        ),
                 ),
                 _InfoChip(
-                  label: '方位',
+                  label: l10n.routeMapBearing,
                   value: busState.bus.azimuth == null
                       ? '--'
                       : '${busState.bus.azimuth!.round()}°',
                 ),
                 _InfoChip(
-                  label: '更新',
+                  label: l10n.routeMapUpdated,
                   value: _formatTime(busState.bus.updatedAt),
                 ),
                 _InfoChip(
-                  label: '位置',
+                  label: l10n.routeMapPosition,
                   value: busState.mode == BusMotionMode.snappedToRoute
-                      ? '沿路線'
-                      : '離線路 ${busState.distanceToRouteMeters.round()}m',
+                      ? l10n.routeMapOnRoute
+                      : l10n.routeMapOffRoute(
+                          busState.distanceToRouteMeters.round(),
+                        ),
                 ),
               ],
             ),
@@ -2120,10 +2158,16 @@ class _StopInfoPopup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final eta = buildEtaPresentation(
       stop,
       alwaysShowSeconds: alwaysShowSeconds,
       brightness: theme.brightness,
+      colorScheme: theme.colorScheme,
+      arrivingText: l10n.etaArriving,
+      secondsText: l10n.etaSeconds,
+      minutesText: l10n.etaMinutes,
+      minutesSecondsText: l10n.etaMinutesSeconds,
     );
 
     return Material(
@@ -2147,22 +2191,23 @@ class _StopInfoPopup extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    stop.stopName,
-                    style: theme.textTheme.titleSmall?.copyWith(
+                  TransitStationName(
+                    name: stop.transitName,
+                    primaryStyle: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
                     children: [
-                      _InfoChip(label: '站序', value: '${stop.sequence}'),
                       _InfoChip(
-                        label: '到站',
+                        label: l10n.routeMapStopSequence,
+                        value: '${stop.sequence}',
+                      ),
+                      _InfoChip(
+                        label: l10n.routeMapArrival,
                         value: eta.text.replaceAll('\n', ''),
                       ),
                     ],
@@ -2185,6 +2230,7 @@ class _BusInfoPopupCompact extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final status = busState.status;
     final statusForeground = status.color.computeLuminance() > 0.45
         ? Colors.black87
@@ -2223,7 +2269,7 @@ class _BusInfoPopupCompact extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    status.label,
+                    localizedBusStatus(l10n, status),
                     style: theme.textTheme.labelMedium?.copyWith(
                       color: statusForeground,
                       fontWeight: FontWeight.w800,
@@ -2239,16 +2285,18 @@ class _BusInfoPopupCompact extends StatelessWidget {
               children: [
                 Expanded(
                   child: _CompactInfoCell(
-                    label: '速度',
+                    label: l10n.routeMapSpeed,
                     value: busState.bus.speedKph == null
                         ? '--'
-                        : '${busState.bus.speedKph!.round()} km/h',
+                        : l10n.speedKilometersPerHour(
+                            busState.bus.speedKph!.round(),
+                          ),
                   ),
                 ),
                 const SizedBox(width: 5),
                 Expanded(
                   child: _CompactInfoCell(
-                    label: '角度',
+                    label: l10n.routeMapAngle,
                     value: busState.bus.azimuth == null
                         ? '--'
                         : '${busState.bus.azimuth!.round()}°',
@@ -2261,17 +2309,19 @@ class _BusInfoPopupCompact extends StatelessWidget {
               children: [
                 Expanded(
                   child: _CompactInfoCell(
-                    label: '更新',
+                    label: l10n.routeMapUpdated,
                     value: _BusInfoPopup._formatTime(busState.bus.updatedAt),
                   ),
                 ),
                 const SizedBox(width: 5),
                 Expanded(
                   child: _CompactInfoCell(
-                    label: '狀態',
+                    label: l10n.routeMapStatus,
                     value: busState.mode == BusMotionMode.snappedToRoute
-                        ? '貼線'
-                        : '離線 ${busState.distanceToRouteMeters.round()}m',
+                        ? l10n.routeMapSnappedToRoute
+                        : l10n.routeMapOffLine(
+                            busState.distanceToRouteMeters.round(),
+                          ),
                   ),
                 ),
               ],
@@ -2371,11 +2421,13 @@ class _CompactInfoCell extends StatelessWidget {
 
 class _DisplayedBus {
   const _DisplayedBus({
+    required this.stateId,
     required this.state,
     required this.point,
     required this.heading,
   });
 
+  final String stateId;
   final AnimatedBusState state;
   final LatLng point;
   final double heading;

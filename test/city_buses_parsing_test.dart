@@ -45,11 +45,16 @@ const _snapshot = {
     },
   ],
   'routes': {
-    'TPE101320': {'name': '234', 'route_uid': 'TPE10132'},
+    'TPE101320': {
+      'name': '234',
+      'name_en': 'Route 234',
+      'route_uid': 'TPE10132',
+    },
   },
   'families': {
     'TPE10231': {
       'name': '民權幹線',
+      'name_en': 'Minquan Main Line',
       'stops_routeid': 'TPE10231',
       'geometry_routeid': 'TPE10272',
       'routeids': ['TPE10231', 'TPE162593'],
@@ -94,6 +99,7 @@ void main() {
     expect(bus.bus.azimuth, 90);
     expect(bus.bus.updatedAt, isNotNull);
     expect(snapshot.displayNameFor(bus), '234');
+    expect(snapshot.routes['TPE101320']!.nameEn, 'Route 234');
     expect(snapshot.isAmbiguous(bus), isFalse);
     expect(snapshot.detailRouteIdFor(bus), 'TPE101320');
     expect(snapshot.geometryRouteIdFor(bus), 'TPE101320');
@@ -108,6 +114,7 @@ void main() {
     expect(bus.routeId, isNull);
     expect(snapshot.isAmbiguous(bus), isTrue);
     expect(snapshot.displayNameFor(bus), '民權幹線');
+    expect(snapshot.families['TPE10231']!.nameEn, 'Minquan Main Line');
     // Stops come from a real route; the line may come from a stop-less shape.
     expect(snapshot.detailRouteIdFor(bus), 'TPE10231');
     expect(snapshot.geometryRouteIdFor(bus), 'TPE10272');

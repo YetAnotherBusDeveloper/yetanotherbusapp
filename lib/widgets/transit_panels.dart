@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/transit_repository.dart';
 import '../core/app_motion.dart';
+import '../l10n/app_localizations.dart';
 import 'app_content_transition.dart';
 
 /// Segmented-looking button used by the transit dashboards to switch panels.
@@ -100,6 +101,7 @@ class TransitErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -111,7 +113,7 @@ class TransitErrorState extends StatelessWidget {
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded),
-              label: const Text('重試'),
+              label: Text(l10n.commonRetry),
             ),
           ],
         ),
@@ -136,6 +138,7 @@ class RailAlertCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final background = isDark
         ? Colors.orange.shade900.withValues(alpha: 0.22)
@@ -154,7 +157,7 @@ class RailAlertCard extends StatelessWidget {
                 Icon(Icons.warning_amber_rounded, color: foreground),
                 const SizedBox(width: 8),
                 Text(
-                  '營運公告',
+                  l10n.railOperatingNotices,
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                     color: foreground,
@@ -202,6 +205,7 @@ class PastTrainsDisclosure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return InkWell(
       onTap: onToggle,
       borderRadius: BorderRadius.circular(12),
@@ -221,7 +225,9 @@ class PastTrainsDisclosure extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(
-              expanded ? '收合已開出的 $count 班' : '顯示已開出的 $count 班',
+              expanded
+                  ? l10n.railHideDeparted(count)
+                  : l10n.railShowDeparted(count),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

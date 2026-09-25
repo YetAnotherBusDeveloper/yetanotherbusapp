@@ -4,17 +4,20 @@ import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
-import '../core/friendly_error.dart';
 import '../core/rail_line_stations.dart';
 import '../core/rail_time.dart';
 import '../core/request_sequence.dart';
 import '../core/transit_repository.dart';
+import '../core/transit_name.dart';
 import '../core/user_location.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/rail_station_picker.dart';
 import '../widgets/transit_panels.dart';
 import '../widgets/transit_station_map.dart';
 import '../widgets/ad_banner_widget.dart';
+import '../widgets/transit_station_name.dart';
 
 enum _TraPanel { query, map }
 
@@ -152,7 +155,12 @@ class _TraScreenState extends State<TraScreen> {
       _applyOd();
     } catch (error) {
       if (!mounted || !_initialDataRequest.isCurrent(request)) return;
-      setState(() => _pageError = friendlyErrorMessage(error));
+      setState(
+        () => _pageError = localizedFriendlyError(
+          AppLocalizations.of(context),
+          error,
+        ),
+      );
     } finally {
       if (mounted && _initialDataRequest.isCurrent(request)) {
         setState(() => _loadingStations = false);
@@ -201,7 +209,7 @@ class _TraScreenState extends State<TraScreen> {
     if (origin.stationId == dest.stationId) {
       setState(() {
         _odTrains = const [];
-        _odError = '出發站和到達站不能一樣。';
+        _odError = AppLocalizations.of(context).traSelectDifferentStations;
       });
       return;
     }
@@ -239,7 +247,12 @@ class _TraScreenState extends State<TraScreen> {
       });
     } catch (error) {
       if (!mounted || !_odRequest.isCurrent(request)) return;
-      setState(() => _odError = friendlyErrorMessage(error));
+      setState(
+        () => _odError = localizedFriendlyError(
+          AppLocalizations.of(context),
+          error,
+        ),
+      );
     } finally {
       if (mounted && _odRequest.isCurrent(request)) {
         setState(() => _loadingOd = false);
@@ -344,9 +357,10 @@ class _TraScreenState extends State<TraScreen> {
   }
 
   Future<void> _chooseOrigin() async {
+    final l10n = AppLocalizations.of(context);
     final picked = await showRailStationPicker(
       context: context,
-      title: '選擇出發站',
+      title: l10n.railChooseOrigin,
       groups: _pickerGroups,
       initial: _origin,
       excluded: _dest,
@@ -359,9 +373,10 @@ class _TraScreenState extends State<TraScreen> {
   }
 
   Future<void> _chooseDest() async {
+    final l10n = AppLocalizations.of(context);
     final picked = await showRailStationPicker(
       context: context,
-      title: '選擇到達站',
+      title: l10n.railChooseDestination,
       groups: _pickerGroups,
       initial: _dest,
       excluded: _origin,
@@ -410,28 +425,28 @@ class _TraScreenState extends State<TraScreen> {
   }
 
   Future<void> _assignFromMap(RailStation station) async {
+    final l10n = AppLocalizations.of(context);
     final choice = await showModalBottomSheet<String>(
       context: context,
       builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              title: Text(
-                station.name,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: station.nameEn.isEmpty ? null : Text(station.nameEn),
+             ListTile(
+               title: TransitStationName(
+                 name: _railStationName(station),
+                 primaryStyle: const TextStyle(fontWeight: FontWeight.w700),
+               ),
             ),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.trip_origin_rounded),
-              title: const Text('設為出發站'),
+               title: Text(l10n.traSetOrigin),
               onTap: () => Navigator.of(sheetContext).pop('origin'),
             ),
             ListTile(
               leading: const Icon(Icons.place_rounded),
-              title: const Text('設為到達站'),
+               title: Text(l10n.traSetDestination),
               onTap: () => Navigator.of(sheetContext).pop('dest'),
             ),
           ],
@@ -525,6 +540,7 @@ class _TraScreenState extends State<TraScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final rows = _buildRows();
     final hasBackgroundImage = hasBackgroundImageForPage(
       AppControllerScope.of(context).settings,
@@ -533,11 +549,11 @@ class _TraScreenState extends State<TraScreen> {
     return Scaffold(
       backgroundColor: hasBackgroundImage ? Colors.transparent : null,
       appBar: AppBar(
-        title: const Text('台鐵'),
+        title: Text(l10n.transitTra),
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
-            tooltip: '重新整理',
+            tooltip: l10n.commonRefresh,
             onPressed: () => _loadInitialData(refresh: true),
             icon: const Icon(Icons.refresh_rounded),
           ),
@@ -600,12 +616,13 @@ class _TraScreenState extends State<TraScreen> {
   }
 
   Widget _buildPanelButtons() {
+    final l10n = AppLocalizations.of(context);
     return Row(
       children: [
         Expanded(
           child: TransitPanelButton(
             icon: Icons.schedule_rounded,
-            label: '班次',
+            label: l10n.traServices,
             selected: _panel == _TraPanel.query,
             onPressed: () => setState(() => _panel = _TraPanel.query),
           ),
@@ -614,7 +631,7 @@ class _TraScreenState extends State<TraScreen> {
         Expanded(
           child: TransitPanelButton(
             icon: Icons.map_rounded,
-            label: '車站地圖',
+            label: l10n.traStationMap,
             selected: _panel == _TraPanel.map,
             onPressed: () => setState(() => _panel = _TraPanel.map),
           ),
@@ -624,6 +641,7 @@ class _TraScreenState extends State<TraScreen> {
   }
 
   Widget _buildOdCard(ThemeData theme, List<_TraOdRow> rows) {
+    final l10n = AppLocalizations.of(context);
     final upcoming = rows.where((row) => !row.isPast).length;
     return Card(
       child: Padding(
@@ -633,9 +651,9 @@ class _TraScreenState extends State<TraScreen> {
           children: [
             RailStationField(
               key: const ValueKey('tra-origin-selector'),
-              label: '出發站',
+              label: l10n.railOrigin,
               station: _origin,
-              placeholder: '選擇出發站',
+              placeholder: l10n.railChooseOrigin,
               onTap: _pickerGroups.isEmpty ? null : _chooseOrigin,
             ),
             Align(
@@ -646,14 +664,14 @@ class _TraScreenState extends State<TraScreen> {
                     ? null
                     : _swapStations,
                 icon: const Icon(Icons.swap_vert_rounded),
-                tooltip: '對調出發站與到達站',
+                tooltip: l10n.railSwapStations,
               ),
             ),
             RailStationField(
               key: const ValueKey('tra-dest-selector'),
-              label: '到達站',
+              label: l10n.railDestination,
               station: _dest,
-              placeholder: '選擇到達站',
+              placeholder: l10n.railChooseDestination,
               onTap: _pickerGroups.isEmpty ? null : _chooseDest,
             ),
             const SizedBox(height: 14),
@@ -665,14 +683,18 @@ class _TraScreenState extends State<TraScreen> {
                     onPressed: _pickDate,
                     icon: const Icon(Icons.calendar_today_rounded),
                     label: Text(
-                      '${_date.month}/${_date.day}（${railWeekdayLabel(_date.weekday)}）',
+                      l10n.scheduleDateLabel(
+                        _date.month,
+                        _date.day,
+                        localizedRailWeekday(l10n, _date.weekday),
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 if (_odTrains.isNotEmpty)
                   Text(
-                    '還有 $upcoming 班可搭',
+                    l10n.traRemainingServices(upcoming),
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: theme.colorScheme.primary,
@@ -691,6 +713,7 @@ class _TraScreenState extends State<TraScreen> {
   }
 
   Widget _buildQueryPanel(ThemeData theme, List<_TraOdRow> rows) {
+    final l10n = AppLocalizations.of(context);
     final past = rows.where((row) => row.isPast).toList(growable: false);
     final upcoming = rows.where((row) => !row.isPast).toList(growable: false);
 
@@ -705,18 +728,20 @@ class _TraScreenState extends State<TraScreen> {
         if (_origin == null || _dest == null)
           TransitEmptyPanel(
             icon: Icons.train_rounded,
-            label: '選好出發站和到達站，就會顯示今天還搭得到的班次。',
+            label: l10n.traSelectionPrompt,
             action: FilledButton.tonalIcon(
               key: const ValueKey('tra-cold-start-locate'),
               onPressed: _pickerGroups.isEmpty ? null : _chooseOrigin,
               icon: const Icon(Icons.my_location_rounded),
-              label: const Text('用目前位置選出發站'),
+              label: Text(l10n.traUseLocationOrigin),
             ),
           )
         else if (rows.isEmpty)
           TransitEmptyPanel(
             icon: Icons.schedule_rounded,
-            label: _loadingOd ? '查詢中…' : '這兩站之間今天沒有直達班次，可能需要轉車。',
+            label: _loadingOd
+                ? l10n.traSearching
+                : l10n.traNoDirectServices,
           )
         else ...[
           if (past.isNotEmpty) ...[
@@ -744,7 +769,10 @@ class _TraScreenState extends State<TraScreen> {
           if (upcoming.isEmpty)
             TransitEmptyPanel(
               icon: Icons.nightlight_round,
-              label: '今天從 ${_origin!.name} 到 ${_dest!.name} 的班次都開完了。',
+              label: l10n.traAllServicesDeparted(
+                _origin!.name,
+                _dest!.name,
+              ),
               action: FilledButton.tonalIcon(
                 onPressed: () {
                   setState(() {
@@ -754,7 +782,7 @@ class _TraScreenState extends State<TraScreen> {
                   _applyOd();
                 },
                 icon: const Icon(Icons.east_rounded),
-                label: const Text('看明天的班次'),
+                label: Text(l10n.traViewTomorrow),
               ),
             )
           else
@@ -782,13 +810,15 @@ class _TraScreenState extends State<TraScreen> {
   }
 
   Widget _buildMapPanel(ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     final stationPoints = _stations
         .where((station) => station.lat != 0 || station.lon != 0)
         .map(
           (station) => TransitMapPoint(
             id: station.stationId,
             label: station.name,
-            subtitle: station.nameEn,
+           subtitle: station.nameEn,
+           name: _railStationName(station),
             latitude: station.lat,
             longitude: station.lon,
             badge: station.stationClass.isEmpty ? null : station.stationClass,
@@ -804,7 +834,7 @@ class _TraScreenState extends State<TraScreen> {
             label: position.status == 'between_stations'
                 ? position.nextStationName
                 : position.currentStationName,
-            subtitle: _positionSummary(position),
+            subtitle: _positionSummary(l10n, position),
             latitude: position.lat,
             longitude: position.lon,
             badge: position.trainNo,
@@ -831,7 +861,7 @@ class _TraScreenState extends State<TraScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        '車站地圖',
+                        l10n.traStationMap,
                         style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -842,13 +872,13 @@ class _TraScreenState extends State<TraScreen> {
                         setState(() => _panel = _TraPanel.query);
                       },
                       icon: const Icon(Icons.schedule_rounded),
-                      label: const Text('看班次'),
+                      label: Text(l10n.traViewServices),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '點站牌可設為出發站或到達站，點紅色列車 marker 看估算中的列車位置。',
+                  l10n.traMapHint,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -868,7 +898,7 @@ class _TraScreenState extends State<TraScreen> {
                     }
                   },
                   height: 360,
-                  emptyLabel: '台鐵站點目前沒有可用座標。',
+                  emptyLabel: l10n.traMapNoCoordinates,
                 ),
               ],
             ),
@@ -882,14 +912,26 @@ class _TraScreenState extends State<TraScreen> {
     );
   }
 
-  String _positionSummary(TraTrainPosition position) {
+  String _positionSummary(
+    AppLocalizations l10n,
+    TraTrainPosition position,
+  ) {
     return switch (position.status) {
       'between_stations' =>
-        '${position.currentStationName} → ${position.nextStationName}',
-      'arrived' => '已到 ${position.currentStationName}',
-      _ => '停靠 ${position.currentStationName}',
+        l10n.railStationRange(
+          position.currentStationName,
+          position.nextStationName,
+        ),
+      'arrived' => l10n.traPositionArrived(position.currentStationName),
+      _ => l10n.traPositionStopped(position.currentStationName),
     };
   }
+
+  TransitName _railStationName(RailStation station) => TransitName(
+    zh: station.name,
+    en: station.nameEn,
+    stableId: station.stationId,
+  );
 }
 
 /// One timetable row plus everything derived from the clock and live board.
@@ -928,6 +970,7 @@ class _TraOdTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final cs = theme.colorScheme;
     final train = row.train;
     final isPast = row.isPast;
@@ -943,19 +986,29 @@ class _TraOdTile extends StatelessWidget {
         : cs.primaryContainer;
     final chipForeground = isPast ? cs.onSurfaceVariant : cs.onPrimaryContainer;
 
-    final duration = railDurationLabel(
+    final duration = localizedRailDuration(
+      l10n,
       train.originDeparture,
       train.destArrival,
     );
-    final status = _status(cs);
-    final headline =
-        '${origin.name} ${train.originDeparture} → ${dest.name} ${train.destArrival}';
+    final status = _status(cs, l10n);
+    final headline = l10n.railRouteWithTimes(
+      origin.name,
+      train.originDeparture,
+      dest.name,
+      train.destArrival,
+    );
 
     return Semantics(
       button: true,
-      label:
-          '${train.trainNo} 次 ${train.trainType}，$headline'
-          '${status == null ? '' : '，${status.text}'}',
+      label: status == null
+          ? l10n.railTrainSemantics(train.trainNo, train.trainType, headline)
+          : l10n.railTrainSemanticsWithStatus(
+              train.trainNo,
+              train.trainType,
+              headline,
+              status.text,
+            ),
       child: InkWell(
         key: ValueKey('tra-train-${train.trainNo}'),
         onTap: onTap,
@@ -1013,7 +1066,7 @@ class _TraOdTile extends StatelessWidget {
                     const SizedBox(height: 3),
                     Text(
                       [
-                        '往 ${train.endStation}',
+                        l10n.directionTo(train.endStation),
                         if (duration.isNotEmpty) duration,
                       ].join(' · '),
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -1076,12 +1129,12 @@ class _TraOdTile extends StatelessWidget {
   /// Returns `null` for a far-future train rather than claiming 準點 for a
   /// service the live board has never reported on — which is what the old tile
   /// did for every train with `delayMinutes <= 0`.
-  _TraStatus? _status(ColorScheme cs) {
+  _TraStatus? _status(ColorScheme cs, AppLocalizations l10n) {
     // A delay is meaningless once the train has gone, and a red 晚3分 on an
     // uncatchable train reads as "hurry", the opposite of the truth.
     if (row.isPast) {
       return _TraStatus(
-        text: '已開出',
+        text: l10n.railDeparted,
         icon: Icons.history_rounded,
         background: cs.surfaceContainerHighest.withValues(alpha: 0.5),
         foreground: cs.onSurfaceVariant,
@@ -1092,20 +1145,22 @@ class _TraOdTile extends StatelessWidget {
     if (live != null && live.delayMinutes > 0) {
       final actual = row.effectiveDeparture;
       return _TraStatus(
-        text: '晚 ${live.delayMinutes} 分',
+        text: l10n.railDelayedMinutes(live.delayMinutes),
         icon: Icons.trending_down_rounded,
         background: cs.errorContainer,
         foreground: cs.onErrorContainer,
         detail: actual == null
             ? null
-            : '${actual.hour.toString().padLeft(2, '0')}:'
-                  '${actual.minute.toString().padLeft(2, '0')} 發車',
+            : l10n.railDepartsAt(
+                '${actual.hour.toString().padLeft(2, '0')}:'
+                '${actual.minute.toString().padLeft(2, '0')}',
+              ),
       );
     }
 
     if (live != null) {
       return _TraStatus(
-        text: '準點',
+        text: l10n.railOnTime,
         icon: Icons.check_circle_outline_rounded,
         background: cs.tertiaryContainer,
         foreground: cs.onTertiaryContainer,
@@ -1115,7 +1170,7 @@ class _TraOdTile extends StatelessWidget {
     final minutes = row.minutesUntilDeparture;
     if (minutes != null && minutes <= 30) {
       return _TraStatus(
-        text: '$minutes 分後',
+        text: l10n.railMinutesUntilDeparture(minutes),
         icon: Icons.schedule_rounded,
         background: cs.secondaryContainer.withValues(alpha: 0.6),
         foreground: cs.onSecondaryContainer,
@@ -1150,6 +1205,7 @@ class _SelectedTraTrainCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final delayed = position.delayMinutes > 0;
     return Card(
       child: Padding(
@@ -1183,7 +1239,7 @@ class _SelectedTraTrainCard extends StatelessWidget {
                     children: [
                       Text(
                         position.trainType.isEmpty
-                            ? '列車位置估算'
+                            ? l10n.traTrainPositionEstimate
                             : position.trainType,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w700,
@@ -1191,7 +1247,10 @@ class _SelectedTraTrainCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${position.startingStationName} → ${position.endingStationName}',
+                        l10n.railStationRange(
+                          position.startingStationName,
+                          position.endingStationName,
+                        ),
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -1211,7 +1270,9 @@ class _SelectedTraTrainCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    delayed ? '晚 ${position.delayMinutes} 分' : '準點',
+                    delayed
+                        ? l10n.railDelayedMinutes(position.delayMinutes)
+                        : l10n.railOnTime,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: delayed
                           ? theme.colorScheme.onErrorContainer
@@ -1224,10 +1285,14 @@ class _SelectedTraTrainCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(switch (position.status) {
-              'between_stations' =>
-                '目前估算在 ${position.currentStationName} 與 ${position.nextStationName} 之間',
-              'arrived' => '目前估算已到達 ${position.currentStationName}',
-              _ => '目前估算停靠在 ${position.currentStationName}',
+              'between_stations' => l10n.traEstimatedBetween(
+                position.currentStationName,
+                position.nextStationName,
+              ),
+              'arrived' => l10n.traEstimatedArrived(
+                position.currentStationName,
+              ),
+              _ => l10n.traEstimatedStopped(position.currentStationName),
             }, style: theme.textTheme.bodyMedium),
             if (position.status == 'between_stations') ...[
               const SizedBox(height: 10),
@@ -1238,7 +1303,7 @@ class _SelectedTraTrainCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                '路段進度 ${(position.progress * 100).round()}%',
+                l10n.traSegmentProgress((position.progress * 100).round()),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -1247,7 +1312,7 @@ class _SelectedTraTrainCard extends StatelessWidget {
             if (position.updatedAt.isNotEmpty) ...[
               const SizedBox(height: 10),
               Text(
-                '資料更新 ${position.updatedAt}',
+                l10n.traDataUpdated(position.updatedAt),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),

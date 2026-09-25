@@ -7,8 +7,9 @@ import '../core/app_motion.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/app_controller.dart';
 import '../core/app_routes.dart';
-import '../core/friendly_error.dart';
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -89,6 +90,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _requestLocationPermissionAndContinue() async {
     final controller = AppControllerScope.read(context);
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _requestingPermission = true;
       _resolvingLocation = false;
@@ -104,13 +106,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
       if (!serviceEnabled) {
         setState(() {
-          _permissionMessage = '定位服務尚未開啓。你仍可手動選擇資料庫。';
+          _permissionMessage = l10n.onboardingLocationServiceDisabled;
         });
       } else if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever ||
           permission == LocationPermission.unableToDetermine) {
         setState(() {
-          _permissionMessage = '沒有取得定位權限。請改為手動選擇資料庫。';
+          _permissionMessage = l10n.onboardingLocationPermissionDenied;
         });
       } else {
         setState(() {
@@ -122,7 +124,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         }
         if (position == null) {
           setState(() {
-            _permissionMessage = '定位權限已授權，但暫時無法取得位置。請改為手動選擇資料庫。';
+            _permissionMessage = l10n.onboardingLocationUnavailable;
           });
         } else {
           await _applySuggestedProvider(controller, position);
@@ -130,15 +132,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             return;
           }
           setState(() {
-            _permissionMessage =
-                '已自動選擇最近的資料庫：${controller.settings.provider.label}。';
+            _permissionMessage = l10n.onboardingProviderSelected(
+              controller.settings.provider.label,
+            );
           });
         }
       }
     } catch (error) {
       setState(() {
-        _permissionMessage =
-            '定位設定失敗（${friendlyErrorMessage(error)}）。請改為手動選擇資料庫。';
+        _permissionMessage = l10n.onboardingLocationFailed(
+          localizedFriendlyError(l10n, error),
+        );
       });
     } finally {
       if (mounted) {
@@ -281,6 +285,7 @@ class _IntroStep extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return _OnboardingStepLayout(
       content: [
         const SizedBox(height: 12),
@@ -298,24 +303,27 @@ class _IntroStep extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 24),
-        Text('歡迎來到 YABus', style: Theme.of(context).textTheme.headlineMedium),
+        Text(
+          l10n.onboardingWelcome,
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
         const SizedBox(height: 24),
-        const _OnboardingFeature(
+        _OnboardingFeature(
           icon: Icons.search_rounded,
-          title: '搜尋路線',
-          subtitle: '輸入公車名稱或號碼，直接打開即時站牌頁。',
+          title: l10n.homeSearchTitle,
+          subtitle: l10n.onboardingSearchDescription,
         ),
         const SizedBox(height: 12),
-        const _OnboardingFeature(
+        _OnboardingFeature(
           icon: Icons.favorite_outline_rounded,
-          title: '收藏站牌',
-          subtitle: '把常搭的站牌分群保存，下次一鍵回來。',
+          title: l10n.onboardingFavoritesTitle,
+          subtitle: l10n.onboardingFavoritesDescription,
         ),
         const SizedBox(height: 12),
-        const _OnboardingFeature(
+        _OnboardingFeature(
           icon: Icons.near_me_outlined,
-          title: '附近站牌',
-          subtitle: '配合定位權限快速找周邊站點。',
+          title: l10n.nearbyTitle,
+          subtitle: l10n.onboardingNearbyDescription,
         ),
       ],
       footer: [
@@ -327,7 +335,7 @@ class _IntroStep extends StatelessWidget {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Text(
-                  '繼續即代表您同意我們的',
+                  l10n.onboardingLegalPrefix,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -335,11 +343,11 @@ class _IntroStep extends StatelessWidget {
                 ),
                 _buildLegalLink(
                   context,
-                  label: '服務條款',
+                  label: l10n.termsOfService,
                   routeName: AppRoutes.termsOfService,
                 ),
                 Text(
-                  '及',
+                  l10n.onboardingLegalAnd,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -347,11 +355,11 @@ class _IntroStep extends StatelessWidget {
                 ),
                 _buildLegalLink(
                   context,
-                  label: '隱私權政策',
+                  label: l10n.privacyPolicy,
                   routeName: AppRoutes.privacyPolicy,
                 ),
                 Text(
-                  '。',
+                  l10n.onboardingLegalSuffix,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
@@ -368,7 +376,7 @@ class _IntroStep extends StatelessWidget {
             style: FilledButton.styleFrom(
               minimumSize: const Size(double.infinity, 52),
             ),
-            child: const Text('開始設定'),
+            child: Text(l10n.onboardingStart),
           ),
         ),
       ],
@@ -396,13 +404,17 @@ class _PermissionStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final busy = requestingPermission || resolvingLocation;
+    final l10n = AppLocalizations.of(context);
     return _OnboardingStepLayout(
       content: [
         const SizedBox(height: 12),
-        Text('定位權限', style: Theme.of(context).textTheme.headlineSmall),
+        Text(
+          l10n.onboardingLocationTitle,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
         const SizedBox(height: 10),
         Text(
-          '我們需要定位權限來取得最近的站牌資訊。',
+          l10n.onboardingLocationDescription,
           style: Theme.of(context).textTheme.bodyLarge,
         ),
         const SizedBox(height: 24),
@@ -412,8 +424,8 @@ class _PermissionStep extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('允許即代表你同意將定位資訊提供給程式進行處理。 (用於取得最近站牌)'),
-                const Text('僅在無資料庫可用時才會將位置提供給伺服器。'),
+                Text(l10n.onboardingLocationConsent),
+                Text(l10n.onboardingLocationServerUse),
                 if (permissionMessage != null) ...[
                   const SizedBox(height: 12),
                   Text(permissionMessage!),
@@ -430,14 +442,16 @@ class _PermissionStep extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(double.infinity, 52),
             ),
-            child: const Text('返回'),
+            child: Text(l10n.commonBack),
           ),
           trailing: FilledButton(
             onPressed: busy ? null : onRequestPermission,
             style: FilledButton.styleFrom(
               minimumSize: const Size(double.infinity, 52),
             ),
-            child: Text(busy ? '處理中...' : '授權並繼續'),
+            child: Text(
+              busy ? l10n.onboardingProcessing : l10n.onboardingAllowContinue,
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -448,7 +462,7 @@ class _PermissionStep extends StatelessWidget {
             style: TextButton.styleFrom(
               minimumSize: const Size(double.infinity, 48),
             ),
-            child: const Text('手動選擇資料庫'),
+            child: Text(l10n.onboardingChooseManually),
           ),
         ),
       ],
@@ -480,15 +494,22 @@ class _DatabaseStep extends StatelessWidget {
         .where(controller.isDatabaseReady)
         .length;
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return _OnboardingStepLayout(
       content: [
         const SizedBox(height: 12),
-        Text('下載資料庫', style: theme.textTheme.headlineSmall),
+        Text(
+          l10n.onboardingDownloadTitle,
+          style: theme.textTheme.headlineSmall,
+        ),
         const SizedBox(height: 10),
-        Text('可複選要在這台裝置使用的縣市資料庫。', style: theme.textTheme.bodyLarge),
+        Text(
+          l10n.onboardingDownloadDescription,
+          style: theme.textTheme.bodyLarge,
+        ),
         const SizedBox(height: 16),
-        Text('縣市清單', style: theme.textTheme.titleMedium),
+        Text(l10n.onboardingRegionList, style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
         DecoratedBox(
           decoration: BoxDecoration(
@@ -518,7 +539,7 @@ class _DatabaseStep extends StatelessWidget {
         if (suggestedProvider != null) ...[
           const SizedBox(height: 12),
           Text(
-            '最近建議：${suggestedProvider!.label}',
+            l10n.onboardingNearestSuggestion(suggestedProvider!.label),
             style: theme.textTheme.bodyMedium,
           ),
         ],
@@ -529,13 +550,23 @@ class _DatabaseStep extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('預設資料來源：${provider.label}'),
+                Text(l10n.onboardingDefaultSource(provider.label)),
                 const SizedBox(height: 8),
                 Text(
-                  '已選資料庫：${selectedProviders.map((item) => item.label).join('、')}',
+                  l10n.onboardingSelectedDatabases(
+                    localizedList(
+                      l10n,
+                      selectedProviders.map((item) => item.label),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 8),
-                Text('已下載 $downloadedCount / ${selectedProviders.length} 份資料庫'),
+                Text(
+                  l10n.onboardingDatabaseProgress(
+                    downloadedCount,
+                    selectedProviders.length,
+                  ),
+                ),
               ],
             ),
           ),
@@ -548,7 +579,7 @@ class _DatabaseStep extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(double.infinity, 52),
             ),
-            child: const Text('返回'),
+            child: Text(l10n.commonBack),
           ),
           trailing: FilledButton(
             onPressed: controller.downloadingDatabase
@@ -567,7 +598,11 @@ class _DatabaseStep extends StatelessWidget {
                       final messenger = ScaffoldMessenger.of(context);
                       messenger.showSnackBar(
                         SnackBar(
-                          content: Text('下載失敗：${friendlyErrorMessage(error)}'),
+                          content: Text(
+                            l10n.onboardingDownloadFailed(
+                              localizedFriendlyError(l10n, error),
+                            ),
+                          ),
                         ),
                       );
                     }
@@ -575,7 +610,11 @@ class _DatabaseStep extends StatelessWidget {
             style: FilledButton.styleFrom(
               minimumSize: const Size(double.infinity, 52),
             ),
-            child: Text(controller.downloadingDatabase ? '下載中...' : '下載'),
+            child: Text(
+              controller.downloadingDatabase
+                  ? l10n.commonDownloading
+                  : l10n.commonDownload,
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -586,7 +625,9 @@ class _DatabaseStep extends StatelessWidget {
             style: FilledButton.styleFrom(
               minimumSize: const Size(double.infinity, 52),
             ),
-            child: Text(controller.databaseReady ? '完成' : '稍後再說'),
+            child: Text(
+              controller.databaseReady ? l10n.commonDone : l10n.commonLater,
+            ),
           ),
         ),
       ],

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:taiwanbus_flutter/core/rail_line_stations.dart';
 import 'package:taiwanbus_flutter/core/transit_repository.dart';
 import 'package:taiwanbus_flutter/core/user_location.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/widgets/rail_station_picker.dart';
 
 RailStation _station(String id, String name, {String nameEn = ''}) =>
@@ -43,6 +44,9 @@ Future<RailStation?> _pumpPicker(
   RailStation? result;
   await tester.pumpWidget(
     MaterialApp(
+      locale: const Locale('zh', 'TW'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(
         body: Builder(
           builder: (context) => Center(
@@ -181,6 +185,9 @@ void main() {
     RailStation? picked;
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh', 'TW'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: Builder(
             builder: (context) => Center(

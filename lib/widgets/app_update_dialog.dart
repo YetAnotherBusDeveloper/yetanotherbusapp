@@ -8,6 +8,7 @@ import '../core/app_build_info.dart';
 import '../core/app_controller.dart';
 import '../core/app_update_service.dart';
 import '../core/models.dart';
+import '../l10n/app_localizations.dart';
 
 Future<void> showAppUpdateDialog(
   BuildContext context, {
@@ -42,20 +43,20 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
   double? _progress;
   String _statusMessage = '';
 
-  @override
-  void initState() {
-    super.initState();
-    _statusMessage = widget.update.summary;
-  }
-
-  Future<void> _copyLink(String url, String label) async {
+  Future<void> _copyLink(String url) async {
     await Clipboard.setData(ClipboardData(text: url));
     if (!mounted) {
       return;
     }
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('$label已複製到剪貼簿。')));
+    ).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppLocalizations.of(context).appUpdateDownloadLinkCopied,
+        ),
+      ),
+    );
   }
 
   Future<void> _openMarkdownLink(String? href) async {
@@ -75,22 +76,24 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
 
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('無法開啓連結。')));
+    ).showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).linkOpenFailed)),
+    );
   }
 
-  String? _buildChangelogMarkdown() {
+  String? _buildChangelogMarkdown(AppLocalizations l10n) {
     final notes = widget.update.notes?.trim();
     final detailsUrl = widget.update.detailsUrl?.trim();
     final sections = <String>[];
 
     if (widget.update.channel == AppUpdateChannel.nightly) {
-      sections.add(_buildNightlyCommitMarkdown());
+      sections.add(_buildNightlyCommitMarkdown(l10n));
     }
 
     if (detailsUrl != null && detailsUrl.isNotEmpty) {
       final rangeLabel =
           '${widget.update.currentDisplayLabel}...${widget.update.latestDisplayLabel}';
-      sections.add('完整變更：[$rangeLabel]($detailsUrl)');
+      sections.add(l10n.appUpdateFullChangesMarkdown(rangeLabel, detailsUrl));
     }
 
     if (notes != null && notes.isNotEmpty) {
@@ -103,13 +106,52 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
     return sections.join('\n\n');
   }
 
-  String _buildNightlyCommitMarkdown() {
+  String _buildNightlyCommitMarkdown(AppLocalizations l10n) {
     final commitHash = widget.update.latestVersionLabel;
     final commitUrl = Uri.https(
       'github.com',
       '/${AppBuildInfo.repoOwner}/${AppBuildInfo.repoName}/commit/$commitHash',
     );
-    return 'Commit：[`${widget.update.latestDisplayLabel}`]($commitUrl)';
+    return l10n.appUpdateCommitMarkdown(
+      widget.update.latestDisplayLabel,
+      commitUrl.toString(),
+    );
+  }
+
+  String _localizedUpdateTitle(AppLocalizations l10n) {
+    return switch (widget.update.channel) {
+      AppUpdateChannel.nightly => l10n.appUpdateNightlyDialogTitle,
+      AppUpdateChannel.release => l10n.appUpdateReleaseDialogTitle(
+        widget.update.latestDisplayLabel,
+      ),
+      AppUpdateChannel.developer => l10n.appUpdatesTitle,
+    };
+  }
+
+  String _localizedInstallerMessage(
+    AppLocalizations l10n,
+    String message,
+  ) {
+    const failurePrefix = '下載或安裝更新失敗：';
+    if (message.startsWith(failurePrefix)) {
+      return l10n.appUpdateInstallFailed(message.substring(failurePrefix.length));
+    }
+
+    return switch (message) {
+      '下載更新中…' => l10n.appUpdateDownloading,
+      '整理安裝檔中…' => l10n.appUpdatePreparingInstaller,
+      '啓動安裝程式…' => l10n.appUpdateLaunchingInstaller,
+      '準備關閉 App 並啓動安裝程式…' =>
+        l10n.appUpdatePreparingDesktopInstaller,
+      '這個平台不支援 app 內安裝更新。' =>
+        l10n.appUpdateInstallUnsupported,
+      '請先允許這個 app 安裝未知應用程式，再重新點一次更新。' =>
+        l10n.appUpdateInstallPermissionRequired,
+      '安裝程式已啓動。' => l10n.appUpdateInstallerLaunched,
+      '即將關閉 App 並啓動安裝程式。' =>
+        l10n.appUpdateDesktopInstallerScheduled,
+      _ => message,
+    };
   }
 
   Future<void> _installUpdate() async {
@@ -117,10 +159,11 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
       return;
     }
 
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _installing = true;
       _progress = 0;
-      _statusMessage = '準備更新…';
+      _statusMessage = l10n.appUpdatePreparing;
     });
 
     final messenger = ScaffoldMessenger.of(context);
@@ -132,7 +175,7 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
         }
         setState(() {
           _progress = progress;
-          _statusMessage = message;
+          _statusMessage = _localizedInstallerMessage(l10n, message);
         });
       },
     );
@@ -152,10 +195,14 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
     setState(() {
       _installing = false;
       _progress = null;
-      _statusMessage = widget.update.summary;
+      _statusMessage = '';
     });
 
-    messenger.showSnackBar(SnackBar(content: Text(installResult.message)));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(_localizedInstallerMessage(l10n, installResult.message)),
+      ),
+    );
 
     if (installResult.didLaunchInstaller) {
       Navigator.of(context).pop();
@@ -170,12 +217,13 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final canInstallInApp =
         widget.controller.appUpdateInstaller.supportsInAppInstall;
-    final changelogMarkdown = _buildChangelogMarkdown();
+    final changelogMarkdown = _buildChangelogMarkdown(l10n);
 
     return AlertDialog(
-      title: Text(widget.update.title),
+      title: Text(_localizedUpdateTitle(l10n)),
       content: SizedBox(
         width: 420,
         child: SingleChildScrollView(
@@ -184,10 +232,20 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (widget.update.channel == AppUpdateChannel.nightly)
-                Text(widget.update.summary),
+                Text(
+                  l10n.appUpdateNightlySummary(
+                    widget.update.latestDisplayLabel,
+                  ),
+                ),
               const SizedBox(height: 12),
-              Text('目前版本：${widget.update.currentDisplayLabel}'),
-              Text('最新版本：${widget.update.latestDisplayLabel}'),
+              Text(
+                l10n.appUpdateCurrentVersion(
+                  widget.update.currentDisplayLabel,
+                ),
+              ),
+              Text(
+                l10n.appUpdateLatestVersion(widget.update.latestDisplayLabel),
+              ),
               if (_installing) ...[
                 const SizedBox(height: 16),
                 LinearProgressIndicator(value: _progress),
@@ -196,7 +254,10 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
               ],
               if (changelogMarkdown != null) ...[
                 const SizedBox(height: 16),
-                Text('更新內容', style: Theme.of(context).textTheme.titleSmall),
+                Text(
+                  l10n.appUpdateContentsTitle,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const SizedBox(height: 8),
                 MarkdownBody(
                   data: changelogMarkdown,
@@ -211,17 +272,21 @@ class _AppUpdateDialogState extends State<_AppUpdateDialog> {
         TextButton(
           onPressed: _installing
               ? null
-              : () => _copyLink(widget.update.downloadUrl, '下載連結'),
-          child: Text(canInstallInApp ? '複製下載連結' : '下載連結'),
+              : () => _copyLink(widget.update.downloadUrl),
+          child: Text(
+            canInstallInApp
+                ? l10n.appUpdateCopyDownloadLink
+                : l10n.appUpdateDownloadLink,
+          ),
         ),
         TextButton(
           onPressed: _installing ? null : () => Navigator.of(context).pop(),
-          child: Text(canInstallInApp ? '稍後' : '關閉'),
+          child: Text(canInstallInApp ? l10n.commonLater : l10n.commonClose),
         ),
         if (canInstallInApp)
           FilledButton(
             onPressed: _installing ? null : _installUpdate,
-            child: const Text('下載並安裝'),
+            child: Text(l10n.appUpdateDownloadAndInstall),
           ),
       ],
     );

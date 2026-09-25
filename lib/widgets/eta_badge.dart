@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/models.dart';
 import '../core/app_motion.dart';
+import '../l10n/app_localizations.dart';
 
 class EtaBadge extends StatelessWidget {
   const EtaBadge({
@@ -20,11 +21,16 @@ class EtaBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final eta = buildEtaPresentation(
       stop,
       alwaysShowSeconds: alwaysShowSeconds,
       brightness: theme.brightness,
       colorScheme: theme.colorScheme,
+      arrivingText: l10n.etaArriving,
+      secondsText: l10n.etaSeconds,
+      minutesText: l10n.etaMinutes,
+      minutesSecondsText: l10n.etaMinutesSeconds,
     );
     final fontSize = size * 0.24;
 
@@ -45,8 +51,8 @@ class EtaBadge extends StatelessWidget {
         switchInCurve: AppMotion.curve,
         switchOutCurve: AppMotion.curve,
         child: Text(
-          key: ValueKey((isLoading, isLoading ? '載入中' : eta.text)),
-          isLoading ? '載入中' : eta.text,
+          key: ValueKey((isLoading, isLoading ? l10n.etaLoading : eta.text)),
+          isLoading ? l10n.etaLoading : eta.text,
           textAlign: TextAlign.center,
           softWrap: true,
           maxLines: 2,
@@ -83,11 +89,15 @@ class GenericEtaBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final eta = buildGenericEtaPresentation(
       seconds: seconds,
       message: message,
       brightness: theme.brightness,
       colorScheme: theme.colorScheme,
+      arrivingText: l10n.etaArriving,
+      secondsText: l10n.etaSeconds,
+      minutesText: l10n.etaMinutes,
     );
     final fontSize = size * 0.24;
     final backgroundColor = darkBackground
@@ -141,6 +151,9 @@ EtaPresentation buildGenericEtaPresentation({
   String? message,
   Brightness brightness = Brightness.light,
   ColorScheme? colorScheme,
+  String arrivingText = '進站中',
+  String Function(int seconds)? secondsText,
+  String Function(int minutes)? minutesText,
 }) {
   final isDark = brightness == Brightness.dark;
   final cs = colorScheme;
@@ -167,7 +180,7 @@ EtaPresentation buildGenericEtaPresentation({
 
   if (seconds <= 0) {
     return EtaPresentation(
-      text: '進站中',
+      text: arrivingText,
       backgroundColor: Colors.red.shade800,
       foregroundColor: Colors.white,
     );
@@ -176,7 +189,7 @@ EtaPresentation buildGenericEtaPresentation({
   if (seconds < 60) {
     // For metro, show "即將到站" instead of exact seconds
     return EtaPresentation(
-      text: '$seconds秒',
+      text: secondsText?.call(seconds) ?? '$seconds秒',
       backgroundColor: Colors.red.shade600,
       foregroundColor: Colors.white,
     );
@@ -186,7 +199,7 @@ EtaPresentation buildGenericEtaPresentation({
   final urgent = minutes < 3;
 
   return EtaPresentation(
-    text: '$minutes分',
+    text: minutesText?.call(minutes) ?? '$minutes分',
     backgroundColor: urgent
         ? Colors.orange.shade700
         : (cs?.primary ??

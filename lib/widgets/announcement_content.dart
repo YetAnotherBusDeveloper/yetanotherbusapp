@@ -3,7 +3,8 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../core/announcement_models.dart';
 import '../core/app_link_handler.dart';
-import '../core/relative_time_formatter.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
 
 class AnnouncementContent extends StatelessWidget {
   const AnnouncementContent({
@@ -20,17 +21,20 @@ class AnnouncementContent extends StatelessWidget {
     if (!context.mounted || opened) {
       return;
     }
-    ScaffoldMessenger.maybeOf(
-      context,
-    )?.showSnackBar(const SnackBar(content: Text('無法開啓連結。')));
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).linkOpenFailed)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final chips = <Widget>[
       Chip(
         avatar: const Icon(Icons.schedule_outlined, size: 18),
-        label: Text(formatRelativeTimestamp(announcement.createdAtDateTime)),
+        label: Text(
+          localizedRelativeTimestamp(l10n, announcement.createdAtDateTime),
+        ),
       ),
       if (announcement.author case final author?)
         Chip(
@@ -72,7 +76,9 @@ class AnnouncementContent extends StatelessWidget {
           Card(
             child: ListTile(
               leading: const Icon(Icons.ondemand_video_outlined),
-              title: Text(embed.type.isEmpty ? '嵌入內容' : embed.type),
+              title: Text(
+                embed.type.isEmpty ? l10n.announcementEmbeddedContent : embed.type,
+              ),
               subtitle: Text(embed.url),
               trailing: const Icon(Icons.open_in_new_rounded),
               onTap: () => _openLink(context, embed.url),
@@ -84,7 +90,7 @@ class AnnouncementContent extends StatelessWidget {
           Card(
             child: ListTile(
               leading: const Icon(Icons.volume_up_outlined),
-              title: const Text('提示音'),
+              title: Text(l10n.announcementSound),
               subtitle: Text(soundUrl),
               trailing: const Icon(Icons.open_in_new_rounded),
               onTap: () => _openLink(context, soundUrl),

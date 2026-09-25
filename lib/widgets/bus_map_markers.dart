@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import '../core/app_motion.dart';
+import '../l10n/app_localizations.dart';
 
 /// Bus and user-location markers shared by the route sheet and the city map.
 ///
@@ -30,34 +31,46 @@ class BusMapBusMarker extends StatelessWidget {
     final foreground = color.computeLuminance() > 0.45
         ? Colors.black87
         : Colors.white;
+    final markerSize = selected ? 64.0 : 56.0;
+    final circleSize = selected ? 40.0 : 34.0;
     return Tooltip(
       message: label,
-      child: AnimatedContainer(
-        duration: AppMotion.duration(context, AppMotion.quick),
-        curve: AppMotion.curve,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: selected ? 3 : 2),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x33000000),
-              blurRadius: 10,
-              offset: Offset(0, 3),
-            ),
-          ],
-        ),
+      child: SizedBox.square(
+        dimension: markerSize,
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Icon(Icons.directions_bus_rounded, color: foreground, size: 22),
-            Align(
-              alignment: Alignment.topCenter,
-              child: BusMapHeadingIndicator(
-                heading: heading,
-                color: foreground,
-                size: selected ? 16 : 14,
+            AnimatedContainer(
+              duration: AppMotion.duration(context, AppMotion.quick),
+              curve: AppMotion.curve,
+              width: circleSize,
+              height: circleSize,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white,
+                  width: selected ? 3 : 2,
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x33000000),
+                    blurRadius: 10,
+                    offset: Offset(0, 3),
+                  ),
+                ],
               ),
+              child: Icon(
+                Icons.directions_bus_rounded,
+                color: foreground,
+                size: 22,
+              ),
+            ),
+            BusMapHeadingIndicator(
+              heading: heading,
+              color: foreground,
+              size: selected ? 11 : 10,
+              orbitDiameter: markerSize,
             ),
           ],
         ),
@@ -72,18 +85,26 @@ class BusMapHeadingIndicator extends StatelessWidget {
     required this.heading,
     required this.color,
     required this.size,
+    required this.orbitDiameter,
   });
 
   final double heading;
   final Color color;
   final double size;
+  final double orbitDiameter;
 
   @override
   Widget build(BuildContext context) {
     final normalizedHeading = normalizeMarkerHeading(heading);
-    return Transform.rotate(
-      angle: normalizedHeading * math.pi / 180,
-      child: Icon(Icons.navigation_rounded, color: color, size: size),
+    return SizedBox.square(
+      dimension: orbitDiameter,
+      child: Transform.rotate(
+        angle: normalizedHeading * math.pi / 180,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Icon(Icons.navigation_rounded, color: color, size: size),
+        ),
+      ),
     );
   }
 }
@@ -101,37 +122,42 @@ class BusMapUserLocationMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: const Color(0xFF1E88E5),
-        border: Border.all(color: Colors.white, width: 2.5),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
+    return Semantics(
+      label: AppLocalizations.of(context).busMapYourLocation,
+      child: Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: const Color(0xFF1E88E5),
+          border: Border.all(color: Colors.white, width: 2.5),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
 class GoogleBusIconRequest {
-  const GoogleBusIconRequest({
+  GoogleBusIconRequest({
     required this.key,
     required this.color,
     required this.selected,
     required this.pixelRatio,
-  });
+    required double heading,
+  }) : heading = quantizeGoogleBusHeading(heading);
 
   final String key;
   final Color color;
   final bool selected;
   final double pixelRatio;
+  final double heading;
 
-  double get logicalSize => selected ? 48 : 40;
+  double get logicalSize => selected ? 64 : 56;
 
   double get radius => selected ? 20 : 17;
 
@@ -158,11 +184,44 @@ String googleBusIconKey({
   required Color color,
   required bool selected,
   required double pixelRatio,
+  required double heading,
 }) {
   return [
     color.toARGB32().toRadixString(16),
     selected ? 'selected' : 'normal',
     pixelRatio.toStringAsFixed(2),
+    quantizeGoogleBusHeading(heading).toStringAsFixed(0),
+  ].join('|');
+}
+
+double quantizeGoogleBusHeading(double heading) {
+  const step = 15.0;
+  final quantized = (normalizeMarkerHeading(heading) / step).round() * step;
+  return quantized >= 360 ? 0 : quantized;
+}
+
+/// Identifies reusable stationary markers for one rendered map state.
+String staticBusMarkerCacheKey({
+  required Iterable<String> visibleBusIds,
+  required int dataGeneration,
+  required String viewportKey,
+  required double zoom,
+  required String filterKey,
+  required String selectionKey,
+  required String locale,
+}) {
+  final identities = visibleBusIds.toList()..sort();
+  final encodedIdentities = identities
+      .map((identity) => '${identity.length}:$identity')
+      .join();
+  return [
+    dataGeneration,
+    viewportKey,
+    zoom.toStringAsFixed(2),
+    filterKey,
+    selectionKey,
+    locale,
+    encodedIdentities,
   ].join('|');
 }
 
@@ -193,12 +252,17 @@ Future<Uint8List> drawGoogleBusIcon(GoogleBusIconRequest request) async {
       ..color = Colors.white,
   );
 
+  final pointerBaseY = center.dy - request.radius - 1;
   final pointer = ui.Path()
-    ..moveTo(center.dx, 0.5)
-    ..lineTo(center.dx + 5, 10)
-    ..lineTo(center.dx, 8)
-    ..lineTo(center.dx - 5, 10)
+    ..moveTo(center.dx, pointerBaseY - 9)
+    ..lineTo(center.dx + 5, pointerBaseY)
+    ..lineTo(center.dx, pointerBaseY - 2)
+    ..lineTo(center.dx - 5, pointerBaseY)
     ..close();
+  canvas.save();
+  canvas.translate(center.dx, center.dy);
+  canvas.rotate(request.heading * math.pi / 180);
+  canvas.translate(-center.dx, -center.dy);
   canvas.drawPath(
     pointer,
     ui.Paint()
@@ -208,6 +272,7 @@ Future<Uint8List> drawGoogleBusIcon(GoogleBusIconRequest request) async {
       ..color = Colors.white,
   );
   canvas.drawPath(pointer, ui.Paint()..color = foreground);
+  canvas.restore();
 
   final busIconPainter = TextPainter(
     text: TextSpan(
@@ -286,7 +351,7 @@ class BusMapClusterMarker extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     return Semantics(
       button: true,
-      label: '此處 $count 輛公車，點一下放大',
+      label: AppLocalizations.of(context).busMapClusterSemantics(count),
       child: Container(
         decoration: BoxDecoration(
           color: colorScheme.primaryContainer,

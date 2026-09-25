@@ -93,13 +93,29 @@ class _RouteSearchRank {
     String normalizedQuery,
   ) {
     final routeName = _normalizeRouteSearchText(_displayRouteName(route));
+    final routeNameEn = _normalizeRouteSearchText(
+      route.routeNameEn ?? route.officialRouteName,
+    );
     final routeId = _normalizeRouteSearchText(route.routeId);
     final description = _normalizeRouteSearchText(route.description);
+    final descriptionEn = _normalizeRouteSearchText(route.pathNameEn ?? '');
+    final nameLengthGaps = [routeName, routeNameEn]
+        .where((name) => name.isNotEmpty)
+        .map((name) => (name.length - normalizedQuery.length).abs());
     return _RouteSearchRank(
-      matchTier: _matchTier(routeName, routeId, description, normalizedQuery),
+      matchTier: _matchTier(
+        routeName,
+        routeNameEn,
+        routeId,
+        description,
+        descriptionEn,
+        normalizedQuery,
+      ),
       lengthGap: normalizedQuery.isEmpty
           ? 0
-          : (routeName.length - normalizedQuery.length).abs(),
+          : nameLengthGaps.isEmpty
+          ? normalizedQuery.length
+          : nameLengthGaps.reduce((left, right) => left < right ? left : right),
       nameLength: routeName.isEmpty ? 9999 : routeName.length,
       routeName: routeName,
       routeId: routeId,
@@ -116,20 +132,22 @@ class _RouteSearchRank {
 
   static int _matchTier(
     String routeName,
+    String routeNameEn,
     String routeId,
     String description,
+    String descriptionEn,
     String query,
   ) {
     if (query.isEmpty) {
       return 0;
     }
-    if (routeName == query) {
+    if (routeName == query || routeNameEn == query) {
       return 0;
     }
-    if (routeName.startsWith(query)) {
+    if (routeName.startsWith(query) || routeNameEn.startsWith(query)) {
       return 1;
     }
-    if (routeName.contains(query)) {
+    if (routeName.contains(query) || routeNameEn.contains(query)) {
       return 2;
     }
     if (routeId == query) {
@@ -138,7 +156,7 @@ class _RouteSearchRank {
     if (routeId.contains(query)) {
       return 4;
     }
-    if (description.contains(query)) {
+    if (description.contains(query) || descriptionEn.contains(query)) {
       return 5;
     }
     return 6;

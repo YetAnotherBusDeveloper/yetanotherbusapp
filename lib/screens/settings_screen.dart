@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../widgets/ad_density_setting.dart';
 import '../widgets/ad_banner_widget.dart';
 import '../core/ad_service.dart';
@@ -14,6 +15,9 @@ import '../core/app_routes.dart';
 import '../core/app_controller.dart';
 import '../core/models.dart';
 import '../core/wear_os_integration.dart';
+import '../l10n/app_localizations.dart';
+import '../l10n/localized_labels.dart';
+import '../widgets/app_dropdown.dart';
 import '../widgets/app_update_dialog.dart';
 import 'account_screen.dart';
 import 'database_settings_screen.dart';
@@ -30,11 +34,13 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   static const _favoriteWidgetRefreshOptions = <int>[0, 15, 30, 60, 120, 180];
   static final _discordCommunityUri = Uri.parse('https://dc.avianjay.sbs/');
-  static const _rgbContributorPalette = <Color>[
-    Color(0xFFFF4D4D),
-    Color(0xFF16C172),
-    Color(0xFF2D9CFF),
-  ];
+  static final _instagramUri = Uri.parse('https://www.instagram.com/yabus.tw/');
+  static final _contributorGithubUris = <String, Uri>{
+    'AvianJay': Uri.parse('https://github.com/AvianJay'),
+    'itouSouta': Uri.parse('https://github.com/itousouta15'),
+    'Axoled': Uri.parse('https://github.com/Axoled-Student'),
+    'Steven0925': Uri.parse('https://github.com/Steven0925'),
+  };
 
   late Future<WearOsSyncStatus> _wearSyncStatusFuture;
   int _adToggleCount = 0;
@@ -55,11 +61,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  String _favoriteWidgetRefreshLabel(int minutes) {
+  String _favoriteWidgetRefreshLabel(AppLocalizations l10n, int minutes) {
     if (minutes <= 0) {
-      return '關閉';
+      return l10n.updateCheckOff;
     }
-    return '$minutes 分鐘';
+    return l10n.minutesValue(minutes);
   }
 
   Future<void> _checkAppUpdate(
@@ -81,7 +87,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    messenger.showSnackBar(SnackBar(content: Text(result.message)));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          localizedAppUpdateResult(AppLocalizations.of(context), result),
+        ),
+      ),
+    );
   }
 
   Future<void> _toggleSmartRouteNotifications(
@@ -99,9 +111,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     if (!granted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('需要通知權限才能啓用智慧推薦通知。')));
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.smartNotificationPermissionRequired)),
+      );
       return;
     }
     await controller.updateEnableSmartRouteNotifications(true);
@@ -112,6 +125,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     AppController controller,
     bool value,
   ) async {
+    final l10n = AppLocalizations.of(context);
     _adToggleCount++;
 
     // Lock after 5 toggles.
@@ -120,23 +134,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await controller.updateEnableAds(true);
       if (!context.mounted) return;
       setState(() => _adToggleLocked = true);
-      // await showDialog<void>(
-      //   context: context,
-      //   barrierDismissible: false,
-      //   builder: (dialogContext) => AlertDialog(
-      //     title: const Text('再玩啊哈哈'),
-      //     content: const Text('開關已經被鎖起來了，只能重裝 app 才能解除鎖定 🥺'),
-      //     actions: [
-      //       FilledButton(
-      //         onPressed: () => Navigator.of(dialogContext).pop(),
-      //         child: const Text('好啦 🥺'),
-      //       ),
-      //     ],
-      //   ),
-      // );
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('再玩啊哈哈')));
+      ).showSnackBar(SnackBar(content: Text(l10n.adsLockedMessage.trim())));
       return;
     }
 
@@ -152,16 +152,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         : await showDialog<bool>(
                 context: context,
                 builder: (dialogContext) => AlertDialog(
-                  title: const Text('你確定嗎'),
-                  content: const Text('我沒有摳摳 :('),
+                  title: Text(l10n.adsDisableTitle),
+                  content: Text(l10n.adsDisableDescription),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.of(dialogContext).pop(false),
-                      child: const Text('算了不關'),
+                      child: Text(l10n.adsKeepEnabled),
                     ),
                     FilledButton(
                       onPressed: () => Navigator.of(dialogContext).pop(true),
-                      child: const Text('確定關閉'),
+                      child: Text(l10n.adsDisableConfirm),
                     ),
                   ],
                 ),
@@ -175,6 +175,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _openDiscordCommunity(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
     final opened = await launchUrl(
       _discordCommunityUri,
       mode: LaunchMode.externalApplication,
@@ -183,27 +184,92 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    messenger.showSnackBar(const SnackBar(content: Text('無法開啓 Discord 社群連結。')));
+    messenger.showSnackBar(SnackBar(content: Text(l10n.discordOpenFailed)));
   }
 
-  InlineSpan _buildRgbContributorSpan(
+  Future<void> _openContributorGithub(
+    BuildContext context,
     String name,
-    ThemeData theme,
-    Color color,
-  ) {
-    final style = theme.textTheme.bodyMedium?.copyWith(
-      fontWeight: FontWeight.w700,
-      letterSpacing: 0.35,
-    );
+    Uri uri,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!context.mounted || opened) {
+      return;
+    }
 
-    return TextSpan(
-      text: name,
-      style: style?.copyWith(
-        color: color,
-        shadows: [
-          Shadow(color: color.withValues(alpha: 0.9), blurRadius: 10),
-          Shadow(color: color.withValues(alpha: 0.55), blurRadius: 22),
+    messenger.showSnackBar(
+      SnackBar(content: Text(l10n.githubOpenFailed(name))),
+    );
+  }
+
+  Future<void> _openInstagram(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final l10n = AppLocalizations.of(context);
+    final opened = await launchUrl(
+      _instagramUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!context.mounted || opened) {
+      return;
+    }
+
+    messenger.showSnackBar(SnackBar(content: Text(l10n.instagramOpenFailed)));
+  }
+
+  Widget _buildAboutChip(
+    ThemeData theme, {
+    required IconData icon,
+    required String label,
+  }) {
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: colorScheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildContributorChip(
+    BuildContext context,
+    ThemeData theme,
+    String name,
+    Uri uri,
+  ) {
+    final colorScheme = theme.colorScheme;
+    return Material(
+      color: colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () => _openContributorGithub(context, name, uri),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Text(
+            name,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -211,6 +277,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
+    final l10n = AppLocalizations.of(context);
     final buildInfo = controller.buildInfo;
     final theme = Theme.of(context);
     final hasSettingsBackgroundImage = hasBackgroundImageForPage(
@@ -230,7 +297,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       pageKey: 'settings',
       child: Scaffold(
         backgroundColor: hasSettingsBackgroundImage ? Colors.transparent : null,
-        appBar: AppBar(title: const Text('設定')),
+        appBar: AppBar(title: Text(l10n.settingsTitle)),
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 860),
@@ -244,25 +311,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '外觀',
+                          l10n.appearanceSectionTitle,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 12),
-                        DropdownButtonFormField<ThemeMode>(
+                        AppDropdownFormField<AppLanguage>(
+                          isExpanded: true,
+                          initialValue: controller.settings.language,
+                          decoration: InputDecoration(
+                            labelText: l10n.languageLabel,
+                          ),
+                          items: AppLanguage.values
+                              .map(
+                                (language) => DropdownMenuItem(
+                                  value: language,
+                                  child: Text(switch (language) {
+                                    AppLanguage.system => l10n.languageSystem,
+                                    AppLanguage.traditionalChinese =>
+                                      l10n.languageTraditionalChinese,
+                                    AppLanguage.english => l10n.languageEnglish,
+                                  }),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (value) {
+                            if (value != null) {
+                              controller.updateLanguage(value);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          '${l10n.interfaceScaleLabel}: '
+                          '${l10n.interfaceScaleValue((controller.settings.interfaceScale * 100).round())}',
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          l10n.interfaceScaleDescription,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        Slider(
+                          min: AppSettings.minInterfaceScale,
+                          max: AppSettings.maxInterfaceScale,
+                          divisions: 5,
+                          value: controller.settings.interfaceScale,
+                          label: l10n.interfaceScaleValue(
+                            (controller.settings.interfaceScale * 100).round(),
+                          ),
+                          semanticFormatterCallback: (value) =>
+                              l10n.interfaceScaleValue((value * 100).round()),
+                          onChanged: controller.updateInterfaceScale,
+                        ),
+                        const SizedBox(height: 4),
+                        AppDropdownFormField<ThemeMode>(
+                          isExpanded: true,
                           initialValue: controller.settings.themeMode,
-                          decoration: const InputDecoration(labelText: '主題模式'),
-                          items: const [
+                          decoration: InputDecoration(
+                            labelText: l10n.themeModeLabel,
+                          ),
+                          items: [
                             DropdownMenuItem(
                               value: ThemeMode.system,
-                              child: Text('跟隨系統'),
+                              child: Text(l10n.themeModeSystem),
                             ),
                             DropdownMenuItem(
                               value: ThemeMode.light,
-                              child: Text('淺色'),
+                              child: Text(l10n.themeModeLight),
                             ),
                             DropdownMenuItem(
                               value: ThemeMode.dark,
-                              child: Text('深色'),
+                              child: Text(l10n.themeModeDark),
                             ),
                           ],
                           onChanged: (value) {
@@ -274,24 +393,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(height: 12),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('精簡模式'),
-                          subtitle: const Text('首頁與部分卡片減少說明文字顯示；桌面首頁固定維持精簡。'),
+                          title: Text(l10n.compactModeTitle),
+                          subtitle: Text(l10n.compactModeDescription),
                           value: controller.settings.enableCompactMode,
                           onChanged: controller.updateEnableCompactMode,
                         ),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('顯示天氣'),
-                          subtitle: const Text('在首頁標題旁顯示目前氣溫，點一下可開啟完整預報。'),
+                          title: Text(l10n.showWeatherTitle),
+                          subtitle: Text(l10n.showWeatherDescription),
                           value: controller.settings.showWeatherInAppBar,
                           onChanged: controller.updateShowWeatherInAppBar,
                         ),
                         if (isAndroid || isIOS) ...[
                           const SizedBox(height: 12),
-                          DropdownButtonFormField<MobileMapProvider>(
+                          AppDropdownFormField<MobileMapProvider>(
+                            isExpanded: true,
                             initialValue: controller.settings.mobileMapProvider,
-                            decoration: const InputDecoration(
-                              labelText: '地圖提供者',
+                            decoration: InputDecoration(
+                              labelText: l10n.mapProviderLabel,
                             ),
                             items: MobileMapProvider.values
                                 .map(
@@ -313,8 +433,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.palette_outlined),
-                          title: const Text('個人化'),
-                          subtitle: const Text('配色、背景透明度'),
+                          title: Text(l10n.personalizationTitle),
+                          subtitle: Text(l10n.personalizationDescription),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () {
                             Navigator.of(context).push(
@@ -338,11 +458,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.account_circle_outlined),
-                      title: const Text('帳戶'),
+                      title: Text(l10n.accountTitle),
                       subtitle: Text(
                         authSession == null
-                            ? '尚未登入。'
-                            : '已登入為 ${authSession.displayName.isEmpty ? authSession.provider : authSession.displayName}',
+                            ? l10n.accountSignedOut
+                            : l10n.accountSignedInAs(
+                                authSession.displayName.isEmpty
+                                    ? authSession.provider
+                                    : authSession.displayName,
+                              ),
                       ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () {
@@ -419,15 +543,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                '已連接的手錶：${status.connectedNodeNames.join('、')}'
-                                '${status.connectedNodeCount > 1 ? ' 等 ${status.connectedNodeCount} 台' : ''}',
+                                status.connectedNodeCount > 1
+                                    ? l10n.wearConnectedWatches(
+                                        localizedList(
+                                          l10n,
+                                          status.connectedNodeNames,
+                                        ),
+                                        status.connectedNodeCount,
+                                      )
+                                    : l10n.wearConnectedWatch(
+                                        localizedList(
+                                          l10n,
+                                          status.connectedNodeNames,
+                                        ),
+                                      ),
                                 style: Theme.of(context).textTheme.bodyMedium,
                               ),
                               const SizedBox(height: 12),
                               SwitchListTile(
                                 contentPadding: EdgeInsets.zero,
-                                title: const Text('啓用 Wear OS 同步'),
-                                subtitle: const Text('將最愛站牌同步到手錶'),
+                                title: Text(l10n.wearSyncTitle),
+                                subtitle: Text(l10n.wearSyncDescription),
                                 value: controller.settings.wearSyncEnabled,
                                 onChanged: controller.updateWearSyncEnabled,
                               ),
@@ -436,7 +572,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   Padding(
                                     padding: const EdgeInsets.only(top: 8),
                                     child: Text(
-                                      '尚無最愛站牌。請先新增最愛，再進行同步。',
+                                      l10n.wearNoFavorites,
                                       style: Theme.of(
                                         context,
                                       ).textTheme.bodyMedium,
@@ -444,15 +580,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   )
                                 else ...[
                                   const SizedBox(height: 8),
-                                  DropdownButtonFormField<String>(
+                                  AppDropdownFormField<String>(
+                                    isExpanded: true,
                                     initialValue: selectedValue,
-                                    decoration: const InputDecoration(
-                                      labelText: '同步分類',
+                                    decoration: InputDecoration(
+                                      labelText: l10n.wearSyncCategory,
                                     ),
                                     items: [
-                                      const DropdownMenuItem(
+                                      DropdownMenuItem(
                                         value: '__all__',
-                                        child: Text('所有分類'),
+                                        child: Text(l10n.wearAllCategories),
                                       ),
                                       ...groupNames.map(
                                         (groupName) => DropdownMenuItem(
@@ -498,23 +635,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '資料庫與下載',
+                            l10n.databaseDownloadsTitle,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '目前地區：${controller.settings.provider.label}',
+                            l10n.databaseCurrentRegion(
+                              controller.settings.provider.label,
+                            ),
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            '啓動更新：${controller.settings.databaseAutoUpdateMode.label}',
+                            l10n.databaseStartupUpdate(
+                              localizedDatabaseAutoUpdateMode(
+                                l10n,
+                                controller.settings.databaseAutoUpdateMode,
+                              ),
+                            ),
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                           if (controller.hasPendingDatabaseUpdates) ...[
                             const SizedBox(height: 4),
                             Text(
-                              '目前有 ${controller.pendingDatabaseUpdates.length} 個地區可更新',
+                              l10n.databasePendingRegions(
+                                controller.pendingDatabaseUpdates.length,
+                              ),
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],
@@ -532,7 +678,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               );
                             },
                             icon: const Icon(Icons.storage_rounded),
-                            label: const Text('開啓資料庫頁面'),
+                            label: Text(l10n.databaseOpenPage),
                           ),
                         ],
                       ),
@@ -547,16 +693,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '使用與更新',
+                          l10n.usageAndUpdatesTitle,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 16),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('強制顯示秒數'),
-                          subtitle: const Text(
-                            '這個通常不太準',
-                            style: TextStyle(
+                          title: Text(l10n.alwaysShowSecondsTitle),
+                          subtitle: Text(
+                            l10n.alwaysShowSecondsDescription,
+                            style: const TextStyle(
                               decoration: TextDecoration.lineThrough,
                             ),
                           ),
@@ -566,8 +712,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         if (isAndroid || isIOS)
                           SwitchListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('震動回饋'),
-                            subtitle: const Text('點選及操作時提供觸覺回饋'),
+                            title: Text(l10n.hapticFeedbackTitle),
+                            subtitle: Text(l10n.hapticFeedbackDescription),
                             value: controller.settings.enableHapticFeedback,
                             onChanged: controller.updateEnableHapticFeedback,
                           ),
@@ -575,7 +721,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             defaultTargetPlatform == TargetPlatform.android)
                           SwitchListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('顯示廣告'),
+                            title: Text(l10n.showAdsTitle),
                             subtitle: _adToggleLocked
                                 ? Text.rich(
                                     TextSpan(
@@ -589,12 +735,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                             height: 20,
                                           ),
                                         ),
-                                        const TextSpan(text: ' 再玩啊哈哈'),
+                                        TextSpan(text: l10n.adsLockedMessage),
                                       ],
                                     ),
                                   )
                                 : controller.settings.enableAds
-                                ? const Text('把開發者的飯碗搶走。')
+                                ? Text(l10n.adsEnabledDescription)
                                 : Text.rich(
                                     TextSpan(
                                       children: [
@@ -612,7 +758,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         ),
                                         TextSpan(
                                           text:
-                                              ' ${["我求你了", "我跪著有用嗎", "你不能這樣對我", "QAQ"][Random().nextInt(4)]}',
+                                              ' ${[l10n.adsPleaOne, l10n.adsPleaTwo, l10n.adsPleaThree, l10n.adsPleaFour][Random().nextInt(4)]}',
                                         ),
                                       ],
                                     ),
@@ -635,16 +781,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const AdDensitySetting(),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('智慧推薦'),
-                          subtitle: const Text('依照你常開啓的時段與路線，在首頁顯示推薦。'),
+                          title: Text(l10n.smartRecommendationsTitle),
+                          subtitle: Text(l10n.smartRecommendationsDescription),
                           value: controller.settings.enableSmartRecommendations,
                           onChanged:
                               controller.updateEnableSmartRecommendations,
                         ),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('自動加入常用最愛'),
-                          subtitle: const Text('同一站牌短期內搭乘多次後，自動加入「常用」最愛群組。'),
+                          title: Text(l10n.autoFavoriteTitle),
+                          subtitle: Text(l10n.autoFavoriteDescription),
                           value: controller
                               .settings
                               .enableAutoFavoriteFrequentStops,
@@ -654,8 +800,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         if (isAndroid)
                           SwitchListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('智慧推薦通知'),
-                            subtitle: const Text('在常用時段背景提醒你可能想看的路線。'),
+                            title: Text(l10n.smartNotificationTitle),
+                            subtitle: Text(l10n.smartNotificationDescription),
                             value: controller
                                 .settings
                                 .enableSmartRouteNotifications,
@@ -668,8 +814,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('進入公車頁保持亮屏'),
-                          subtitle: const Text('在路線詳細頁面維持螢幕常亮。'),
+                          title: Text(l10n.keepScreenAwakeTitle),
+                          subtitle: Text(l10n.keepScreenAwakeDescription),
                           value:
                               controller.settings.keepScreenAwakeOnRouteDetail,
                           onChanged:
@@ -678,11 +824,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         if (supportsRouteBackgroundMonitor)
                           SwitchListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('背景乘車提醒'),
+                            title: Text(l10n.backgroundTripTitle),
                             subtitle: Text(
                               isIOS
-                                  ? '需要通知與背景定位權限，才能在背景持續提醒搭車狀態。'
-                                  : '需要通知與定位權限，才能在背景持續提醒搭車狀態。',
+                                  ? l10n.backgroundTripIosDescription
+                                  : l10n.backgroundTripDescription,
                             ),
                             value: controller
                                 .settings
@@ -695,20 +841,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         if (isAndroid) ...[
                           const SizedBox(height: 12),
-                          DropdownButtonFormField<int>(
+                          AppDropdownFormField<int>(
+                            isExpanded: true,
                             initialValue: controller
                                 .settings
                                 .favoriteWidgetAutoRefreshMinutes,
-                            decoration: const InputDecoration(
-                              labelText: '最愛小工具背景更新',
-                              helperText: 'Android 小工具最低更新間隔為 15 分鐘。',
+                            decoration: InputDecoration(
+                              labelText: l10n.favoriteWidgetRefreshLabel,
+                              helperText: l10n.favoriteWidgetRefreshHelper,
                             ),
                             items: _favoriteWidgetRefreshOptions
                                 .map(
                                   (minutes) => DropdownMenuItem(
                                     value: minutes,
                                     child: Text(
-                                      _favoriteWidgetRefreshLabel(minutes),
+                                      _favoriteWidgetRefreshLabel(
+                                        l10n,
+                                        minutes,
+                                      ),
                                     ),
                                   ),
                                 )
@@ -724,20 +874,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ],
                         const SizedBox(height: 8),
-                        Text('一般更新間隔：${controller.settings.busUpdateTime} 秒'),
+                        Text(
+                          l10n.normalUpdateInterval(
+                            controller.settings.busUpdateTime,
+                          ),
+                        ),
                         Slider(
                           min: 5,
                           max: 60,
                           divisions: 11,
                           value: controller.settings.busUpdateTime.toDouble(),
-                          label: '${controller.settings.busUpdateTime} 秒',
+                          label: l10n.secondsValue(
+                            controller.settings.busUpdateTime,
+                          ),
                           onChanged: (value) {
                             controller.updateBusUpdateTime(value.round());
                           },
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '錯誤後重試間隔：${controller.settings.busErrorUpdateTime} 秒',
+                          l10n.retryInterval(
+                            controller.settings.busErrorUpdateTime,
+                          ),
                         ),
                         Slider(
                           min: 1,
@@ -745,7 +903,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           divisions: 14,
                           value: controller.settings.busErrorUpdateTime
                               .toDouble(),
-                          label: '${controller.settings.busErrorUpdateTime} 秒',
+                          label: l10n.secondsValue(
+                            controller.settings.busErrorUpdateTime,
+                          ),
                           onChanged: (value) {
                             controller.updateBusErrorUpdateTime(value.round());
                           },
@@ -763,20 +923,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'App 更新',
+                            l10n.appUpdatesTitle,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 12),
-                          DropdownButtonFormField<AppUpdateChannel>(
+                          AppDropdownFormField<AppUpdateChannel>(
+                            isExpanded: true,
                             initialValue: controller.settings.appUpdateChannel,
-                            decoration: const InputDecoration(
-                              labelText: '更新通道',
+                            decoration: InputDecoration(
+                              labelText: l10n.updateChannelLabel,
                             ),
                             items: AppUpdateChannel.values
                                 .map(
                                   (channel) => DropdownMenuItem(
                                     value: channel,
-                                    child: Text(channel.label),
+                                    child: Text(
+                                      localizedAppUpdateChannel(l10n, channel),
+                                    ),
                                   ),
                                 )
                                 .toList(),
@@ -787,17 +950,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             },
                           ),
                           const SizedBox(height: 12),
-                          DropdownButtonFormField<AppUpdateCheckMode>(
+                          AppDropdownFormField<AppUpdateCheckMode>(
+                            isExpanded: true,
                             initialValue:
                                 controller.settings.appUpdateCheckMode,
-                            decoration: const InputDecoration(
-                              labelText: '啓動時檢查',
+                            decoration: InputDecoration(
+                              labelText: l10n.updateCheckOnLaunchLabel,
                             ),
                             items: AppUpdateCheckMode.values
                                 .map(
                                   (mode) => DropdownMenuItem(
                                     value: mode,
-                                    child: Text(mode.label),
+                                    child: Text(
+                                      localizedAppUpdateCheckMode(l10n, mode),
+                                    ),
                                   ),
                                 )
                                 .toList(),
@@ -809,12 +975,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            controller.settings.appUpdateChannel.description,
+                            localizedAppUpdateChannelDescription(
+                              l10n,
+                              controller.settings.appUpdateChannel,
+                            ),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            controller.settings.appUpdateCheckMode.description,
+                            localizedAppUpdateCheckModeDescription(
+                              l10n,
+                              controller.settings.appUpdateCheckMode,
+                            ),
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 12),
@@ -832,15 +1004,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 : const Icon(Icons.system_update_alt_rounded),
                             label: Text(
                               controller.checkingAppUpdate
-                                  ? '檢查中…'
-                                  : '立即檢查 App 更新',
+                                  ? l10n.appUpdateChecking
+                                  : l10n.appUpdateCheckNow,
                             ),
                           ),
                           if (controller.lastAppUpdateResult
                               case final result?) ...[
                             const SizedBox(height: 12),
                             Text(
-                              '最近結果：${result.message}',
+                              l10n.appUpdateRecentResult(
+                                localizedAppUpdateResult(l10n, result),
+                              ),
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],
@@ -857,27 +1031,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '紀錄與隱私',
+                          l10n.historyPrivacyTitle,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 12),
-                        Text('搜尋紀錄上限：${controller.settings.maxHistory} 筆'),
+                        Text(
+                          l10n.searchHistoryLimit(
+                            controller.settings.maxHistory,
+                          ),
+                        ),
                         Slider(
                           min: 0,
                           max: 30,
                           divisions: 30,
                           value: controller.settings.maxHistory.toDouble(),
-                          label: '${controller.settings.maxHistory} 筆',
+                          label: l10n.itemsValue(
+                            controller.settings.maxHistory,
+                          ),
                           onChanged: (value) {
                             controller.updateMaxHistory(value.round());
                           },
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '智慧推薦路線：${controller.routeUsageProfiles.length} 條',
+                          l10n.smartRoutesCount(
+                            controller.routeUsageProfiles.length,
+                          ),
                         ),
                         const SizedBox(height: 4),
-                        Text('路線選擇紀錄：${controller.recordedRouteSelections} 次'),
+                        Text(
+                          l10n.routeSelectionsCount(
+                            controller.recordedRouteSelections,
+                          ),
+                        ),
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 12,
@@ -886,17 +1072,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             OutlinedButton.icon(
                               onPressed: controller.clearHistory,
                               icon: const Icon(Icons.delete_outline_rounded),
-                              label: const Text('清除搜尋紀錄'),
+                              label: Text(l10n.clearSearchHistory),
                             ),
                             OutlinedButton.icon(
                               onPressed: controller.clearRouteUsageProfiles,
                               icon: const Icon(Icons.psychology_alt_outlined),
-                              label: const Text('清除智慧推薦紀錄'),
+                              label: Text(l10n.clearSmartHistory),
                             ),
                             OutlinedButton.icon(
                               onPressed: controller.clearRouteSelectionHistory,
                               icon: const Icon(Icons.route_outlined),
-                              label: const Text('清除路線選擇紀錄'),
+                              label: Text(l10n.clearRouteSelectionHistory),
                             ),
                           ],
                         ),
@@ -904,7 +1090,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.gavel_outlined),
-                          title: const Text('服務條款'),
+                          title: Text(l10n.termsOfService),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () {
                             Navigator.of(
@@ -915,7 +1101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.privacy_tip_outlined),
-                          title: const Text('隱私權政策'),
+                          title: Text(l10n.privacyPolicy),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () {
                             Navigator.of(
@@ -935,7 +1121,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '開始流程',
+                          l10n.onboardingSettingsTitle,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 12),
@@ -948,7 +1134,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Navigator.of(context).pop();
                           },
                           icon: const Icon(Icons.restart_alt_rounded),
-                          label: const Text('重新執行開始流程'),
+                          label: Text(l10n.restartOnboarding),
                         ),
                       ],
                     ),
@@ -962,60 +1148,120 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '關於',
+                          l10n.aboutTitle,
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 85,
+                              height: 85,
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(22),
+                              ),
+                              alignment: Alignment.center,
+                              child: SvgPicture.asset(
+                                'assets/branding/icon.svg',
+                                width: 45,
+                                height: 45,
+                                semanticsLabel: 'YABus',
+                                colorFilter: ColorFilter.mode(
+                                  theme.colorScheme.onPrimaryContainer,
+                                  BlendMode.srcIn,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'YABus',
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'YetAnotherBusApp',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      _buildAboutChip(
+                                        theme,
+                                        icon: Icons.sell_outlined,
+                                        label: buildInfo.displayVersion,
+                                      ),
+                                      _buildAboutChip(
+                                        theme,
+                                        icon: Icons.commit_rounded,
+                                        label: buildInfo.shortGitSha,
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 32),
                         Text(
-                          'YetAnotherBusApp',
-                          style: Theme.of(context).textTheme.titleSmall,
+                          l10n.contributorsTitle,
+                          style: theme.textTheme.titleSmall,
                         ),
-                        const SizedBox(height: 8),
-                        Text('版本：${buildInfo.displayVersion}'),
-                        Text('commit：${buildInfo.shortGitSha}'),
-                        const SizedBox(height: 8),
-                        Text.rich(
-                          TextSpan(
-                            style: theme.textTheme.bodyMedium,
-                            children: [
-                              const TextSpan(text: '貢獻者清單：\n'),
-                              _buildRgbContributorSpan(
-                                'AvianJay',
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final contributor
+                                in _contributorGithubUris.entries)
+                              _buildContributorChip(
+                                context,
                                 theme,
-                                _rgbContributorPalette[0],
+                                contributor.key,
+                                contributor.value,
                               ),
-                              const TextSpan(text: '\n'),
-                              _buildRgbContributorSpan(
-                                'itouSouta',
-                                theme,
-                                _rgbContributorPalette[1],
-                              ),
-                              const TextSpan(text: '\n'),
-                              _buildRgbContributorSpan(
-                                'Axoled',
-                                theme,
-                                _rgbContributorPalette[2],
-                              ),
-                            ],
-                          ),
+                          ],
                         ),
-                        const SizedBox(height: 12),
+                        const Divider(height: 32),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const FaIcon(
                             FontAwesomeIcons.discord,
                             size: 22,
                           ),
-                          title: const Text('加入角蛙社群'),
-                          subtitle: const Text('我的 Discord 伺服器 uwu'),
+                          title: Text(l10n.communityTitle),
+                          subtitle: Text(l10n.communityDescription),
                           trailing: const Icon(Icons.open_in_new_rounded),
                           onTap: () => _openDiscordCommunity(context),
                         ),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
+                          leading: const FaIcon(
+                            FontAwesomeIcons.instagram,
+                            size: 22,
+                          ),
+                          title: const Text('Instagram'),
+                          subtitle: const Text('@yabus.tw'),
+                          trailing: const Icon(Icons.open_in_new_rounded),
+                          onTap: () => _openInstagram(context),
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.feedback_outlined),
-                          title: const Text('意見回饋'),
-                          subtitle: const Text('回報問題、提出功能需求或任何想說的話'),
+                          title: Text(l10n.feedbackTitle),
+                          subtitle: Text(l10n.feedbackDescription),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () {
                             Navigator.of(context).pushNamed(AppRoutes.feedback);
