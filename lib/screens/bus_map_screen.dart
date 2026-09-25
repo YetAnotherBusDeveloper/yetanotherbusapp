@@ -854,14 +854,7 @@ class _BusMapScreenState extends State<BusMapScreen>
 
     final map = _unsupported
         ? _buildUnsupportedNotice(theme)
-        : ValueListenableBuilder<int>(
-            valueListenable: _animationTick,
-            builder: (context, _, _) => _buildMap(
-              theme,
-              drawSet,
-              controller.settings.mobileMapProvider,
-            ),
-          );
+        : _buildMap(theme, drawSet, controller.settings.mobileMapProvider);
 
     final overlay = Stack(
       children: [
@@ -1237,14 +1230,19 @@ class _BusMapScreenState extends State<BusMapScreen>
     MobileMapProvider mapProvider,
   ) {
     if (useGoogleMapsProviderFor(mapProvider)) {
-      return _buildGoogleMap(theme, drawSet);
+      // google_maps_flutter updates markers through widget configuration, so
+      // its map still needs the animation tick. The FlutterMap backend below
+      // can isolate ticks to one marker layer instead of rebuilding the map.
+      return ValueListenableBuilder<int>(
+        valueListenable: _animationTick,
+        builder: (context, _, _) => _buildGoogleMap(theme, drawSet),
+      );
     }
     return _buildFlutterMap(theme, drawSet);
   }
 
   Widget _buildFlutterMap(ThemeData theme, _BusMapDrawSet drawSet) {
     final buses = drawSet.buses;
-    final now = DateTime.now();
     final geometry = _selectedGeometry;
     return FlutterMap(
       mapController: _mapController,
@@ -1346,7 +1344,16 @@ class _BusMapScreenState extends State<BusMapScreen>
                 ),
             ],
           ),
-        MarkerLayer(markers: _osmBusMarkers(buses, now)),
+        // A selected route animates four times per second. Keep that hot
+        // rebuild below FlutterMap so tiles, route geometry, stop pins and
+        // clusters remain untouched between server snapshots.
+        ValueListenableBuilder<int>(
+          valueListenable: _animationTick,
+          builder: (context, _, _) => MarkerLayer(
+            key: const ValueKey('bus-map-moving-marker-layer'),
+            markers: _osmBusMarkers(buses, DateTime.now()),
+          ),
+        ),
       ],
     );
   }
