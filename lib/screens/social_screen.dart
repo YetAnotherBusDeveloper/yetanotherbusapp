@@ -19,28 +19,46 @@ class SocialScreen extends StatefulWidget {
 }
 
 class _SocialScreenState extends State<SocialScreen> {
+  final TextEditingController _noteController = TextEditingController();
+  SocialShareActivity _activity = SocialShareActivity.waiting;
+  SocialShareDuration _duration = SocialShareDuration.oneHour;
   LocationSharePrecision _precision = LocationSharePrecision.approximate;
+  bool _includeLocation = false;
   bool _sharing = false;
 
-  Future<void> _shareLocation() async {
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _shareUpdate() async {
     if (_sharing) {
       return;
     }
+    final displayName =
+        AppControllerScope.of(context).authSession?.displayName ?? '';
     setState(() => _sharing = true);
 
     try {
-      final position = await resolveUserPosition(
-        timeLimit: const Duration(seconds: 8),
-        accuracy: _precision == LocationSharePrecision.exact
-            ? LocationAccuracy.high
-            : LocationAccuracy.medium,
-      );
-      final shareText = LocationShareMessage.text(
+      final position = _includeLocation
+          ? await resolveUserPosition(
+              timeLimit: const Duration(seconds: 8),
+              accuracy: _precision == LocationSharePrecision.exact
+                  ? LocationAccuracy.high
+                  : LocationAccuracy.medium,
+            )
+          : null;
+      final shareText = SocialShareMessage.compose(
+        displayName: displayName,
+        activity: _activity,
+        duration: _duration,
+        note: _noteController.text,
         position: position,
         precision: _precision,
       );
       final result = await SharePlus.instance.share(
-        ShareParams(text: shareText, subject: 'YetAnotherBusApp 位置分享'),
+        ShareParams(text: shareText, subject: 'YetAnotherBusApp 動態分享'),
       );
 
       if (!mounted) {
@@ -48,7 +66,7 @@ class _SocialScreenState extends State<SocialScreen> {
       }
       if (result.status == ShareResultStatus.unavailable) {
         await Clipboard.setData(ClipboardData(text: shareText));
-        _showMessage('無法開啟系統分享面板，已將位置連結複製到剪貼簿。');
+        _showMessage('無法開啟系統分享面板，已將動態複製到剪貼簿。');
       } else {
         _showMessage('已開啟分享面板。');
       }
@@ -58,7 +76,7 @@ class _SocialScreenState extends State<SocialScreen> {
       }
       final failure = error is LocationFailure ? error : null;
       _showMessage(
-        failure?.message ?? '分享位置失敗：${friendlyErrorMessage(error)}',
+        failure?.message ?? '分享動態失敗：${friendlyErrorMessage(error)}',
         action: failure?.serviceDisabled == true
             ? SnackBarAction(
                 label: '定位設定',
@@ -88,6 +106,10 @@ class _SocialScreenState extends State<SocialScreen> {
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final theme = Theme.of(context);
+    final displayName = controller.authSession?.displayName.trim();
+    final senderName = displayName == null || displayName.isEmpty
+        ? '你'
+        : displayName;
 
     return Scaffold(
       appBar: AppBar(title: const Text('社交與位置分享')),
@@ -106,45 +128,143 @@ class _SocialScreenState extends State<SocialScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('分享你現在在哪裡', style: theme.textTheme.titleLarge),
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              child: Text(
+                                senderName.characters.first.toUpperCase(),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '分享新動態',
+                                    style: theme.textTheme.titleLarge,
+                                  ),
+                                  Text(
+                                    '以 $senderName 的身分分享',
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                         const SizedBox(height: 8),
                         Text(
-                          '只有在你按下按鈕後才會取得位置。位置不會寫入帳號同步，也不會持續追蹤。',
+                          '告訴朋友你的交通狀態，也可選擇性附上目前位置。',
                           style: theme.textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 20),
-                        Text('分享精度', style: theme.textTheme.titleSmall),
+                        Text('你正在做什麼？', style: theme.textTheme.titleSmall),
                         const SizedBox(height: 8),
-                        SegmentedButton<LocationSharePrecision>(
-                          expandedInsets: EdgeInsets.zero,
-                          segments: [
-                            for (final option in LocationSharePrecision.values)
-                              ButtonSegment(
-                                value: option,
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final option in SocialShareActivity.values)
+                              ChoiceChip(
                                 label: Text(option.label),
-                                icon: Icon(
-                                  option == LocationSharePrecision.exact
-                                      ? Icons.gps_fixed_rounded
-                                      : Icons.location_searching_rounded,
-                                ),
+                                selected: _activity == option,
+                                onSelected: _sharing
+                                    ? null
+                                    : (_) => setState(() => _activity = option),
                               ),
                           ],
-                          selected: {_precision},
-                          onSelectionChanged: _sharing
-                              ? null
-                              : (selected) =>
-                                    setState(() => _precision = selected.first),
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _precision.description,
-                          style: theme.textTheme.bodySmall,
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _noteController,
+                          enabled: !_sharing,
+                          maxLength: SocialShareMessage.noteMaxLength,
+                          maxLines: 3,
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: '想說什麼？（選填）',
+                            hintText: '例如：我在 2 號出口等你',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: _includeLocation,
+                          onChanged: _sharing
+                              ? null
+                              : (value) =>
+                                    setState(() => _includeLocation = value),
+                          title: const Text('附上目前位置'),
+                          subtitle: const Text('關閉時不會請求定位權限'),
+                          secondary: const Icon(Icons.location_on_outlined),
+                        ),
+                        if (_includeLocation) ...[
+                          const SizedBox(height: 8),
+                          SegmentedButton<LocationSharePrecision>(
+                            expandedInsets: EdgeInsets.zero,
+                            segments: [
+                              for (final option
+                                  in LocationSharePrecision.values)
+                                ButtonSegment(
+                                  value: option,
+                                  label: Text(option.label),
+                                  icon: Icon(
+                                    option == LocationSharePrecision.exact
+                                        ? Icons.gps_fixed_rounded
+                                        : Icons.location_searching_rounded,
+                                  ),
+                                ),
+                            ],
+                            selected: {_precision},
+                            onSelectionChanged: _sharing
+                                ? null
+                                : (selected) => setState(
+                                    () => _precision = selected.first,
+                                  ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _precision.description,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<SocialShareDuration>(
+                          initialValue: _duration,
+                          decoration: const InputDecoration(
+                            labelText: '建議查看期限',
+                            prefixIcon: Icon(Icons.timer_outlined),
+                            border: OutlineInputBorder(),
+                          ),
+                          items: [
+                            for (final option in SocialShareDuration.values)
+                              DropdownMenuItem(
+                                value: option,
+                                child: Text(option.label),
+                              ),
+                          ],
+                          onChanged: _sharing
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    setState(() => _duration = value);
+                                  }
+                                },
+                        ),
+                        const SizedBox(height: 16),
+                        _UpdatePreview(
+                          activity: _activity,
+                          note: _noteController.text,
+                          includeLocation: _includeLocation,
+                          precision: _precision,
+                          duration: _duration,
                         ),
                         const SizedBox(height: 20),
                         SizedBox(
                           width: double.infinity,
                           child: FilledButton.icon(
-                            onPressed: _sharing ? null : _shareLocation,
+                            onPressed: _sharing ? null : _shareUpdate,
                             icon: _sharing
                                 ? const SizedBox.square(
                                     dimension: 18,
@@ -152,8 +272,12 @@ class _SocialScreenState extends State<SocialScreen> {
                                       strokeWidth: 2,
                                     ),
                                   )
-                                : const Icon(Icons.share_location_rounded),
-                            label: Text(_sharing ? '正在取得位置…' : '分享目前位置'),
+                                : const Icon(Icons.ios_share_rounded),
+                            label: Text(
+                              _sharing
+                                  ? (_includeLocation ? '正在取得位置…' : '正在開啟分享…')
+                                  : '分享動態',
+                            ),
                           ),
                         ),
                       ],
@@ -167,6 +291,89 @@ class _SocialScreenState extends State<SocialScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _UpdatePreview extends StatelessWidget {
+  const _UpdatePreview({
+    required this.activity,
+    required this.note,
+    required this.includeLocation,
+    required this.precision,
+    required this.duration,
+  });
+
+  final SocialShareActivity activity;
+  final String note;
+  final bool includeLocation;
+  final LocationSharePrecision precision;
+  final SocialShareDuration duration;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final normalizedNote = SocialShareMessage.normalizeNote(note);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.visibility_outlined,
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text('分享預覽', style: theme.textTheme.labelLarge),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(activity.label, style: theme.textTheme.titleMedium),
+            if (normalizedNote.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(normalizedNote),
+            ],
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _PreviewChip(
+                  icon: includeLocation
+                      ? Icons.location_on_outlined
+                      : Icons.location_off_outlined,
+                  label: includeLocation ? precision.label : '不分享位置',
+                ),
+                _PreviewChip(icon: Icons.timer_outlined, label: duration.label),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PreviewChip extends StatelessWidget {
+  const _PreviewChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      avatar: Icon(icon, size: 16),
+      label: Text(label),
+      visualDensity: VisualDensity.compact,
     );
   }
 }
@@ -218,7 +425,7 @@ class _PrivacyCard extends StatelessWidget {
             SizedBox(width: 12),
             Expanded(
               child: Text(
-                '安全提醒：位置連結可以被轉傳，請確認收件人可信任。這個功能目前是一次性分享，不是好友即時定位或背景追蹤。',
+                '安全提醒：只有按下分享時才會取得位置，不會背景追蹤。建議查看期限不會自動刪除其他 App 中的內容，位置連結也可能被轉傳，請只分享給信任的人。',
               ),
             ),
           ],

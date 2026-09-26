@@ -44,4 +44,59 @@ void main() {
     expect(text, contains('一次性分享'));
     expect(text, contains('100 公尺'));
   });
+
+  test('social update can share information without requesting a location', () {
+    final text = SocialShareMessage.compose(
+      displayName: 'Steven',
+      activity: SocialShareActivity.waiting,
+      duration: SocialShareDuration.fifteenMinutes,
+      note: '  我在捷運站  2 號出口等你  ',
+      createdAt: DateTime(2026, 9, 23, 9, 30),
+    );
+
+    expect(text, contains('Steven 的近況｜正在等車'));
+    expect(text, contains('我在捷運站 2 號出口等你'));
+    expect(text, contains('建議查看至：2026/09/23 09:45'));
+    expect(text, isNot(contains('google.com/maps')));
+  });
+
+  test('social update includes privacy-labelled approximate location', () {
+    final text = SocialShareMessage.compose(
+      displayName: '',
+      activity: SocialShareActivity.arriving,
+      duration: SocialShareDuration.oneHour,
+      position: _position(),
+      createdAt: DateTime(2026, 9, 23, 9, 30),
+    );
+
+    expect(text, contains('我的近況｜即將抵達'));
+    expect(text, contains('位置（概略位置）'));
+    expect(text, contains('25.033%2C121.565'));
+    expect(text, contains('無法遠端撤回'));
+  });
+
+  test('social update limits long notes', () {
+    final note = List.filled(140, 'a').join();
+    final text = SocialShareMessage.compose(
+      displayName: 'Steven',
+      activity: SocialShareActivity.riding,
+      duration: SocialShareDuration.oneDay,
+      note: note,
+      createdAt: DateTime(2026, 9, 23),
+    );
+
+    expect(text, contains(List.filled(120, 'a').join()));
+    expect(text, isNot(contains(List.filled(121, 'a').join())));
+  });
+
+  test('social update preserves emoji grapheme at the character limit', () {
+    const familyEmoji = '👨‍👩‍👧‍👦';
+    final note = '${List.filled(119, 'a').join()}$familyEmoji';
+
+    final normalized = SocialShareMessage.normalizeNote(note);
+
+    expect(normalized, note);
+    expect(normalized, endsWith(familyEmoji));
+    expect(normalized.runes, isNot(contains(0xFFFD)));
+  });
 }
