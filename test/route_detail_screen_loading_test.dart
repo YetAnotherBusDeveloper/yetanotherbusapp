@@ -100,6 +100,8 @@ RouteDetailData _detail({
   int? eta,
   String name = '測試路線',
   String? nameEn,
+  String? pathName,
+  String? pathNameEn,
   DateTime? updatedAt,
   List<String> family = const [],
   bool withBus = false,
@@ -121,14 +123,14 @@ RouteDetailData _detail({
     PathInfo(
       routeKey: 500,
       pathId: 0,
-      name: '去程',
-      nameEn: nameEn == null ? null : 'Outbound',
+      name: pathName ?? '去程',
+      nameEn: pathNameEn ?? (nameEn == null ? null : 'Outbound'),
     ),
     PathInfo(
       routeKey: 500,
       pathId: 1,
-      name: '返程',
-      nameEn: nameEn == null ? null : 'Inbound',
+      name: pathName ?? '返程',
+      nameEn: pathNameEn ?? (nameEn == null ? null : 'Inbound'),
     ),
   ],
   stopsByPath: {
@@ -368,6 +370,46 @@ void main() {
     expect(find.text('Inbound Stop 1\n返程站1'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  _screenTest(
+    'long path names stay within narrow direction tabs',
+    (tester, repository) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      repository.topologyRequests.single.complete(
+        _detail(
+          pathName: '新民高中（健行路）往超長目的地方向與另一個站牌',
+          pathNameEn:
+              'Shin-min Senior High School (Jianxing Road) Long Direction Name',
+        ),
+      );
+      await _frames(tester);
+
+      final tabBarRect = tester.getRect(find.byType(TabBar));
+      for (final tab in find.byType(Tab).evaluate()) {
+        final rect = tester.getRect(find.byWidget(tab.widget));
+        expect(rect.left, greaterThanOrEqualTo(tabBarRect.left));
+        expect(rect.right, lessThanOrEqualTo(tabBarRect.right));
+      }
+      final englishLabel = tester.widget<Text>(
+        find
+            .text(
+              'Shin-min Senior High School (Jianxing Road) Long Direction Name',
+            )
+            .first,
+      );
+      expect(englishLabel.overflow, TextOverflow.ellipsis);
+      final chineseLabel = tester.widget<Text>(
+        find.text('新民高中（健行路）往超長目的地方向與另一個站牌').first,
+      );
+      expect(chineseLabel.overflow, TextOverflow.ellipsis);
+      expect(tester.takeException(), isNull);
+    },
+    locale: const Locale('en'),
+  );
 
   _screenTest(
     'localizes route detail in English at narrow width',

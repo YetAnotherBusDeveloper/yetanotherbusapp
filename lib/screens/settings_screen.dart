@@ -33,6 +33,9 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   static const _favoriteWidgetRefreshOptions = <int>[0, 15, 30, 60, 120, 180];
+  // Keep the base Chinese locale available to Flutter as a fallback, while
+  // offering the more specific Traditional Chinese locale in the picker.
+  static final _fallbackOnlyLocales = <Locale>{const Locale('zh')};
   static final _discordCommunityUri = Uri.parse('https://dc.avianjay.sbs/');
   static final _instagramUri = Uri.parse('https://www.instagram.com/yabus.tw/');
   static final _contributorGithubUris = <String, Uri>{
@@ -278,6 +281,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final l10n = AppLocalizations.of(context);
+    final selectableLocales = AppLocalizations.supportedLocales
+        .where((locale) => !_fallbackOnlyLocales.contains(locale))
+        .toList(growable: false);
+    final selectedLanguage = controller.settings.language;
     final buildInfo = controller.buildInfo;
     final theme = Theme.of(context);
     final hasSettingsBackgroundImage = hasBackgroundImageForPage(
@@ -326,7 +333,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               value: null,
                               child: Text(l10n.languageSystem),
                             ),
-                            ...AppLocalizations.supportedLocales.map(
+                            ...selectableLocales.map(
                               (locale) => DropdownMenuItem<Locale?>(
                                 value: locale,
                                 child: Text(
@@ -334,6 +341,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               ),
                             ),
+                            // Keep an existing fallback-locale preference
+                            // selectable until the user chooses another one.
+                            if (selectedLanguage != null &&
+                                _fallbackOnlyLocales.contains(selectedLanguage))
+                              DropdownMenuItem<Locale?>(
+                                value: selectedLanguage,
+                                child: Text(
+                                  lookupAppLocalizations(
+                                    selectedLanguage,
+                                  ).languageName,
+                                ),
+                              ),
                           ],
                           onChanged: controller.updateLanguage,
                         ),

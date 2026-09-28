@@ -6213,22 +6213,38 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     return Column(
       children: [
         if (_tabController != null)
-          TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            tabAlignment: TabAlignment.center,
-            tabs: detail.paths
-                .map(
-                  (path) => Tab(
-                    child: TransitStationName(
-                      name: path.transitName,
-                      primaryStyle: theme.textTheme.labelLarge,
-                      textAlign: TextAlign.center,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                    ),
-                  ),
-                )
-                .toList(),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const tabHorizontalPadding = 16.0;
+              final maxLabelWidth = math.max(
+                0.0,
+                constraints.maxWidth / math.min(detail.paths.length, 2) -
+                    tabHorizontalPadding * 2,
+              );
+              return TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                tabAlignment: TabAlignment.center,
+                labelPadding: const EdgeInsets.symmetric(
+                  horizontal: tabHorizontalPadding,
+                ),
+                tabs: detail.paths
+                    .map(
+                      (path) => Tab(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: maxLabelWidth),
+                          child: TransitStationName(
+                            name: path.transitName,
+                            primaryStyle: theme.textTheme.labelLarge,
+                            textAlign: TextAlign.center,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
           ),
         Expanded(
           child: FadeTransition(

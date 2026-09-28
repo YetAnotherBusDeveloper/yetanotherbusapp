@@ -17,7 +17,6 @@ import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/interface_scale_text_scaler.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
-import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/widgets/app_dropdown.dart';
 
 void main() {
@@ -83,7 +82,7 @@ void main() {
     timeout: const Timeout(Duration(seconds: 15)),
   );
 
-  testWidgets('settings lists supported locales and can follow system', (
+  testWidgets('settings lists selectable locales and can follow system', (
     tester,
   ) async {
     final controller = (await tester.runAsync(_buildController))!;
@@ -101,17 +100,21 @@ void main() {
     final dropdown = find.byType(AppDropdownFormField<Locale?>);
     expect(dropdown, findsOneWidget);
     expect(
+      tester
+          .widget<AppDropdownFormField<Locale?>>(dropdown)
+          .items
+          .map((item) => item.value),
+      [null, const Locale('en'), const Locale('zh', 'TW')],
+    );
+    expect(
       find.descendant(of: dropdown, matching: find.text('Follow system')),
       findsOneWidget,
     );
     await tester.tap(dropdown);
     await tester.pumpAndSettle();
-    for (final locale in AppLocalizations.supportedLocales) {
-      expect(
-        find.text(lookupAppLocalizations(locale).languageName),
-        findsWidgets,
-      );
-    }
+    expect(find.text('English'), findsWidgets);
+    expect(find.text('繁體中文'), findsWidgets);
+    expect(find.text('中文'), findsNothing);
 
     await tester.tap(find.text('繁體中文').last);
     await tester.pumpAndSettle();
@@ -147,6 +150,47 @@ void main() {
     expect(
       Localizations.localeOf(tester.element(dropdown)),
       const Locale('en'),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('existing fallback-locale preference remains changeable', (
+    tester,
+  ) async {
+    final controller = (await tester.runAsync(_buildController))!;
+    addTearDown(controller.dispose);
+    await tester.runAsync(() => controller.updateLanguage(const Locale('zh')));
+
+    await tester.pumpWidget(
+      BusApp(controller: controller, analytics: controller.analytics),
+    );
+    await tester.pump();
+    Navigator.of(
+      tester.element(find.byType(Navigator).first),
+    ).pushNamed(AppRoutes.settings);
+    await tester.pumpAndSettle();
+
+    final dropdown = find.byType(AppDropdownFormField<Locale?>);
+    expect(
+      tester
+          .widget<AppDropdownFormField<Locale?>>(dropdown)
+          .items
+          .map((item) => item.value),
+      [null, const Locale('en'), const Locale('zh', 'TW'), const Locale('zh')],
+    );
+
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('繁體中文').last);
+    await tester.pumpAndSettle();
+    expect(controller.settings.language, const Locale('zh', 'TW'));
+    expect(
+      tester
+          .widget<AppDropdownFormField<Locale?>>(dropdown)
+          .items
+          .map((item) => item.value),
+      [null, const Locale('en'), const Locale('zh', 'TW')],
     );
 
     await tester.pumpWidget(const SizedBox.shrink());
