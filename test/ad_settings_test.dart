@@ -6,6 +6,7 @@ import 'package:taiwanbus_flutter/app/bus_app.dart';
 import 'package:taiwanbus_flutter/core/ad_service.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/screens/settings_screen.dart';
 import 'package:taiwanbus_flutter/widgets/ad_density_setting.dart';
 
@@ -75,6 +76,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          locale: const Locale('zh', 'TW'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: AppControllerScope(
             controller: controller,
             child: const SettingsScreen(),
