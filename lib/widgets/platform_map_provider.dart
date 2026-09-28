@@ -1,8 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart'
+    show TileBuilder, darkModeTileBuilder;
 import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:latlong2/latlong.dart' as latlong;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/models.dart';
 
@@ -22,18 +25,92 @@ bool useGoogleMapsProviderFor(MobileMapProvider provider) {
   return supportsGoogleMapsProvider && provider == MobileMapProvider.googleMaps;
 }
 
-String mapTileUrlTemplate(Brightness brightness) {
-  if (brightness == Brightness.dark) {
-    return 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
-  }
+/// Identifies this app to the tile servers it talks to.
+///
+/// The OpenStreetMap tile usage policy requires a clear, stable, contactable
+/// `User-Agent` and forbids relying on a library default:
+/// https://operations.osmfoundation.org/policies/tiles/
+const String mapTileUserAgent =
+    'tw.avianjay.taiwanbus.flutter '
+    '(+https://github.com/YetAnotherBusDeveloper/yetanotherbusapp)';
+
+/// URL template for the OpenStreetMap standard raster tiles.
+///
+/// This is deliberately brightness-independent. Dark mode used to point at
+/// CARTO's `dark_all` basemap, but CARTO now serves an "API KEY REQUIRED"
+/// watermark instead of map data to keyless requests (raster basemaps require
+/// a key, and the free commercial tier is 1M tiles/month). Instead we render
+/// the same light tiles in both themes and darken them client-side via
+/// [mapTileBuilder], which keeps the map key-free on every platform.
+String mapTileUrlTemplate() {
   return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 }
 
-List<String> mapTileSubdomains(Brightness brightness) {
+/// Wraps each tile so dark mode can recolour the light basemap in place.
+///
+/// Returns `null` in light mode, which leaves the tiles untouched.
+TileBuilder? mapTileBuilder(Brightness brightness) {
   if (brightness == Brightness.dark) {
-    return const <String>['a', 'b', 'c', 'd'];
+    return darkModeTileBuilder;
   }
-  return const <String>[];
+  return null;
+}
+
+/// Attribution overlay required by the OpenStreetMap tile usage policy.
+///
+/// The policy requires visible licence attribution that is never hidden
+/// beneath other UI or moved off-screen, so this is a permanently visible box
+/// rather than a collapsed popup. Only add it to the OSM-backed map: the
+/// Google Maps backend carries its own attribution.
+///
+/// [alignment] must be a corner the map's own controls do not occupy.
+Widget mapTileAttribution({Alignment alignment = Alignment.bottomRight}) {
+  return SafeArea(
+    child: Align(
+      alignment: alignment,
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: const _MapTileAttribution(),
+      ),
+    ),
+  );
+}
+
+/// Deliberately not [SimpleAttributionWidget]: that lays its label out in a
+/// [Row], so the full licence text cannot wrap and overflows narrow maps.
+/// Here the text is allowed to wrap instead, which keeps the attribution
+/// complete and on-screen at every width.
+class _MapTileAttribution extends StatelessWidget {
+  const _MapTileAttribution();
+
+  static final Uri _copyrightUri = Uri.parse(
+    'https://www.openstreetmap.org/copyright',
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface.withValues(alpha: 0.82),
+      borderRadius: BorderRadius.circular(4),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () {
+          launchUrl(_copyrightUri, mode: LaunchMode.externalApplication);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          child: Text(
+            '© OpenStreetMap contributors',
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 10,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 Set<Factory<OneSequenceGestureRecognizer>> buildGoogleMapGestureRecognizers() {

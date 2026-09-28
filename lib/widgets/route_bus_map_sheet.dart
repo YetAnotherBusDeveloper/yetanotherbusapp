@@ -1284,9 +1284,9 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                   ),
                   children: [
                     TileLayer(
-                      urlTemplate: mapTileUrlTemplate(theme.brightness),
-                      subdomains: mapTileSubdomains(theme.brightness),
-                      userAgentPackageName: 'tw.avianjay.taiwanbus.flutter',
+                      urlTemplate: mapTileUrlTemplate(),
+                      userAgentPackageName: mapTileUserAgent,
+                      tileBuilder: mapTileBuilder(theme.brightness),
                     ),
                     PolylineLayer(
                       // There is only one route in this layer. Keeping its
@@ -1429,6 +1429,8 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                           }(),
                         ],
                       ),
+                    // Bottom-left because the recenter FAB owns bottom-right.
+                    mapTileAttribution(alignment: Alignment.bottomLeft),
                   ],
                 ),
         ),
