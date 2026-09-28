@@ -82,7 +82,7 @@ class BusApp extends StatelessWidget {
                   onGenerateTitle: (context) =>
                       AppLocalizations.of(context).appTitle,
                   debugShowCheckedModeBanner: false,
-                  locale: _localeForLanguage(controller.settings.language),
+                  locale: controller.settings.language,
                   localizationsDelegates:
                       AppLocalizations.localizationsDelegates,
                   supportedLocales: AppLocalizations.supportedLocales,
@@ -266,12 +266,6 @@ class BusApp extends StatelessWidget {
     );
   }
 }
-
-Locale? _localeForLanguage(AppLanguage language) => switch (language) {
-  AppLanguage.system => null,
-  AppLanguage.traditionalChinese => const Locale('zh', 'TW'),
-  AppLanguage.english => const Locale('en'),
-};
 
 String? automaticBackgroundColorPath(AppSettings settings) {
   if (settings.colorSource != AppColorSource.automatic) {

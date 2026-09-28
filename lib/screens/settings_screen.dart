@@ -315,30 +315,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 12),
-                        AppDropdownFormField<AppLanguage>(
+                        AppDropdownFormField<Locale?>(
                           isExpanded: true,
                           initialValue: controller.settings.language,
                           decoration: InputDecoration(
                             labelText: l10n.languageLabel,
                           ),
-                          items: AppLanguage.values
-                              .map(
-                                (language) => DropdownMenuItem(
-                                  value: language,
-                                  child: Text(switch (language) {
-                                    AppLanguage.system => l10n.languageSystem,
-                                    AppLanguage.traditionalChinese =>
-                                      l10n.languageTraditionalChinese,
-                                    AppLanguage.english => l10n.languageEnglish,
-                                  }),
+                          items: [
+                            DropdownMenuItem<Locale?>(
+                              value: null,
+                              child: Text(l10n.languageSystem),
+                            ),
+                            ...AppLocalizations.supportedLocales.map(
+                              (locale) => DropdownMenuItem<Locale?>(
+                                value: locale,
+                                child: Text(
+                                  lookupAppLocalizations(locale).languageName,
                                 ),
-                              )
-                              .toList(growable: false),
-                          onChanged: (value) {
-                            if (value != null) {
-                              controller.updateLanguage(value);
-                            }
-                          },
+                              ),
+                            ),
+                          ],
+                          onChanged: controller.updateLanguage,
                         ),
                         const SizedBox(height: 16),
                         Text(

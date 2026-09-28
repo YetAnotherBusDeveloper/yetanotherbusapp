@@ -70,7 +70,9 @@ class AppController extends ChangeNotifier {
     AnnouncementReactionService? announcementReactionService,
   }) : announcementService = announcementService ?? AnnouncementService(),
        announcementReactionService =
-           announcementReactionService ?? AnnouncementReactionService();
+           announcementReactionService ?? AnnouncementReactionService() {
+    _lastRootSettings = _RootSettings.from(_settings);
+  }
 
   static const defaultFavoriteGroupName = '收藏';
   static const autoFavoriteGroupName = '常用';
@@ -131,7 +133,7 @@ class AppController extends ChangeNotifier {
   int _lastWearSmartPushAtMs = 0;
   StreamSubscription<Map<String, Object?>>? _wearEventSubscription;
   final ValueNotifier<int> _rootRevision = ValueNotifier<int>(0);
-  late _RootSettings _lastRootSettings = _RootSettings.from(_settings);
+  late _RootSettings _lastRootSettings;
   bool _postFrameInitializationStarted = false;
 
   AppSettings get settings => _settings;
@@ -1731,7 +1733,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateLanguage(AppLanguage language) async {
+  Future<void> updateLanguage(Locale? language) async {
     if (_settings.language == language) return;
     _settings = _settings.copyWith(language: language);
     notifyListeners();
@@ -4109,7 +4111,7 @@ class _RootSettings {
   }
 
   final ThemeMode themeMode;
-  final AppLanguage language;
+  final Locale? language;
   final double interfaceScale;
   final bool useAmoledDark;
   final AppColorSource colorSource;

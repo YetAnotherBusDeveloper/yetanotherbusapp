@@ -24,10 +24,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get languageSystem => '跟隨系統';
 
   @override
-  String get languageTraditionalChinese => '繁體中文';
-
-  @override
-  String get languageEnglish => 'English';
+  String get languageName => '中文';
 
   @override
   String get interfaceScaleLabel => '介面縮放';
@@ -3230,10 +3227,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get languageSystem => '跟隨系統';
 
   @override
-  String get languageTraditionalChinese => '繁體中文';
-
-  @override
-  String get languageEnglish => 'English';
+  String get languageName => '繁體中文';
 
   @override
   String get interfaceScaleLabel => '介面縮放';

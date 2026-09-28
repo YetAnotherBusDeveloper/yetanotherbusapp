@@ -24,10 +24,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get languageSystem => 'Follow system';
 
   @override
-  String get languageTraditionalChinese => 'Traditional Chinese';
-
-  @override
-  String get languageEnglish => 'English';
+  String get languageName => 'English';
 
   @override
   String get interfaceScaleLabel => 'Interface scale';

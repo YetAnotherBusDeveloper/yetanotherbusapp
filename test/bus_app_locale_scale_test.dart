@@ -9,6 +9,7 @@ import 'package:taiwanbus_flutter/core/account_sync_service.dart';
 import 'package:taiwanbus_flutter/core/app_analytics.dart';
 import 'package:taiwanbus_flutter/core/app_build_info.dart';
 import 'package:taiwanbus_flutter/core/app_controller.dart';
+import 'package:taiwanbus_flutter/core/app_routes.dart';
 import 'package:taiwanbus_flutter/core/app_update_installer.dart';
 import 'package:taiwanbus_flutter/core/app_update_service.dart';
 import 'package:taiwanbus_flutter/core/auth_service.dart';
@@ -16,6 +17,8 @@ import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/interface_scale_text_scaler.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
+import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
+import 'package:taiwanbus_flutter/widgets/app_dropdown.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +26,13 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     DynamicColorTestingUtils.setMockDynamicColors();
+    TestWidgetsFlutterBinding.instance.platformDispatcher.localeTestValue =
+        const Locale('en');
+  });
+
+  tearDown(() {
+    TestWidgetsFlutterBinding.instance.platformDispatcher
+        .clearLocaleTestValue();
   });
 
   testWidgets(
@@ -31,7 +41,7 @@ void main() {
       final controller = (await tester.runAsync(_buildController))!;
       addTearDown(controller.dispose);
       await tester.runAsync(
-        () => controller.updateLanguage(AppLanguage.english),
+        () => controller.updateLanguage(const Locale('en')),
       );
       await tester.runAsync(() => controller.updateInterfaceScale(1.2));
 
@@ -52,7 +62,7 @@ void main() {
       );
 
       await tester.runAsync(
-        () => controller.updateLanguage(AppLanguage.traditionalChinese),
+        () => controller.updateLanguage(const Locale('zh', 'TW')),
       );
       await tester.runAsync(() => controller.updateInterfaceScale(0.8));
       await tester.pump();
@@ -61,10 +71,86 @@ void main() {
       expect(Localizations.localeOf(appContext), const Locale('zh', 'TW'));
       expect(MediaQuery.textScalerOf(appContext).scale(10), closeTo(8, 0.0001));
 
+      await tester.runAsync(() => controller.updateLanguage(null));
+      await tester.pump();
+
+      appContext = tester.element(find.byType(Navigator).first);
+      expect(controller.settings.language, isNull);
+      expect(Localizations.localeOf(appContext), const Locale('en'));
+
       await tester.pumpWidget(const SizedBox.shrink());
     },
     timeout: const Timeout(Duration(seconds: 15)),
   );
+
+  testWidgets('settings lists supported locales and can follow system', (
+    tester,
+  ) async {
+    final controller = (await tester.runAsync(_buildController))!;
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      BusApp(controller: controller, analytics: controller.analytics),
+    );
+    await tester.pump();
+
+    final context = tester.element(find.byType(Navigator).first);
+    Navigator.of(context).pushNamed(AppRoutes.settings);
+    await tester.pumpAndSettle();
+
+    final dropdown = find.byType(AppDropdownFormField<Locale?>);
+    expect(dropdown, findsOneWidget);
+    expect(
+      find.descendant(of: dropdown, matching: find.text('Follow system')),
+      findsOneWidget,
+    );
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+    for (final locale in AppLocalizations.supportedLocales) {
+      expect(
+        find.text(lookupAppLocalizations(locale).languageName),
+        findsWidgets,
+      );
+    }
+
+    await tester.tap(find.text('繁體中文').last);
+    await tester.pumpAndSettle();
+    expect(controller.settings.language, const Locale('zh', 'TW'));
+    expect(controller.rootRevision.value, 1);
+    await tester.pump();
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).locale,
+      const Locale('zh', 'TW'),
+    );
+    expect(
+      Localizations.localeOf(tester.element(find.byType(Navigator).first)),
+      const Locale('zh', 'TW'),
+    );
+    expect(
+      Localizations.localeOf(tester.element(dropdown)),
+      const Locale('zh', 'TW'),
+    );
+    expect(
+      find.descendant(of: dropdown, matching: find.text('繁體中文')),
+      findsOneWidget,
+    );
+
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('跟隨系統').last);
+    await tester.pumpAndSettle();
+    expect(controller.settings.language, isNull);
+    expect(
+      find.descendant(of: dropdown, matching: find.text('Follow system')),
+      findsOneWidget,
+    );
+    expect(
+      Localizations.localeOf(tester.element(dropdown)),
+      const Locale('en'),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 Future<AppController> _buildController() async {

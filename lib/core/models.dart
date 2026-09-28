@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../l10n/app_localizations.dart';
 import 'transit_name.dart';
 
 enum BusProvider {
@@ -155,13 +156,14 @@ ThemeMode themeModeFromString(String value) {
   );
 }
 
-enum AppLanguage { system, traditionalChinese, english }
+Locale? appLanguageFromString(Object? value) {
+  final tag = value?.toString();
+  if (tag == null || tag.isEmpty) return null;
 
-AppLanguage appLanguageFromString(Object? value) {
-  return AppLanguage.values.firstWhere(
-    (language) => language.name == value,
-    orElse: () => AppLanguage.system,
-  );
+  for (final locale in AppLocalizations.supportedLocales) {
+    if (locale.toLanguageTag() == tag) return locale;
+  }
+  return null;
 }
 
 double _interfaceScaleFromJson(Object? value) {
@@ -354,6 +356,7 @@ class AppSettings {
   static const minInterfaceScale = 0.8;
   static const maxInterfaceScale = 1.3;
   static const defaultInterfaceScale = 1.0;
+  static const _unsetLanguage = Object();
 
   const AppSettings({
     required this.provider,
@@ -413,7 +416,7 @@ class AppSettings {
       skipDownloadPromptProviders: const [],
       readRouteAlerts: const [],
       themeMode: ThemeMode.system,
-      language: AppLanguage.system,
+      language: null,
       interfaceScale: defaultInterfaceScale,
       mobileMapProvider: MobileMapProvider.googleMaps,
       useAmoledDark: false,
@@ -604,7 +607,7 @@ class AppSettings {
   final List<BusProvider> skipDownloadPromptProviders;
   final List<ReadRouteAlert> readRouteAlerts;
   final ThemeMode themeMode;
-  final AppLanguage language;
+  final Locale? language;
   final double interfaceScale;
   final MobileMapProvider mobileMapProvider;
   final bool useAmoledDark;
@@ -648,7 +651,7 @@ class AppSettings {
     List<BusProvider>? skipDownloadPromptProviders,
     List<ReadRouteAlert>? readRouteAlerts,
     ThemeMode? themeMode,
-    AppLanguage? language,
+    Object? language = _unsetLanguage,
     double? interfaceScale,
     MobileMapProvider? mobileMapProvider,
     bool? useAmoledDark,
@@ -694,7 +697,9 @@ class AppSettings {
           skipDownloadPromptProviders ?? this.skipDownloadPromptProviders,
       readRouteAlerts: readRouteAlerts ?? this.readRouteAlerts,
       themeMode: themeMode ?? this.themeMode,
-      language: language ?? this.language,
+      language: identical(language, _unsetLanguage)
+          ? this.language
+          : language as Locale?,
       interfaceScale: interfaceScale ?? this.interfaceScale,
       mobileMapProvider: mobileMapProvider ?? this.mobileMapProvider,
       useAmoledDark: useAmoledDark ?? this.useAmoledDark,
@@ -764,7 +769,7 @@ class AppSettings {
           .toList(),
       'read_alerts': readRouteAlerts.map((entry) => entry.toJson()).toList(),
       'themeMode': themeMode.name,
-      'language': language.name,
+      'language': language?.toLanguageTag(),
       'interfaceScale': interfaceScale,
       'mobileMapProvider': mobileMapProvider.name,
       'useAmoledDark': useAmoledDark,

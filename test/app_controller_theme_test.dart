@@ -32,14 +32,18 @@ void main() {
     await controller.updateHomeBackgroundOpacity(0.42);
     expect(controller.rootRevision.value, initialRevision);
 
-    await controller.updateLanguage(AppLanguage.english);
+    await controller.updateLanguage(const Locale('en'));
     expect(controller.rootRevision.value, initialRevision + 1);
 
-    await controller.updateInterfaceScale(1.2);
+    await controller.updateLanguage(null);
+    expect(controller.settings.language, isNull);
     expect(controller.rootRevision.value, initialRevision + 2);
 
-    await controller.updateThemeMode(ThemeMode.dark);
+    await controller.updateInterfaceScale(1.2);
     expect(controller.rootRevision.value, initialRevision + 3);
+
+    await controller.updateThemeMode(ThemeMode.dark);
+    expect(controller.rootRevision.value, initialRevision + 4);
   });
 }
 
