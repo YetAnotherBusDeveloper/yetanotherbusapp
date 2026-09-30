@@ -928,6 +928,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
   }
 
+  Future<void> _openRouteAlertSource(RouteAlert alert) async {
+    final value = alert.sourceUrl?.trim();
+    final uri = value == null ? null : Uri.tryParse(value);
+    if (uri == null || !uri.hasScheme) {
+      return;
+    }
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   Widget _buildAlertTile(RouteAlert alert, ThemeData theme) {
     final effectLabel = alert.effectText;
     final causeLabel = alert.causeText;
@@ -981,6 +990,17 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             padding: const EdgeInsets.only(top: 4, left: 16),
             child: Text(alert.description, style: theme.textTheme.bodySmall),
           ),
+        _buildRouteAlertMetadata(
+          context: context,
+          theme: theme,
+          alert: alert,
+          routeName: _detail?.route.transitName.displayForLocale(
+            Localizations.localeOf(context).toLanguageTag(),
+          ),
+          onOpenSource: alert.sourceUrl?.trim().isNotEmpty == true
+              ? () => _openRouteAlertSource(alert)
+              : null,
+        ),
       ],
     );
   }
@@ -6877,6 +6897,100 @@ class _RouteStatusPill extends StatelessWidget {
   }
 }
 
+DateTime? _routeAlertDateTime(int? timestamp) {
+  if (timestamp == null || timestamp <= 0) {
+    return null;
+  }
+  final milliseconds = timestamp > 1000000000000
+      ? timestamp
+      : timestamp * Duration.millisecondsPerSecond;
+  return DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
+}
+
+String _routeAlertTimeText(BuildContext context, RouteAlert alert) {
+  final start = _routeAlertDateTime(alert.startTime);
+  final end = _routeAlertDateTime(alert.endTime);
+  final published = _routeAlertDateTime(alert.publishTime);
+  final values = <String>[];
+  String format(DateTime value) {
+    final date = MaterialLocalizations.of(context).formatMediumDate(value);
+    final time = MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay.fromDateTime(value),
+    );
+    return '$date $time';
+  }
+
+  if (start != null) values.add(format(start));
+  if (end != null) values.add(format(end));
+  if (values.isEmpty && published != null) {
+    values.add(format(published));
+  }
+  return values.join(' – ');
+}
+
+Widget _buildRouteAlertMetadata({
+  required BuildContext context,
+  required ThemeData theme,
+  required RouteAlert alert,
+  String? routeName,
+  Future<void> Function()? onOpenSource,
+}) {
+  final l10n = AppLocalizations.of(context);
+  final time = _routeAlertTimeText(context, alert);
+  final source = alert.source?.trim() ?? '';
+  final sourceUrl = alert.sourceUrl?.trim() ?? '';
+  final rows = <Widget>[];
+  void addRow(String label, String value) {
+    if (value.isEmpty) return;
+    final separator = l10n.localeName.startsWith('zh') ? '：' : ': ';
+    rows.add(
+      Padding(
+        padding: const EdgeInsets.only(top: 4, left: 16),
+        child: Text(
+          '$label$separator$value',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+
+  addRow(l10n.routeAlertAffectedRoute, routeName?.trim() ?? '');
+  addRow(
+    l10n.routeAlertType,
+    [alert.effectText, alert.causeText]
+        .where((value) => value.isNotEmpty)
+        .join(' · '),
+  );
+  addRow(l10n.routeAlertTime, time);
+  addRow(l10n.routeAlertImpact, alert.scope?.trim() ?? '');
+  addRow(l10n.routeAlertSource, source.isNotEmpty ? source : sourceUrl);
+  if (sourceUrl.isNotEmpty && onOpenSource != null) {
+    rows.add(
+      Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: TextButton.icon(
+          onPressed: onOpenSource,
+          icon: const Icon(Icons.open_in_new_rounded, size: 16),
+          label: Text(l10n.routeAlertOpenSource),
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.only(left: 16, right: 8),
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
+      ),
+    );
+  }
+  if (rows.isEmpty) {
+    return const SizedBox.shrink();
+  }
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: rows,
+  );
+}
+
 class _RouteInfoDialog extends StatefulWidget {
   const _RouteInfoDialog({
     required this.detail,
@@ -7225,6 +7339,18 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
     }
   }
 
+  Future<void> _openRouteAlertSource(RouteAlert alert) async {
+    final value = alert.source?.trim();
+    final uri = value == null ? null : Uri.tryParse(value);
+    final sourceUrl = alert.sourceUrl?.trim();
+    final sourceUri = sourceUrl == null ? null : Uri.tryParse(sourceUrl);
+    final target = sourceUri ?? uri;
+    if (target == null || !target.hasScheme) {
+      return;
+    }
+    await launchUrl(target, mode: LaunchMode.externalApplication);
+  }
+
   Widget _buildExpandableAlertItem(RouteAlert alert, ThemeData theme) {
     final expanded = _expandedAlertIds.contains(alert.alertId);
     return InkWell(
@@ -7300,6 +7426,17 @@ class _RouteInfoDialogState extends State<_RouteInfoDialog> {
                     style: theme.textTheme.bodySmall,
                   ),
                 ),
+              _buildRouteAlertMetadata(
+                context: context,
+                theme: theme,
+                alert: alert,
+                routeName: widget.detail.route.transitName.displayForLocale(
+                  Localizations.localeOf(context).toLanguageTag(),
+                ),
+                onOpenSource: alert.sourceUrl?.trim().isNotEmpty == true
+                    ? () => _openRouteAlertSource(alert)
+                    : null,
+              ),
             ],
           ],
         ),

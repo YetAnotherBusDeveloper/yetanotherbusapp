@@ -1747,6 +1747,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get routeDetailOperationsNotice => 'Service notice';
 
   @override
+  String get routeAlertAffectedRoute => 'Affected route';
+
+  @override
+  String get routeAlertType => 'Type';
+
+  @override
+  String get routeAlertTime => 'Time';
+
+  @override
+  String get routeAlertImpact => 'Impact';
+
+  @override
+  String get routeAlertSource => 'Official source';
+
+  @override
+  String get routeAlertOpenSource => 'Open official source';
+
+  @override
   String get routeDetailViewRoutePresence => 'Viewing route';
 
   @override
