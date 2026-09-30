@@ -62,7 +62,10 @@ void main() {
     final second = await repository.fetchRouteAlerts('TPE/123');
 
     expect(requests, 1);
-    expect(requestUri?.pathSegments.last, 'TPE/123');
+    expect(
+      requestUri?.pathSegments,
+      containsAllInOrder(const ['TPE/123', 'alerts']),
+    );
     expect(first.single.alertId, 'alert-1');
     expect(second.single.effectText, '重大延遲');
 
