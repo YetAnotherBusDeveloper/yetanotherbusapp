@@ -205,7 +205,7 @@ Future<AppController> _buildController() async {
     defaultUpdateChannel: AppUpdateChannel.release,
   );
   final client = MockClient((_) async => http.Response('{}', 200));
-  return AppController(
+  final controller = AppController(
     repository: BusRepository(client: client),
     storage: StorageService(),
     analytics: await AppAnalytics.initialize(),
@@ -215,4 +215,7 @@ Future<AppController> _buildController() async {
     authService: AuthService(),
     accountSyncService: AccountSyncService(client: client),
   );
+  // Locale tests must not connect to the host machine's Discord IPC service.
+  await controller.updateDesktopDiscordPresenceEnabled(false);
+  return controller;
 }

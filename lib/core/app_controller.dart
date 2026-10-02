@@ -56,6 +56,8 @@ class FavoriteGroupTypeMismatchException implements Exception {
   String toString() => '群組「$groupName」不接受 ${itemType.name} 收藏。';
 }
 
+enum AppLocalData { account, favorites, routeHistory, smartUsage, announcements }
+
 class AppController extends ChangeNotifier {
   AppController({
     required this.repository,
@@ -68,9 +70,11 @@ class AppController extends ChangeNotifier {
     required this.accountSyncService,
     AnnouncementService? announcementService,
     AnnouncementReactionService? announcementReactionService,
+    BackgroundImageStore? backgroundImageStore,
   }) : announcementService = announcementService ?? AnnouncementService(),
        announcementReactionService =
-           announcementReactionService ?? AnnouncementReactionService() {
+           announcementReactionService ?? AnnouncementReactionService(),
+       _backgroundImageStore = backgroundImageStore ?? BackgroundImageStore() {
     _lastRootSettings = _RootSettings.from(_settings);
   }
 
@@ -91,7 +95,8 @@ class AppController extends ChangeNotifier {
   final AccountSyncService accountSyncService;
   final AnnouncementService announcementService;
   final AnnouncementReactionService announcementReactionService;
-  final BackgroundImageStore _backgroundImageStore = BackgroundImageStore();
+  final BackgroundImageStore _backgroundImageStore;
+  Future<void> _backgroundImageOperation = Future<void>.value();
 
   AppSettings _settings = AppSettings.defaults();
   AuthSession? _authSession;
@@ -135,6 +140,30 @@ class AppController extends ChangeNotifier {
   final ValueNotifier<int> _rootRevision = ValueNotifier<int>(0);
   late _RootSettings _lastRootSettings;
   bool _postFrameInitializationStarted = false;
+  bool _disposed = false;
+  Future<void>? _bootstrapFuture;
+  Future<void>? _backgroundNormalizationFuture;
+  final Set<AppLocalData> _readyLocalData = {};
+  final Map<AppLocalData, Future<void>> _localDataLoads = {};
+  final Map<AppLocalData, Object> _localDataErrors = {};
+  bool _pendingChangeDrivenAccountSync = false;
+  int _recommendationRevision = 0;
+  String? _cachedSmartRouteSignature;
+  Object? _lastRecommendationRoutes;
+  Object? _lastRecommendationFavorites;
+  Object? _lastRecommendationUsage;
+  final Map<BusProvider, Future<void>> _databaseStateLoads = {};
+  final Set<BusProvider> _knownDatabaseStates = {};
+
+  bool get favoritesReady => isLocalDataReady(AppLocalData.favorites);
+  bool get routeHistoryReady => isLocalDataReady(AppLocalData.routeHistory);
+  bool get accountReady => isLocalDataReady(AppLocalData.account);
+  bool get recommendationDataReady => favoritesReady && routeHistoryReady &&
+      isLocalDataReady(AppLocalData.smartUsage);
+  int get recommendationRevision => _recommendationRevision;
+  bool isLocalDataReady(AppLocalData domain) => _readyLocalData.contains(domain);
+  Object? localDataError(AppLocalData domain) => _localDataErrors[domain];
+  bool isDatabaseStateKnown(BusProvider provider) => _knownDatabaseStates.contains(provider);
 
   AppSettings get settings => _settings;
   ValueListenable<int> get rootRevision => _rootRevision;
@@ -159,7 +188,7 @@ class AppController extends ChangeNotifier {
     0,
     (total, entry) => total + entry.totalSelections,
   );
-  String get smartRouteSignature => _routeUsageProfiles
+  String get smartRouteSignature => _cachedSmartRouteSignature ??= _routeUsageProfiles
       .map(
         (entry) =>
             '${entry.provider.name}:'
@@ -237,7 +266,7 @@ class AppController extends ChangeNotifier {
   bool get routeHistoryDeletionPending =>
       _accountSyncLocalState.routeHistoryDeletionPending;
   bool get shouldPromptToEnableAccountSync =>
-      isAuthenticated && _accountSyncLocalState.syncEnabled == null;
+      accountReady && isAuthenticated && _accountSyncLocalState.syncEnabled == null;
   DateTime? get settingsLastModifiedAt =>
       _dateTimeFromMs(_settingsLastModifiedAtMs);
   DateTime? get favoriteGroupsLastModifiedAt =>
@@ -287,55 +316,137 @@ class AppController extends ChangeNotifier {
     return !_settings.skipDownloadPromptProviders.contains(provider);
   }
 
-  Future<void> initialize() async {
-    await storage.migrateLegacyApiDataIfNeeded();
-    await authService.initialize();
-    _authSession = authService.session;
-    await _loadAccountSyncLocalState();
+  /// Only authoritative appearance and entry decisions belong before runApp.
+  Future<void> initializeForFirstFrame() => _bootstrapFuture ??= _loadBootstrap();
+
+  Future<void> _loadBootstrap() async {
     _settings = await storage.loadSettings();
     AppHaptics.setEnabled(_settings.enableHapticFeedback);
     _settingsLastModifiedAtMs = await storage.loadSettingsLastModifiedAtMs();
-    final normalizedBackgroundPaths = await _backgroundImageStore
-        .normalizeSettingsPaths(_settings.pageBackgroundImagePaths);
-    final normalizedBackgroundOpacities = Map<String, double>.from(
-      _settings.pageBackgroundImageOpacities,
-    )..removeWhere((key, _) => !normalizedBackgroundPaths.containsKey(key));
-    if (!mapEquals(
-          _settings.pageBackgroundImagePaths,
-          normalizedBackgroundPaths,
-        ) ||
-        !mapEquals(
-          _settings.pageBackgroundImageOpacities,
-          normalizedBackgroundOpacities,
-        )) {
-      _settings = _settings.copyWith(
-        pageBackgroundImagePaths: normalizedBackgroundPaths,
-        pageBackgroundImageOpacities: normalizedBackgroundOpacities,
-      );
-      await _persistSettings(modifiedAtMs: _settingsLastModifiedAtMs);
-    }
-    _announcementLocalState = await storage.loadAnnouncementLocalState();
-    _history = await storage.loadHistory();
-    _favoriteGroups = await storage.loadFavoriteGroups();
-    _favoriteGroupKinds = await storage.loadFavoriteGroupKinds(
-      _favoriteGroups.keys,
-    );
-    _favoriteGroupsLastModifiedAtMs = await storage
-        .loadFavoriteGroupsLastModifiedAtMs();
-    _routeUsageProfiles = await storage.loadRouteUsageProfiles();
-    _favoriteUsageProfiles = await storage.loadFavoriteUsageProfiles();
-    _stopVisitProfiles = await storage.loadStopVisitProfiles();
-    _destinationChoiceProfiles = await storage.loadDestinationChoiceProfiles();
+    if (_disposed) return;
     _initialized = true;
     notifyListeners();
   }
+
+  /// Eager initialization remains available for callers that need all data.
+  Future<void> initialize() async {
+    await initializeForFirstFrame();
+    await ensureLocalDataReady();
+    await _normalizeBackgroundSettings();
+  }
+
+  Future<void> ensureLocalDataReady({bool yieldBetweenBundles = false}) async {
+    // Yield between bundles so decoding does not monopolize the UI isolate.
+    for (final domain in AppLocalData.values) {
+      await ensureLocalData(domain);
+      if (yieldBetweenBundles) await Future<void>.delayed(Duration.zero);
+    }
+  }
+
+  Future<void> ensureFavoritesReady() => ensureLocalData(AppLocalData.favorites);
+  Future<void> ensureRouteHistoryReady() => ensureLocalData(AppLocalData.routeHistory);
+  Future<void> ensureAccountReady() => ensureLocalData(AppLocalData.account);
+  Future<void> ensureRecommendationDataReady() async {
+    await ensureFavoritesReady();
+    await ensureRouteHistoryReady();
+    await ensureLocalData(AppLocalData.smartUsage);
+  }
+
+  Future<void> ensureLocalData(AppLocalData domain) {
+    if (_disposed) return Future<void>.error(StateError('AppController disposed'));
+    if (isLocalDataReady(domain)) return Future<void>.value();
+    final pending = _localDataLoads[domain];
+    if (pending != null) return pending;
+    _localDataErrors.remove(domain);
+    final load = _loadLocalData(domain);
+    _localDataLoads[domain] = load;
+    unawaited(load.then<void>((_) {
+      _localDataLoads.remove(domain);
+    }, onError: (Object error, StackTrace stackTrace) {
+      _localDataLoads.remove(domain);
+      _localDataErrors[domain] = error;
+      notifyListeners();
+    }));
+    return load;
+  }
+
+  Future<void> _loadLocalData(AppLocalData domain) async {
+    await initializeForFirstFrame();
+    if (_disposed) throw StateError('AppController disposed');
+    switch (domain) {
+      case AppLocalData.account:
+        await authService.initialize();
+        _authSession = authService.session;
+        await _loadAccountSyncLocalState();
+      case AppLocalData.favorites:
+        final groups = await storage.loadFavoriteGroups();
+        final (kinds, modifiedAt) = await (
+          storage.loadFavoriteGroupKinds(groups.keys),
+          storage.loadFavoriteGroupsLastModifiedAtMs(),
+        ).wait;
+        _favoriteGroups = groups;
+        _favoriteGroupKinds = kinds;
+        _favoriteGroupsLastModifiedAtMs = modifiedAt;
+      case AppLocalData.routeHistory:
+        final history = await storage.loadHistory();
+        final routes = await storage.loadRouteUsageProfiles();
+        final destinations = await storage.loadDestinationChoiceProfiles();
+        _history = history;
+        _routeUsageProfiles = routes;
+        _destinationChoiceProfiles = destinations;
+      case AppLocalData.smartUsage:
+        final favorites = await storage.loadFavoriteUsageProfiles();
+        final visits = await storage.loadStopVisitProfiles();
+        _favoriteUsageProfiles = favorites;
+        _stopVisitProfiles = visits;
+      case AppLocalData.announcements:
+        _announcementLocalState = await storage.loadAnnouncementLocalState();
+    }
+    if (_disposed) throw StateError('AppController disposed');
+    _readyLocalData.add(domain);
+    notifyListeners();
+    if (domain == AppLocalData.account && _pendingChangeDrivenAccountSync) {
+      _pendingChangeDrivenAccountSync = false;
+      _scheduleChangeDrivenAccountSync();
+    }
+  }
+
+  Future<void> _normalizeBackgroundSettings() => _backgroundNormalizationFuture ??= _runBackgroundImageOperation(() async {
+    while (!_disposed) {
+      final paths = Map<String, String>.from(_settings.pageBackgroundImagePaths);
+      final normalized = await _backgroundImageStore.normalizeSettingsPaths(paths, cleanup: false);
+      // Remote settings may change paths while files are being imported.
+      if (!mapEquals(paths, _settings.pageBackgroundImagePaths)) continue;
+      final opacities = Map<String, double>.from(_settings.pageBackgroundImageOpacities)
+        ..removeWhere((key, _) => !normalized.containsKey(key));
+      if (!mapEquals(paths, normalized) ||
+          !mapEquals(opacities, _settings.pageBackgroundImageOpacities)) {
+        _settings = _settings.copyWith(pageBackgroundImagePaths: normalized,
+          pageBackgroundImageOpacities: opacities);
+        // Housekeeping is not a user change and must not trigger cloud sync.
+        await storage.saveNormalizedSettings(_settings);
+        notifyListeners();
+      }
+      return;
+    }
+  });
 
   Future<void> initializeAfterFirstFrame() async {
     if (!_initialized || _postFrameInitializationStarted) {
       return;
     }
     _postFrameInitializationStarted = true;
-
+    await Future<void>.delayed(Duration.zero);
+    // Database discovery and maintenance must not wait for Wear/network work.
+    unawaited(_runNonCriticalStartupTask(refreshDatabaseState));
+    unawaited(_runNonCriticalStartupTask(() async {
+      await storage.migrateLegacyApiDataIfNeeded();
+      await _normalizeBackgroundSettings();
+      await _runBackgroundImageOperation(() =>
+        _backgroundImageStore.cleanupUnusedImages(_settings.pageBackgroundImagePaths.values));
+    }));
+    await _runNonCriticalStartupTask(() => ensureLocalDataReady(yieldBetweenBundles: true));
+    if (_disposed || _readyLocalData.length != AppLocalData.values.length) return;
     await _runNonCriticalStartupTask(
       () => AndroidHomeIntegration.updateFavoriteWidgetAutoRefreshMinutes(
         _settings.favoriteWidgetAutoRefreshMinutes,
@@ -359,7 +470,6 @@ class AppController extends ChangeNotifier {
         _settings.enableSmartRouteNotifications,
       ),
     );
-    await _runNonCriticalStartupTask(refreshDatabaseState);
     await _runNonCriticalStartupTask(
       () => desktopDiscordPresenceService.refresh(settings: _settings),
     );
@@ -380,14 +490,20 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _validatePersistedAuthSession() async {
-    if (_authSession == null) {
+    await ensureAccountReady();
+    final session = _authSession;
+    if (session == null) {
       return;
     }
     try {
-      _authAccount = await authService.fetchAccount();
+      final account = await authService.fetchAccount();
+      if (_disposed || _authSession != session) return;
+      _authAccount = account;
     } on AuthTokenExpiredException {
+      if (_disposed || _authSession != session) return;
       await _forceLocalLogout();
     } catch (_) {
+      if (_disposed || _authSession != session) return;
       // Network errors are non-fatal; keep the session for now.
       _authAccount = null;
     }
@@ -395,6 +511,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<bool> startAuthLogin(String provider) async {
+    await ensureAccountReady();
     if (_authBusy) {
       return false;
     }
@@ -429,6 +546,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> completeAuthCallback(AppLaunchAction action) async {
+    await ensureAccountReady();
     if (action.authError?.isNotEmpty == true) {
       throw Exception(action.authError);
     }
@@ -461,6 +579,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> refreshAuthAccount() async {
+    await ensureAccountReady();
+    final session = _authSession;
     if (_authSession == null) {
       _authAccount = null;
       notifyListeners();
@@ -473,8 +593,11 @@ class AppController extends ChangeNotifier {
     _authAccountLoading = true;
     notifyListeners();
     try {
-      _authAccount = await authService.fetchAccount();
+      final account = await authService.fetchAccount();
+      if (_disposed || _authSession != session) return;
+      _authAccount = account;
     } on AuthTokenExpiredException {
+      if (_disposed || _authSession != session) return;
       _authAccountLoading = false;
       await _forceLocalLogout();
       return;
@@ -485,6 +608,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<bool> startAuthLink(String provider) async {
+    await ensureAccountReady();
     if (_authBusy || _authSession == null) {
       return false;
     }
@@ -506,6 +630,7 @@ class AppController extends ChangeNotifier {
   Future<AuthLinkCallbackResult> completeAuthLinkCallback(
     AppLaunchAction action,
   ) async {
+    await ensureAccountReady();
     if (action.authError?.isNotEmpty == true) {
       throw Exception(action.authError);
     }
@@ -538,6 +663,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> confirmPendingAccountMerge(String mergeToken) async {
+    await ensureAccountReady();
     if (_authBusy) {
       return;
     }
@@ -555,16 +681,23 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _reloadAuthAccount() async {
+    final session = _authSession;
     try {
-      _authAccount = await authService.fetchAccount();
+      final account = await authService.fetchAccount();
+      if (_disposed || _authSession != session) return;
+      _authAccount = account;
     } on AuthTokenExpiredException {
+      if (_disposed || _authSession != session) return;
       await _forceLocalLogout();
     } catch (_) {
+      if (_disposed || _authSession != session) return;
       _authAccount = null;
     }
   }
 
   Future<void> logoutAuth() async {
+    await ensureAccountReady();
+    await ensureRouteHistoryReady();
     if (_authBusy) {
       return;
     }
@@ -587,6 +720,7 @@ class AppController extends ChangeNotifier {
   /// Used when the server has already rejected the token (401/403), so
   /// there is no point in calling the server logout endpoint.
   Future<void> _forceLocalLogout() async {
+    await ensureRouteHistoryReady();
     await authService.logout();
     await _restoreDeviceLocalRouteHistory();
     _authSession = null;
@@ -676,6 +810,7 @@ class AppController extends ChangeNotifier {
     bool enabled, {
     bool syncNow = true,
   }) async {
+    await ensureAccountReady();
     _accountSyncLocalState = _accountSyncLocalState.copyWith(
       syncEnabled: enabled,
     );
@@ -697,6 +832,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> setRouteHistorySyncEnabled(bool enabled) async {
+    await ensureAccountReady();
+    await ensureRouteHistoryReady();
     if (isAuthenticated && (_authSession?.deviceId.trim().isEmpty ?? true)) {
       throw StateError('這個登入工作階段缺少裝置識別碼，無法更新路線紀錄同步。');
     }
@@ -756,6 +893,10 @@ class AppController extends ChangeNotifier {
   }
 
   void _scheduleChangeDrivenAccountSync() {
+    if (!accountReady) {
+      _pendingChangeDrivenAccountSync = true;
+      return;
+    }
     if (!accountSyncEnabled || !isAuthenticated) {
       return;
     }
@@ -820,7 +961,8 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  Future<void> refreshAccountSyncStatus() {
+  Future<void> refreshAccountSyncStatus() async {
+    await ensureAccountReady();
     if (_authSession == null) {
       _clearAccountSyncSessionData();
       notifyListeners();
@@ -1131,6 +1273,7 @@ class AppController extends ChangeNotifier {
     bool selectAllIfEmpty = false,
     bool scheduleSync = true,
   }) async {
+    await ensureFavoritesReady();
     final availableIds = _availableWearFavoriteIds();
     final availableSet = availableIds.toSet();
     var nextIds = _settings.wearSelectedFavoriteIds
@@ -1314,6 +1457,10 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _syncWearOsSnapshot({bool requestRefresh = false}) async {
+    await ensureFavoritesReady();
+    if (_settings.wearSyncEnabled && _settings.wearSmartSuggestionsEnabled) {
+      await ensureRecommendationDataReady();
+    }
     await _normalizeWearSelectedFavoriteIds();
     final favorites = await _buildWearFavoritePayload();
 
@@ -1403,6 +1550,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _runAccountSyncOperation(Future<void> Function() action) async {
+    await ensureLocalDataReady();
     if (_accountSyncBusy) {
       throw StateError('同步進行中，請稍後再試。');
     }
@@ -1437,6 +1585,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> refreshAnnouncements({bool force = false}) async {
+    await ensureLocalData(AppLocalData.announcements);
+    await ensureAccountReady();
     if (_announcementsLoading) {
       return;
     }
@@ -1481,6 +1631,7 @@ class AppController extends ChangeNotifier {
     String announcementId,
     String emoji,
   ) async {
+    await ensureAccountReady();
     if (!isAuthenticated) {
       return false;
     }
@@ -1596,6 +1747,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> markAnnouncementListViewed() async {
+    await ensureLocalData(AppLocalData.announcements);
     final nextState = announcementService.markListViewed(
       _announcementLocalState,
       _announcements,
@@ -1604,6 +1756,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> markAnnouncementPopupShown(AppAnnouncement announcement) async {
+    await ensureLocalData(AppLocalData.announcements);
     final nextState = announcementService.markPopupShown(
       _announcementLocalState,
       announcement,
@@ -1612,6 +1765,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> dismissAnnouncementPopup(AppAnnouncement announcement) async {
+    await ensureLocalData(AppLocalData.announcements);
     final nextState = announcementService.dismissPopup(
       _announcementLocalState,
       announcement,
@@ -1634,15 +1788,30 @@ class AppController extends ChangeNotifier {
     _checkingDatabase = true;
     notifyListeners();
     try {
-      final next = <BusProvider, bool>{};
-      for (final provider in BusProvider.values) {
-        next[provider] = await repository.databaseExists(provider);
-      }
-      _databaseReadyByProvider = next;
+      await ensureProviderDatabaseState(_settings.provider, force: true);
+      await Future.wait(BusProvider.values.where((provider) => provider != _settings.provider)
+        .map((provider) => ensureProviderDatabaseState(provider, force: true)));
     } finally {
       _checkingDatabase = false;
       notifyListeners();
     }
+  }
+
+  Future<void> ensureProviderDatabaseState(BusProvider provider, {bool force = false}) {
+    final pending = _databaseStateLoads[provider];
+    if (pending != null) return pending;
+    if (!force && _knownDatabaseStates.contains(provider)) return Future<void>.value();
+    final load = () async {
+      final exists = await repository.databaseExists(provider);
+      if (_disposed) return;
+      _databaseReadyByProvider[provider] = exists;
+      _knownDatabaseStates.add(provider);
+      if (provider == _settings.provider) notifyListeners();
+    }();
+    _databaseStateLoads[provider] = load;
+    unawaited(load.then<void>((_) => _databaseStateLoads.remove(provider),
+      onError: (Object error, StackTrace stackTrace) { _databaseStateLoads.remove(provider); }));
+    return load;
   }
 
   Future<void> updateProvider(BusProvider provider) async {
@@ -1927,10 +2096,20 @@ class AppController extends ChangeNotifier {
     'settings',
   ];
 
+  Future<void> _runBackgroundImageOperation(Future<void> Function() operation) {
+    final result = _backgroundImageOperation.then((_) => operation());
+    // A failed operation must not poison subsequent background changes.
+    _backgroundImageOperation = result.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {},
+    );
+    return result;
+  }
+
   Future<void> _saveBackgroundImageSettings({
     required Map<String, String> paths,
     required Map<String, double> opacities,
-  }) async {
+  }) => _runBackgroundImageOperation(() async {
     final normalizedPaths = await _backgroundImageStore.normalizeSettingsPaths(
       paths,
     );
@@ -1941,7 +2120,7 @@ class AppController extends ChangeNotifier {
       pageBackgroundImageOpacities: normalizedOpacities,
     );
     await _persistSettings();
-  }
+  });
 
   Future<void> updateOverlayOpacity(double value) async {
     _settings = _settings.copyWith(overlayOpacity: value);
@@ -2035,6 +2214,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> updateMaxHistory(int value) async {
+    await ensureRouteHistoryReady();
     _settings = _settings.copyWith(maxHistory: value);
     _history = _history.take(value).toList();
     await _persistSettings();
@@ -2333,6 +2513,7 @@ class AppController extends ChangeNotifier {
     BusProvider? provider,
   }) async {
     final targetProvider = provider ?? _settings.provider;
+    await ensureProviderDatabaseState(targetProvider);
     if (isDatabaseReady(targetProvider)) {
       return repository.searchRoutes(query, provider: targetProvider);
     }
@@ -2351,6 +2532,7 @@ class AppController extends ChangeNotifier {
 
     final results = <RouteSummary>[];
     for (final provider in searchProviders) {
+      await ensureProviderDatabaseState(provider);
       if (isDatabaseReady(provider)) {
         results.addAll(
           await repository.searchRoutes(query, provider: provider),
@@ -2370,6 +2552,7 @@ class AppController extends ChangeNotifier {
   ) async {
     final results = <StopRouteSearchResult>[];
     for (final provider in searchProviders) {
+      await ensureProviderDatabaseState(provider);
       if (!isDatabaseReady(provider)) {
         continue;
       }
@@ -2581,6 +2764,8 @@ class AppController extends ChangeNotifier {
     int? destinationStopId,
     String? destinationStopName,
   }) async {
+    await ensureRouteHistoryReady();
+    await ensureAccountReady();
     _history = _history
         .where(
           (entry) =>
@@ -2631,6 +2816,8 @@ class AppController extends ChangeNotifier {
     required int destinationStopId,
     required String destinationStopName,
   }) async {
+    await ensureRouteHistoryReady();
+    await ensureAccountReady();
     var index = _history.indexWhere(
       (entry) =>
           entry.provider == provider &&
@@ -2681,6 +2868,8 @@ class AppController extends ChangeNotifier {
     DateTime? selectedAt,
   }) async {
     final timestamp = selectedAt ?? DateTime.now();
+    await ensureRouteHistoryReady();
+    await ensureAccountReady();
     _destinationChoiceProfiles = _buildUpdatedDestinationChoiceProfiles(
       source: _destinationChoiceProfiles,
       provider: provider,
@@ -2781,6 +2970,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> clearHistory() async {
+    await ensureRouteHistoryReady();
+    await ensureAccountReady();
     _history = [];
     await storage.saveHistory(_history);
     await _updateRouteHistoryDevicePayload(history: const []);
@@ -2788,6 +2979,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> clearRouteUsageProfiles() async {
+    await ensureRouteHistoryReady();
+    await ensureLocalData(AppLocalData.smartUsage);
+    await ensureAccountReady();
     _routeUsageProfiles = const [];
     _favoriteUsageProfiles = const [];
     _stopVisitProfiles = const [];
@@ -2801,6 +2995,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> clearRouteSelectionHistory() async {
+    await ensureRouteHistoryReady();
+    await ensureLocalData(AppLocalData.smartUsage);
+    await ensureAccountReady();
     _routeUsageProfiles =
         _routeUsageProfiles
             .map((profile) => profile.clearSelections())
@@ -2833,6 +3030,10 @@ class AppController extends ChangeNotifier {
     String? stopName,
   }) async {
     final timestamp = selectedAt ?? DateTime.now();
+    await ensureRouteHistoryReady();
+    await ensureLocalData(AppLocalData.smartUsage);
+    await ensureFavoritesReady();
+    await ensureAccountReady();
     _routeUsageProfiles = _buildUpdatedRouteUsageProfiles(
       provider: provider,
       routeKey: routeKey,
@@ -2875,7 +3076,10 @@ class AppController extends ChangeNotifier {
       );
     }
 
-    await _persistSmartRouteProfiles();
+    await _persistSmartRouteProfiles(
+      favoriteUsageChanged: selectedFavorite != null,
+      stopVisitsChanged: pathId != null && stopId != null,
+    );
     await _recordSyncedRouteUsage(
       provider: provider,
       routeKey: routeKey,
@@ -2987,6 +3191,8 @@ class AppController extends ChangeNotifier {
     int? pathId,
   }) async {
     final timestamp = openedAt ?? DateTime.now();
+    await ensureRouteHistoryReady();
+    await ensureAccountReady();
     _routeUsageProfiles = _buildUpdatedRouteUsageProfiles(
       provider: provider,
       routeKey: route.routeKey,
@@ -3003,7 +3209,7 @@ class AppController extends ChangeNotifier {
         hourlyOpens: <int, int>{timestamp.hour: 1},
       ),
     );
-    await _persistSmartRouteProfiles();
+    await _persistSmartRouteProfiles(favoriteUsageChanged: false, stopVisitsChanged: false);
     await _recordSyncedRouteUsage(
       provider: provider,
       routeKey: route.routeKey,
@@ -3112,10 +3318,13 @@ class AppController extends ChangeNotifier {
     return right.lastSelectedAtMsAt().compareTo(left.lastSelectedAtMsAt());
   }
 
-  Future<void> _persistSmartRouteProfiles() async {
+  Future<void> _persistSmartRouteProfiles({
+    bool favoriteUsageChanged = true,
+    bool stopVisitsChanged = true,
+  }) async {
     await storage.saveRouteUsageProfiles(_routeUsageProfiles);
-    await storage.saveFavoriteUsageProfiles(_favoriteUsageProfiles);
-    await storage.saveStopVisitProfiles(_stopVisitProfiles);
+    if (favoriteUsageChanged) await storage.saveFavoriteUsageProfiles(_favoriteUsageProfiles);
+    if (stopVisitsChanged) await storage.saveStopVisitProfiles(_stopVisitProfiles);
     await AndroidHomeIntegration.syncSmartRouteNotifications(
       _settings.enableSmartRouteNotifications,
     );
@@ -3130,6 +3339,7 @@ class AppController extends ChangeNotifier {
     if (!_settings.wearSyncEnabled || !_settings.wearSmartSuggestionsEnabled) {
       return;
     }
+    await ensureRecommendationDataReady();
     final signature = smartRouteSignature;
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     final signatureUnchanged = _lastWearSmartSignature == signature;
@@ -3156,6 +3366,8 @@ class AppController extends ChangeNotifier {
     DateTime? now,
     Position? position,
   }) async {
+    await ensureRecommendationDataReady();
+    await ensureProviderDatabaseState(_settings.provider);
     if (!_settings.enableSmartRecommendations ||
         !isDatabaseReady(_settings.provider) ||
         _routeUsageProfiles.isEmpty) {
@@ -3184,6 +3396,8 @@ class AppController extends ChangeNotifier {
     Position? position,
     int limit = 3,
   }) async {
+    await ensureRecommendationDataReady();
+    await ensureProviderDatabaseState(_settings.provider);
     if (!_settings.enableSmartRecommendations ||
         !isDatabaseReady(_settings.provider) ||
         _routeUsageProfiles.isEmpty) {
@@ -3212,6 +3426,7 @@ class AppController extends ChangeNotifier {
     String name, {
     FavoriteGroupKind kind = FavoriteGroupKind.boarding,
   }) async {
+    await ensureFavoritesReady();
     final trimmed = name.trim();
     if (trimmed.isEmpty || _favoriteGroups.containsKey(trimmed)) {
       return;
@@ -3228,6 +3443,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> deleteFavoriteGroup(String name) async {
+    await ensureFavoritesReady();
     final next = {..._favoriteGroups};
     next.remove(name);
     _favoriteGroups = next;
@@ -3254,6 +3470,7 @@ class AppController extends ChangeNotifier {
     FavoriteItem favorite, {
     String? groupName,
   }) async {
+    await ensureFavoritesReady();
     var targetGroup = groupName?.trim() ?? '';
     if (targetGroup.isEmpty) {
       final compatible = _favoriteGroups.keys.where(
@@ -3340,6 +3557,7 @@ class AppController extends ChangeNotifier {
     int? destinationStopId,
     String? destinationStopName,
   }) async {
+    await ensureFavoritesReady();
     final currentGroup = _favoriteGroups[groupName];
     if (currentGroup == null || currentGroup.isEmpty) {
       return false;
@@ -3408,6 +3626,7 @@ class AppController extends ChangeNotifier {
     String groupName,
     FavoriteItem favorite,
   ) async {
+    await ensureFavoritesReady();
     final next = <String, List<FavoriteItem>>{
       for (final entry in _favoriteGroups.entries)
         entry.key: List<FavoriteItem>.from(entry.value),
@@ -3437,6 +3656,7 @@ class AppController extends ChangeNotifier {
     int oldIndex,
     int newIndex,
   ) async {
+    await ensureFavoritesReady();
     final current = _favoriteGroups[groupName];
     if (current == null || oldIndex < 0 || oldIndex >= current.length) {
       return;
@@ -3463,6 +3683,7 @@ class AppController extends ChangeNotifier {
   Future<List<FavoriteResolvedItem>> resolveFavoriteGroup(
     String groupName,
   ) async {
+    await ensureFavoritesReady();
     final items = await repository.resolveFavoriteGroup(
       favoritesInGroup(groupName).whereType<FavoriteStop>().toList(),
     );
@@ -4066,6 +4287,7 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _cancelScheduledAccountSync();
     _wearEventSubscription?.cancel();
     _rootRevision.dispose();
@@ -4074,6 +4296,16 @@ class AppController extends ChangeNotifier {
 
   @override
   void notifyListeners() {
+    if (_disposed) return;
+    if (!identical(_lastRecommendationRoutes, _routeUsageProfiles) ||
+        !identical(_lastRecommendationFavorites, _favoriteGroups) ||
+        !identical(_lastRecommendationUsage, _favoriteUsageProfiles)) {
+      _lastRecommendationRoutes = _routeUsageProfiles;
+      _lastRecommendationFavorites = _favoriteGroups;
+      _lastRecommendationUsage = _favoriteUsageProfiles;
+      _recommendationRevision++;
+      _cachedSmartRouteSignature = null;
+    }
     final nextRootSettings = _RootSettings.from(_settings);
     if (nextRootSettings != _lastRootSettings) {
       _lastRootSettings = nextRootSettings;

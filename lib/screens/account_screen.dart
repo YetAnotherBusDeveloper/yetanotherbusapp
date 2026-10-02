@@ -7,17 +7,29 @@ import '../core/app_routes.dart';
 import '../core/account_sync_models.dart';
 import '../core/app_controller.dart';
 import '../core/auth_service.dart';
+import '../widgets/local_data_gate.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 
-class AccountScreen extends StatefulWidget {
+class AccountScreen extends StatelessWidget {
   const AccountScreen({super.key});
 
   @override
-  State<AccountScreen> createState() => _AccountScreenState();
+  Widget build(BuildContext context) => LocalDataGate(
+    domain: AppLocalData.account,
+    title: AppLocalizations.of(context).accountTitle,
+    child: const _AccountView(),
+  );
 }
 
-class _AccountScreenState extends State<AccountScreen> {
+class _AccountView extends StatefulWidget {
+  const _AccountView();
+
+  @override
+  State<_AccountView> createState() => _AccountScreenState();
+}
+
+class _AccountScreenState extends State<_AccountView> {
   bool _requestedInitialRefresh = false;
 
   @override

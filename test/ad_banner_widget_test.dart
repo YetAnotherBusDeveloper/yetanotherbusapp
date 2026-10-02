@@ -41,6 +41,7 @@ void main() {
     calls.clear();
     pendingSize = null;
     pendingAnchoredSize = null;
+    AdService.instance.deferUntil(null);
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     instanceManager = AdInstanceManager('plugins.flutter.io/google_mobile_ads');
     messenger.setMockMethodCallHandler(instanceManager.channel, (call) async {
@@ -73,6 +74,7 @@ void main() {
   });
 
   tearDown(() {
+    AdService.instance.deferUntil(null);
     controller.dispose();
     debugDefaultTargetPlatformOverride = null;
     messenger.setMockMethodCallHandler(instanceManager.channel, null);
@@ -155,6 +157,30 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     await pumpBanner(tester);
     expect(loadCount(), 1);
+  });
+
+  adTestWidgets('every ad request waits for startup readiness', (tester) async {
+    final ready = Completer<void>();
+    AdService.instance.deferUntil(ready.future);
+    await pumpBanner(tester);
+    expect(loadCount(), 0);
+    expect(calls.where((call) => call.method == 'MobileAds#initialize'), isEmpty);
+    ready.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(loadCount(), 1);
+  });
+
+  adTestWidgets('a slot disabled before readiness never requests an ad', (tester) async {
+    final ready = Completer<void>();
+    AdService.instance.deferUntil(ready.future);
+    await pumpBanner(tester);
+    await controller.updateEnableAds(false);
+    await tester.pump();
+    ready.complete();
+    await tester.pump();
+    expect(loadCount(), 0);
+    expect(calls.where((call) => call.method == 'MobileAds#initialize'), isEmpty);
   });
 
   adTestWidgets(

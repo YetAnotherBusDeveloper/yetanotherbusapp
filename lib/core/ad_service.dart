@@ -18,6 +18,14 @@ class AdService {
 
   bool _initialized = false;
   Future<void>? _initFuture;
+  Future<void>? _startupReady;
+
+  /// Set before mounting any banner. All initialization paths share this gate.
+  void deferUntil(Future<void>? readiness) {
+    _startupReady = readiness;
+  }
+
+  Future<void> waitUntilReady() => _startupReady ?? Future<void>.value();
 
   /// Whether the ad SDK is initialized and the platform supports ads.
   bool get isAvailable => _initialized && isSupported;
@@ -33,6 +41,7 @@ class AdService {
       return;
     }
     try {
+      await waitUntilReady();
       await MobileAds.instance.initialize();
       _initialized = true;
     } catch (_) {

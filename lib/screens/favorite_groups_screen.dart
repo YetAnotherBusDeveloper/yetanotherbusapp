@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
+import '../core/app_controller.dart';
 import '../core/models.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 import '../widgets/app_dropdown.dart';
+import '../widgets/local_data_gate.dart';
 
 class FavoriteGroupDraft {
   const FavoriteGroupDraft({required this.name, required this.kind});
@@ -93,6 +95,17 @@ Future<FavoriteGroupDraft?> showFavoriteGroupDialog(
 
 class FavoriteGroupsScreen extends StatelessWidget {
   const FavoriteGroupsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => LocalDataGate(
+    domain: AppLocalData.favorites,
+    title: AppLocalizations.of(context).favoriteGroupsTitle,
+    child: const _FavoriteGroupsView(),
+  );
+}
+
+class _FavoriteGroupsView extends StatelessWidget {
+  const _FavoriteGroupsView();
 
   Future<void> _showAddGroupDialog(BuildContext context) async {
     final controller = AppControllerScope.read(context);

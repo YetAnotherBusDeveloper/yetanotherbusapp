@@ -633,6 +633,7 @@ class _NearbyFallbackData {
 class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
   Future<_SmartCardData?>? _future;
   String _reloadKey = '';
+  Object? _preparationError;
 
   @override
   void didChangeDependencies() {
@@ -647,21 +648,50 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
   }
 
   void _reloadIfNeeded() {
+    final ready = widget.controller.recommendationDataReady &&
+        widget.controller.isDatabaseStateKnown(widget.controller.settings.provider);
     final nextKey = [
       widget.controller.settings.provider.name,
       widget.controller.settings.enableSmartRecommendations,
       widget.controller.databaseReady,
-      widget.controller.smartRouteSignature,
+      ready,
+      if (ready) widget.controller.recommendationRevision,
     ].join('|');
     if (_reloadKey == nextKey) {
       return;
     }
     _reloadKey = nextKey;
+    _preparationError = null;
+    if (!ready) {
+      _future = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_prepareRecommendations());
+      });
+      return;
+    }
     _future = _loadSuggestion();
   }
 
+  Future<void> _prepareRecommendations() async {
+    try {
+      await widget.controller.ensureProviderDatabaseState(widget.controller.settings.provider);
+      await widget.controller.ensureRecommendationDataReady();
+    } catch (error) {
+      if (mounted) setState(() => _preparationError = error);
+    }
+  }
+
   Future<void> _refresh() async {
+    try {
+      await widget.controller.ensureRecommendationDataReady();
+    } catch (error) {
+      if (mounted) setState(() => _preparationError = error);
+      return;
+    }
+    if (!mounted) return;
     setState(() {
+      _preparationError = null;
       _future = _loadSuggestion();
     });
   }
@@ -714,6 +744,7 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     if (!controller.settings.enableSmartRecommendations) {
       return null;
     }
+    await controller.ensureProviderDatabaseState(controller.settings.provider);
     final positionFuture = _resolvePosition();
     Position? position;
 
@@ -1259,7 +1290,8 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
         final l10n = AppLocalizations.of(context);
         final Widget state;
         final String stateKey;
-        if (snapshot.connectionState == ConnectionState.waiting &&
+        if ((!(controller.recommendationDataReady && controller.isDatabaseStateKnown(controller.settings.provider)) && !snapshot.hasError && _preparationError == null) ||
+            snapshot.connectionState == ConnectionState.waiting &&
             !snapshot.hasData) {
           stateKey = 'loading';
           state = _SmartRecommendationShell(
@@ -1274,7 +1306,7 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
               ),
             ),
           );
-        } else if (snapshot.hasError) {
+        } else if (snapshot.hasError || _preparationError != null) {
           stateKey = 'error';
           state = _SmartRecommendationShell(
             title: l10n.smartRecommendationsTitle,

@@ -23,6 +23,7 @@ class StorageService {
       'favorite_groups_last_modified_at_ms';
   static const _accountSyncStateKeyPrefix = 'account_sync_state';
   static const _railOdSelectionKeyPrefix = 'rail_od_selection';
+  static const _backgroundColorCacheKey = 'background_color_cache';
 
   Future<void> migrateLegacyApiDataIfNeeded() async {
     final prefs = await SharedPreferences.getInstance();
@@ -61,6 +62,30 @@ class StorageService {
       _settingsLastModifiedAtKey,
       modifiedAtMs ?? DateTime.now().millisecondsSinceEpoch,
     );
+  }
+
+  /// Persist repaired file paths without changing user modification metadata.
+  Future<void> saveNormalizedSettings(AppSettings settings) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_settingsKey, jsonEncode(settings.toJson()));
+  }
+
+  Future<int?> loadBackgroundColorCache(String? path) async {
+    if (path == null) return null;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_backgroundColorCacheKey);
+    if (raw == null) return null;
+    try {
+      final cached = jsonDecode(raw) as Map<String, dynamic>;
+      return cached['path'] == path ? cached['color'] as int? : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> saveBackgroundColorCache(String path, int color) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_backgroundColorCacheKey, jsonEncode({'path': path, 'color': color}));
   }
 
   /// Last origin/destination station pair a rail dashboard was left on.

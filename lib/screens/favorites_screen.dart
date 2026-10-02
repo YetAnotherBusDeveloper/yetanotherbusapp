@@ -14,22 +14,35 @@ import '../core/models.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 import '../widgets/eta_badge.dart';
+import '../widgets/local_data_gate.dart';
 import 'favorite_groups_screen.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/cat_state_card.dart';
 import '../widgets/app_content_transition.dart';
 import 'route_detail_navigation.dart';
 
-class FavoritesScreen extends StatefulWidget {
+class FavoritesScreen extends StatelessWidget {
   const FavoritesScreen({this.initialGroupName, super.key});
 
   final String? initialGroupName;
 
   @override
-  State<FavoritesScreen> createState() => _FavoritesScreenState();
+  Widget build(BuildContext context) => LocalDataGate(
+    domain: AppLocalData.favorites,
+    title: AppLocalizations.of(context).homeFavoritesTitle,
+    child: _FavoritesView(initialGroupName: initialGroupName),
+  );
 }
 
-class _FavoritesScreenState extends State<FavoritesScreen>
+class _FavoritesView extends StatefulWidget {
+  const _FavoritesView({this.initialGroupName});
+  final String? initialGroupName;
+
+  @override
+  State<_FavoritesView> createState() => _FavoritesScreenState();
+}
+
+class _FavoritesScreenState extends State<_FavoritesView>
     with TickerProviderStateMixin, RouteAware {
   TabController? _tabController;
   Timer? _countdownTimer;

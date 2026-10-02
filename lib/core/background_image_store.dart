@@ -50,8 +50,12 @@ class BackgroundImageStore {
   }
 
   Future<Map<String, String>> normalizeSettingsPaths(
-    Map<String, String> paths,
-  ) async {
+    Map<String, String> paths, {
+    bool cleanup = true,
+  }) async {
+    if (paths.isEmpty && !cleanup) {
+      return {};
+    }
     if (kIsWeb) {
       return Map<String, String>.fromEntries(
         paths.entries.where((entry) => entry.value.trim().isNotEmpty),
@@ -96,7 +100,9 @@ class BackgroundImageStore {
       normalized[entry.key] = importedPath;
     }
 
-    await cleanupUnusedImages(normalized.values);
+    if (cleanup) {
+      await cleanupUnusedImages(normalized.values);
+    }
     return normalized;
   }
 

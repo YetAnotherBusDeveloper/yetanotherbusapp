@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
@@ -27,10 +26,12 @@ Future<void> main(List<String> args) async {
   usePathUrlStrategy();
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
   try {
-    await configureDatabaseFactory();
-    await AppLaunchService.instance.initialize(initialArguments: args);
-    final analytics = await AppAnalytics.initialize();
-    final buildInfo = await AppBuildInfo.load();
+    final (_, _, buildInfo) = await (
+      configureDatabaseFactory(),
+      AppLaunchService.instance.initialize(initialArguments: args),
+      AppBuildInfo.load(),
+    ).wait;
+    final analytics = AppAnalytics.deferred();
     ApiUserAgent.configure(buildInfo);
 
     final controller = AppController(
@@ -43,30 +44,21 @@ Future<void> main(List<String> args) async {
       authService: AuthService(),
       accountSyncService: AccountSyncService(),
     );
-    await controller.initialize();
+    await controller.initializeForFirstFrame();
     final automaticSeedPath = automaticBackgroundColorPath(controller.settings);
-    final automaticSeedColor = await resolveAutomaticBackgroundColor(
-      automaticSeedPath,
-    );
-    unawaited(AdService.instance.initialize());
-    runApp(
-      BusApp(
-        controller: controller,
-        analytics: analytics,
-        automaticSeedColor: automaticSeedColor,
-        automaticSeedPath: automaticSeedPath,
-      ),
-    );
+    final cachedSeed = await controller.storage.loadBackgroundColorCache(automaticSeedPath);
+    AdService.instance.deferUntil(widgetsBinding.waitUntilFirstFrameRasterized);
+    runApp(BusApp(controller: controller, analytics: analytics,
+      automaticSeedPath: automaticSeedPath,
+      automaticSeedColor: cachedSeed == null ? null : Color(cachedSeed)));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(controller.initializeAfterFirstFrame());
+      unawaited(widgetsBinding.waitUntilFirstFrameRasterized.then((_) async {
+        await Future<void>.delayed(Duration.zero);
+        unawaited(analytics.start());
+        unawaited(AnnouncementPushService.instance.initialize().catchError((Object _) {}));
+      }));
     });
-    if (kIsWeb) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(AnnouncementPushService.instance.initialize());
-      });
-    } else {
-      unawaited(AnnouncementPushService.instance.initialize());
-    }
   } catch (error) {
     runApp(
       _StartupErrorApp(

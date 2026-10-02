@@ -65,10 +65,13 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final controller = AppControllerScope.of(context);
+    if (!controller.routeHistoryReady) {
+      unawaited(controller.ensureRouteHistoryReady().catchError((Object _) {}));
+    }
     if (!_supportsRouteKeypad) {
       return;
     }
-    final controller = AppControllerScope.of(context);
     final providers = controller.downloadedProviders;
     final providerKey = providers.map((provider) => provider.name).join('|');
     if (_loadedRouteNameProviders == providerKey) {
@@ -1365,7 +1368,9 @@ class _SearchScreenState extends State<SearchScreen> {
                         : ListView(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                             children: [
-                              if (resultState == 'history')
+                              if (resultState == 'history' && !busController.routeHistoryReady)
+                                const Center(child: CircularProgressIndicator())
+                              else if (resultState == 'history')
                                 _HistorySection(
                                   history: busController.history,
                                   onClear: busController.clearHistory,

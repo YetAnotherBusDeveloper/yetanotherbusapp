@@ -1413,6 +1413,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   Future<void> _applyLearnedDestinationIfPossible() async {
+    if (!mounted) return;
+    final controller = AppControllerScope.read(context);
+    try {
+      await controller.ensureRouteHistoryReady();
+    } catch (_) {
+      // Route data stays usable even if local learning data cannot be read.
+      return;
+    }
     if (!mounted ||
         widget.suppressAutoDestinationSelection ||
         _manualDestinationClearInSession ||
@@ -1425,7 +1433,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final boardingStop = _resolvedBoardingStop();
     if (pathId == null || boardingStop == null) return;
 
-    final choice = AppControllerScope.read(context).learnedDestinationChoice(
+    final choice = controller.learnedDestinationChoice(
       provider: widget.provider,
       routeKey: widget.routeKey,
       departurePathId: pathId,
@@ -4088,6 +4096,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
   Future<String?> _selectFavoriteGroup(FavoriteItemType itemType) async {
     final controller = AppControllerScope.read(context);
+    await controller.ensureFavoritesReady();
+    if (!mounted) return null;
     final compatible = controller.compatibleFavoriteGroupNames(itemType);
     String? selected;
     if (compatible.isEmpty) {

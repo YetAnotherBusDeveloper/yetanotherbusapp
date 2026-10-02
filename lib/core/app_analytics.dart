@@ -1,20 +1,38 @@
 import 'dart:async';
 
 import 'package:firebase_analytics/firebase_analytics.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'firebase_bootstrap.dart';
 import 'models.dart';
 
 class AppAnalytics {
-  AppAnalytics._(this.analytics)
-    : observer = analytics == null
-          ? null
-          : FirebaseAnalyticsObserver(analytics: analytics);
+  /// Creates the analytics facade without starting any platform work.
+  AppAnalytics.deferred({Future<FirebaseAnalytics?> Function()? initializer})
+    : _initializer = initializer ?? _initializeFirebaseAnalytics;
 
-  final FirebaseAnalytics? analytics;
-  final FirebaseAnalyticsObserver? observer;
+  final Future<FirebaseAnalytics?> Function() _initializer;
+  FirebaseAnalytics? _analytics;
+  final _DeferredAnalyticsObserver _observer = _DeferredAnalyticsObserver();
+  Future<void>? _initializationFuture;
+
+  FirebaseAnalytics? get analytics => _analytics;
+  NavigatorObserver get observer => _observer;
+
+  /// Call after the first frame. Concurrent callers share the same startup.
+  Future<void> start() => _initializationFuture ??= _start();
+
+  Future<void> _start() async {
+    try {
+      final analytics = await _initializer();
+      if (analytics == null) return;
+      _analytics = analytics;
+      _observer.enable(analytics);
+    } catch (_) {
+      // Analytics must never prevent the app from starting or being used.
+    }
+  }
 
   bool get isEnabled => analytics != null;
 
@@ -202,6 +220,19 @@ class AppAnalytics {
     String name, [
     Map<String, Object?> parameters = const <String, Object?>{},
   ]) async {
+    // Keep initialization off the interaction path, even when callers await
+    // their analytics event (for example while changing settings).
+    if (analytics == null) {
+      final initialization = _initializationFuture;
+      if (initialization != null) {
+        unawaited(initialization.then((_) => _sendEvent(name, parameters)));
+      }
+      return;
+    }
+    await _sendEvent(name, parameters);
+  }
+
+  Future<void> _sendEvent(String name, Map<String, Object?> parameters) async {
     final analytics = this.analytics;
     if (analytics == null) {
       return;
@@ -236,20 +267,72 @@ class AppAnalytics {
   }
 
   static Future<AppAnalytics> initialize() async {
+    final analytics = AppAnalytics.deferred();
+    await analytics.start();
+    return analytics;
+  }
+
+  static Future<FirebaseAnalytics?> _initializeFirebaseAnalytics() async {
     if (kIsWeb ||
         (defaultTargetPlatform != TargetPlatform.android &&
             defaultTargetPlatform != TargetPlatform.iOS)) {
-      return AppAnalytics._(null);
+      return null;
     }
 
     try {
-      await Firebase.initializeApp();
+      final bootstrap = await FirebaseBootstrap.initialize();
+      if (!bootstrap.firebaseReady) return null;
       final analytics = FirebaseAnalytics.instance;
       await analytics.setAnalyticsCollectionEnabled(true);
       await analytics.logAppOpen();
-      return AppAnalytics._(analytics);
+      return analytics;
     } catch (_) {
-      return AppAnalytics._(null);
+      return null;
     }
+  }
+}
+
+/// Stays attached to the navigator while Firebase starts in the background.
+/// Retains the current page so its first screen view is not lost.
+class _DeferredAnalyticsObserver extends NavigatorObserver {
+  FirebaseAnalyticsObserver? _delegate;
+  Route<dynamic>? _currentPage;
+
+  void enable(FirebaseAnalytics analytics) {
+    _delegate = FirebaseAnalyticsObserver(analytics: analytics);
+    final page = _currentPage;
+    if (page != null) _delegate!.didPush(page, null);
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PageRoute) _currentPage = route;
+    _delegate?.didPush(route, previousRoute);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route == _currentPage) {
+      _currentPage = previousRoute is PageRoute ? previousRoute : null;
+    }
+    _delegate?.didPop(route, previousRoute);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    if (newRoute is PageRoute) {
+      _currentPage = newRoute;
+    } else if (oldRoute == _currentPage) {
+      _currentPage = null;
+    }
+    _delegate?.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route == _currentPage) {
+      _currentPage = previousRoute is PageRoute ? previousRoute : null;
+    }
+    _delegate?.didRemove(route, previousRoute);
   }
 }

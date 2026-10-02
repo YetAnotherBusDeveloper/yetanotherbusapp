@@ -72,6 +72,9 @@ class _BannerSlotState extends State<_BannerSlot> {
 
   Future<void> _load() async {
     try {
+      await AdService.instance.waitUntilReady();
+      // A disabled/offscreen slot must not initialize the SDK after the gate.
+      if (!mounted) return;
       await AdService.instance.initialize();
       if (!mounted || !AdService.instance.isAvailable) return;
       final size = widget.isInline

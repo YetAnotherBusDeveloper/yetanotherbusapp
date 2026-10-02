@@ -102,7 +102,7 @@ class BusApp extends StatelessWidget {
                   navigatorObservers: [
                     appRouteObserver,
                     DesktopDiscordRouteObserver(controller),
-                    if (analytics.observer != null) analytics.observer!,
+                    analytics.observer,
                   ],
                   builder: (context, child) {
                     final theme = Theme.of(context);
@@ -329,6 +329,13 @@ class _AutomaticBackgroundColorState extends State<_AutomaticBackgroundColor> {
     _resolvedPath = _seedColor == null ? null : widget.initialPath;
     widget.controller.addListener(_updateColor);
     _updateColor();
+    // Display the cached palette immediately, then refresh it after painting.
+    final path = _resolvedPath;
+    if (path != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _resolvedPath == path) unawaited(_extractColor(path));
+      });
+    }
   }
 
   @override
@@ -357,14 +364,25 @@ class _AutomaticBackgroundColorState extends State<_AutomaticBackgroundColor> {
     if (path == null) {
       return;
     }
-    unawaited(_extractColor(path));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _resolvedPath != path) return;
+      unawaited(_extractColor(path));
+    });
   }
 
   Future<void> _extractColor(String path) async {
     try {
       final color = await resolveAutomaticBackgroundColor(path);
       if (!mounted || _resolvedPath != path) return;
+      if (color == null && _seedColor != null) return;
       if (color != _seedColor) setState(() => _seedColor = color);
+      if (color != null) {
+        try {
+          await widget.controller.storage.saveBackgroundColorCache(path, color.toARGB32());
+        } catch (_) {
+          // A palette cache failure must not change the resolved theme.
+        }
+      }
     } catch (_) {
       if (mounted && _resolvedPath == path && _seedColor != null) {
         setState(() => _seedColor = null);
@@ -651,6 +669,8 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
 
   void _handleControllerChanged() {
     _maybeScheduleAccountSyncPrompt();
+    _maybeScheduleLaunchAction();
+    _maybeScheduleAnnouncementOpen();
   }
 
   void _maybeScheduleStartupCheck() {
@@ -749,12 +769,15 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
   }
 
   void _syncIOSWidgets() {
-    unawaited(
-      IOSWidgetIntegration.syncFavoriteGroups(
-        widget.controller.favoriteGroups,
-        waitForBridge: true,
-      ),
-    );
+    unawaited(() async {
+      try {
+        await widget.controller.ensureFavoritesReady();
+        if (!mounted) return;
+        await IOSWidgetIntegration.syncFavoriteGroups(widget.controller.favoriteGroups, waitForBridge: true);
+      } catch (_) {
+        // Never publish a default-empty collection when hydration fails.
+      }
+    }());
   }
 
   void _maybeScheduleLaunchAction() {
