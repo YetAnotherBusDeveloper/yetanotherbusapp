@@ -2761,6 +2761,24 @@ abstract class AppLocalizations {
   /// **'Service notice'**
   String get routeDetailOperationsNotice;
 
+  /// No description provided for @routeAlertAffectedRoute.
+  String get routeAlertAffectedRoute;
+
+  /// No description provided for @routeAlertType.
+  String get routeAlertType;
+
+  /// No description provided for @routeAlertTime.
+  String get routeAlertTime;
+
+  /// No description provided for @routeAlertImpact.
+  String get routeAlertImpact;
+
+  /// No description provided for @routeAlertSource.
+  String get routeAlertSource;
+
+  /// No description provided for @routeAlertOpenSource.
+  String get routeAlertOpenSource;
+
   /// No description provided for @routeDetailViewRoutePresence.
   ///
   /// In en, this message translates to:

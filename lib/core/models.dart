@@ -2504,28 +2504,76 @@ class RouteAlert {
     required this.endTime,
     required this.publishTime,
     required this.updatedTime,
+    this.source,
+    this.sourceUrl,
   });
 
   factory RouteAlert.fromJson(Map<String, dynamic> json) {
+    final rawSource = json['source'];
+    final source = rawSource is Map
+        ? _firstString(rawSource, const ['name', 'title', 'label'])
+        : _firstString(json, const ['source', 'source_name', 'provider']);
+    final sourceUrl = rawSource is Map
+        ? _firstString(rawSource, const ['url', 'uri', 'link'])
+        : _firstString(json, const [
+            'source_url',
+            'official_url',
+            'info_url',
+            'url',
+          ]) ??
+          (source != null && Uri.tryParse(source)?.hasScheme == true
+              ? source
+              : null);
     return RouteAlert(
       alertId: json['alert_id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
       description: json['description']?.toString() ?? '',
-      status: (json['status'] as num?)?.toInt(),
-      cause: (json['cause'] as num?)?.toInt(),
-      effect: (json['effect'] as num?)?.toInt(),
-      direction: (json['direction'] as num?)?.toInt(),
-      scope: json['scope']?.toString(),
+      status: _intValue(json['status']),
+      cause: _intValue(json['cause']),
+      effect: _intValue(json['effect']),
+      direction: _intValue(json['direction']),
+      scope: _scopeString(json['scope']),
       stopIds:
           (json['stop_ids'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList() ??
           const <String>[],
-      startTime: (json['start_time'] as num?)?.toInt(),
-      endTime: (json['end_time'] as num?)?.toInt(),
-      publishTime: (json['publish_time'] as num?)?.toInt(),
-      updatedTime: (json['updated_time'] as num?)?.toInt(),
+      startTime: _intValue(json['start_time']),
+      endTime: _intValue(json['end_time']),
+      publishTime: _intValue(json['publish_time']),
+      updatedTime: _intValue(json['updated_time']),
+      source: source,
+      sourceUrl: sourceUrl,
     );
+  }
+
+  static String? _firstString(Map<dynamic, dynamic> json, List<String> keys) {
+    for (final key in keys) {
+      final value = json[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  static int? _intValue(Object? value) {
+    if (value is num) {
+      return value.toInt();
+    }
+    return int.tryParse(value?.toString().trim() ?? '');
+  }
+
+  static String? _scopeString(Object? value) {
+    if (value is List) {
+      final values = value
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
+      return values.isEmpty ? null : values.join('、');
+    }
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty ? null : text;
   }
 
   final String alertId;
@@ -2541,6 +2589,8 @@ class RouteAlert {
   final int? endTime;
   final int? publishTime;
   final int? updatedTime;
+  final String? source;
+  final String? sourceUrl;
 
   String get statusText => switch (status) {
     0 => '全部營運停止',
