@@ -81,6 +81,8 @@ class BusRepository {
     _stationPassbyInFlight.clear();
     _routeRealtimeBusesCache.clear();
     _routeRealtimeBusesInFlight.clear();
+    _routeAlertsCache.clear();
+    _routeAlertsInFlight.clear();
     _routeDetailCache.clear();
     _routeDetailInFlight.clear();
     _routeStopsApiCache.clear();
@@ -132,7 +134,7 @@ class BusRepository {
   final Map<String, Future<List<CancelledDeparture>>>
   _taichungCancelledDepartureInFlight =
       <String, Future<List<CancelledDeparture>>>{};
-  static const _routeAlertsCacheTtl = Duration(hours: 2);
+  static const _routeAlertsCacheTtl = Duration(minutes: 5);
   final Map<String, _TimedValue<List<RouteAlert>>> _routeAlertsCache =
       <String, _TimedValue<List<RouteAlert>>>{};
   final Map<String, Future<List<RouteAlert>>> _routeAlertsInFlight =
@@ -3375,10 +3377,13 @@ class BusRepository {
     }
 
     final future = _loadRouteAlerts(routeId);
+    final generation = _routeDataGeneration;
     _routeAlertsInFlight[routeId] = future;
     try {
       final alerts = await future;
-      _routeAlertsCache[routeId] = _TimedValue<List<RouteAlert>>(alerts);
+      if (generation == _routeDataGeneration) {
+        _routeAlertsCache[routeId] = _TimedValue<List<RouteAlert>>(alerts);
+      }
       return alerts;
     } finally {
       if (identical(_routeAlertsInFlight[routeId], future)) {

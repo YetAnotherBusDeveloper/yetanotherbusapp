@@ -1546,6 +1546,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get routeDetailOperationsNotice => '營運通知';
 
   @override
+  String get routeAlertAffectedRoute => '受影響路線';
+
+  @override
+  String get routeAlertType => '異常類型';
+
+  @override
+  String get routeAlertTime => '發生時間';
+
+  @override
+  String get routeAlertImpact => '影響範圍';
+
+  @override
+  String get routeAlertSource => '官方公告來源';
+
+  @override
+  String get routeAlertOpenSource => '開啟官方公告';
+
+  @override
   String get routeDetailViewRoutePresence => '查看路線';
 
   @override
@@ -4747,6 +4765,24 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get routeDetailOperationsNotice => '營運通知';
+
+  @override
+  String get routeAlertAffectedRoute => '受影響路線';
+
+  @override
+  String get routeAlertType => '異常類型';
+
+  @override
+  String get routeAlertTime => '發生時間';
+
+  @override
+  String get routeAlertImpact => '影響範圍';
+
+  @override
+  String get routeAlertSource => '官方公告來源';
+
+  @override
+  String get routeAlertOpenSource => '開啟官方公告';
 
   @override
   String get routeDetailViewRoutePresence => '查看路線';
