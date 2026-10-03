@@ -129,7 +129,8 @@ object FavoriteGroupWidgetSupport {
         if (showLoading) {
             appWidgetIds.forEach { appWidgetId ->
                 runCatching {
-                    appWidgetManager.updateAppWidget(
+                    // Update only the status, keeping the previous arrivals visible.
+                    appWidgetManager.partiallyUpdateAppWidget(
                         appWidgetId,
                         buildLoadingRemoteViews(appContext, appWidgetId),
                     )
@@ -245,10 +246,11 @@ object FavoriteGroupWidgetSupport {
     }
 
     private fun buildLoadingRemoteViews(context: Context, appWidgetId: Int): RemoteViews {
-        val title = loadConfiguredGroup(context, appWidgetId) ?: "YABus"
-        return buildBaseRemoteViews(context, appWidgetId, title).apply {
-            setViewVisibility(R.id.favorite_widget_empty, View.VISIBLE)
-            setTextViewText(R.id.favorite_widget_empty, "更新中...")
+        return RemoteViews(context.packageName, R.layout.favorite_group_widget).apply {
+            setTextViewText(
+                R.id.favorite_widget_updated_at,
+                "${formatLastUpdated(context, loadLastUpdated(context, appWidgetId))} · 更新中...",
+            )
         }
     }
 
@@ -265,25 +267,36 @@ object FavoriteGroupWidgetSupport {
             return WidgetRenderResult(views, updateTimestamp = true)
         }
 
-        val boardingItems = items.filter { it.type == "boarding" }
+        val visibleItems = items.take(MAX_WIDGET_ITEMS)
+        val boardingItems = visibleItems.filter { it.type == "boarding" }
         val liveStopsByRoute = linkedMapOf<String, Map<String, WidgetLiveStop>>()
+        val failedRoutes = mutableSetOf<String>()
+        val failedStations = mutableSetOf<String>()
         var successfulFetches = 0
         boardingItems.associateBy(::routeRequestKey).forEach { (requestKey, item) ->
             val fetchResult = fetchLiveStopMap(context, item)
             if (fetchResult.success) {
                 successfulFetches += 1
+            } else {
+                failedRoutes += requestKey
             }
             liveStopsByRoute[requestKey] = fetchResult.liveStops
         }
         val stationArrivals = linkedMapOf<String, WidgetStationArrival?>()
-        items.filter { it.type == "station" }.forEach { item ->
+        visibleItems.filter { it.type == "station" }.associateBy(::stationRequestKey).forEach { (requestKey, item) ->
             val fetchResult = fetchStationArrival(item)
             if (fetchResult.success) successfulFetches += 1
-            stationArrivals[stationRequestKey(item)] = fetchResult.arrival
+            else failedStations += requestKey
+            stationArrivals[requestKey] = fetchResult.arrival
         }
 
         views.removeAllViews(R.id.favorite_widget_items_container)
-        items.take(MAX_WIDGET_ITEMS).forEach { item ->
+        visibleItems.forEach { item ->
+            val fetchFailed = when (item.type) {
+                "boarding" -> routeRequestKey(item) in failedRoutes
+                "station" -> stationRequestKey(item) in failedStations
+                else -> false
+            }
             val liveStop = if (item.type == "boarding") {
                 liveStopsByRoute[routeRequestKey(item)]?.get("${item.pathId}:${item.stopId}")
             } else {
@@ -293,7 +306,7 @@ object FavoriteGroupWidgetSupport {
             val itemViews = RemoteViews(context.packageName, R.layout.favorite_group_widget_item)
             itemViews.setTextViewText(
                 R.id.favorite_widget_item_eta,
-                formatEtaText(liveStop),
+                if (fetchFailed) "更新失敗" else widgetEtaText(liveStop?.sec, liveStop?.msg),
             )
             itemViews.setTextViewText(
                 R.id.favorite_widget_item_route,
@@ -308,7 +321,7 @@ object FavoriteGroupWidgetSupport {
                 when (item.type) {
                     "route" -> item.routeDescription.orEmpty().ifBlank { item.provider.uppercase() }
                     "station" -> stationArrival?.let { "${it.routeName} · ${it.sideLabel} 側" }
-                        ?: "目前沒有即將抵達班次"
+                        ?: if (fetchFailed) "無法取得班次，請重試" else "目前沒有即將抵達班次"
                     else -> item.stopName.ifBlank { "站牌 ${item.stopId}" }
                 },
             )
@@ -327,9 +340,15 @@ object FavoriteGroupWidgetSupport {
             views.addView(R.id.favorite_widget_items_container, itemViews)
         }
 
+        val hasFailures = failedRoutes.isNotEmpty() || failedStations.isNotEmpty()
+        if (hasFailures) {
+            views.setViewVisibility(R.id.favorite_widget_empty, View.VISIBLE)
+            views.setTextViewText(R.id.favorite_widget_empty, "部分資料更新失敗，請點右上角重試。")
+        }
         return WidgetRenderResult(
             views = views,
-            updateTimestamp = successfulFetches > 0,
+            // The timestamp describes the last complete refresh, not partial success.
+            updateTimestamp = successfulFetches > 0 && !hasFailures,
         )
     }
 
@@ -736,22 +755,6 @@ object FavoriteGroupWidgetSupport {
             }
         }
         return null
-    }
-
-    private fun formatEtaText(liveStop: WidgetLiveStop?): String {
-        liveStop ?: return "--"
-        val message = liveStop.msg?.trim().orEmpty()
-        if (message.isNotEmpty()) {
-            return message
-        }
-        val seconds = liveStop.sec ?: return "--"
-        if (seconds <= 0) {
-            return "進站中"
-        }
-        if (seconds < 60) {
-            return "即將進站"
-        }
-        return "${seconds / 60}分"
     }
 
     private fun formatLastUpdated(
