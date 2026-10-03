@@ -46,18 +46,31 @@ Future<void> main(List<String> args) async {
     );
     await controller.initializeForFirstFrame();
     final automaticSeedPath = automaticBackgroundColorPath(controller.settings);
-    final cachedSeed = await controller.storage.loadBackgroundColorCache(automaticSeedPath);
+    final cachedSeed = await controller.storage.loadBackgroundColorCache(
+      automaticSeedPath,
+    );
     AdService.instance.deferUntil(widgetsBinding.waitUntilFirstFrameRasterized);
-    runApp(BusApp(controller: controller, analytics: analytics,
-      automaticSeedPath: automaticSeedPath,
-      automaticSeedColor: cachedSeed == null ? null : Color(cachedSeed)));
+    runApp(
+      BusApp(
+        controller: controller,
+        analytics: analytics,
+        automaticSeedPath: automaticSeedPath,
+        automaticSeedColor: cachedSeed == null ? null : Color(cachedSeed),
+      ),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(controller.initializeAfterFirstFrame());
-      unawaited(widgetsBinding.waitUntilFirstFrameRasterized.then((_) async {
-        await Future<void>.delayed(Duration.zero);
-        unawaited(analytics.start());
-        unawaited(AnnouncementPushService.instance.initialize().catchError((Object _) {}));
-      }));
+      unawaited(
+        widgetsBinding.waitUntilFirstFrameRasterized.then((_) async {
+          await Future<void>.delayed(Duration.zero);
+          unawaited(analytics.start());
+          unawaited(
+            AnnouncementPushService.instance.initialize().catchError(
+              (Object _) {},
+            ),
+          );
+        }),
+      );
     });
   } catch (error) {
     runApp(

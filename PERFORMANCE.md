@@ -1,5 +1,26 @@
 # 效能分析與驗證（#84）
 
+## Android 漸進式啟動
+
+啟動流程採用「保留外觀、漸進載入」：`main.dart` 在 `runApp` 前只等待啟動入口、版本資訊與 `initializeForFirstFrame()`，後者只載入設定及修改時間。既有主題、語言、首次使用狀態與背景路徑可立即使用；自動配色優先使用路徑相符的取色快取，再於首個畫面後更新。
+
+- 帳號、收藏、路線歷史、智慧使用紀錄及公告狀態分為獨立的載入領域。同一領域的操作共用進行中的 Future；讀取失敗可以重試，不能用未載入的空集合覆寫資料。
+- `initialized` 表示首頁所需設定已就緒，不代表所有本機集合已就緒。需要完整資料的呼叫端可使用 `initialize()`／`ensureLocalDataReady()`；相關操作須等待對應的 `ensure…Ready()`。
+- 收藏與帳號頁面在必要資料就緒前顯示載入狀態。搜尋入口可先使用，歷史紀錄稍後補齊；推薦資料及資料庫狀態未知時，不先發起「沒有學習紀錄」的附近站牌備援請求。
+- 路線開啟僅儲存路線使用紀錄，不再順便覆寫尚未載入的收藏使用與站牌造訪紀錄。推薦刷新使用修訂值，路線簽章只在組成資料變更後重算。
+- 圖片路徑修復與清理移至首個畫面後，並與背景圖片設定變更共用序列。修復保留當前外觀及真正的使用者修改時間，不觸發設定同步。
+- 所有廣告載入入口等待共用的首個 rasterized frame 閘門；首頁不無條件初始化廣告。啟用 Android Ads 初始化／載入最佳化旗標。
+- Android `YABusApplication` 提供 WorkManager 隨用初始化設定，只移除其 AndroidX Startup metadata，保留其他 initializer。小工具與背景程序仍可透過 `WorkManager.getInstance()` 排程及取消工作。
+
+### 驗證
+
+- `flutter test`：**461 項全部通過**。新增情境包括設定優先啟動、阻塞資料載入時首頁可見、早期收藏變更、窄化路線紀錄儲存、載入中清除、讀取失敗重試、dispose 後回應、舊帳號驗證回應及圖片維護競態。
+- `progressive_startup_test.dart` 明確模擬 Android home-integration 通道，避免本機及 Linux CI 的 `MissingPluginException`。沒有停用三項原本失敗的測試。
+- `YABusApplicationTest`：**2 項通過**，驗證 merged manifest 未啟動 WorkManager initializer，以及沒有 Flutter Activity 的程序可以初始化、排程及取消工作。
+- 尚未連接 Android 實機量測冷啟動，不能由單元測試或建置時間推算縮短秒數。正式版 APK 建置曾逾時，尚未確認成功輸出。
+
+實機驗收須固定同一裝置及資料，分開量測 Logo 消失／首個 Flutter 畫面、主要操作可用、收藏／推薦資料就緒，以及啟動後首次點擊延遲。比較無背景、自動配色、大量歷史、離線、通知／小工具開啟；Android 第一幀自動回報的 fully-drawn 時間不能直接代表漸進載入完成。
+
 ## 本次確認的熱點與修改
 
 | 範圍 | 程式碼證據 | 修改 |

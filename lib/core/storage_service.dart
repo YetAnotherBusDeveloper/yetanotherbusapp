@@ -85,7 +85,10 @@ class StorageService {
 
   Future<void> saveBackgroundColorCache(String path, int color) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_backgroundColorCacheKey, jsonEncode({'path': path, 'color': color}));
+    await prefs.setString(
+      _backgroundColorCacheKey,
+      jsonEncode({'path': path, 'color': color}),
+    );
   }
 
   /// Last origin/destination station pair a rail dashboard was left on.

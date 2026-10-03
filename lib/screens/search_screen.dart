@@ -1368,7 +1368,8 @@ class _SearchScreenState extends State<SearchScreen> {
                         : ListView(
                             padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                             children: [
-                              if (resultState == 'history' && !busController.routeHistoryReady)
+                              if (resultState == 'history' &&
+                                  !busController.routeHistoryReady)
                                 const Center(child: CircularProgressIndicator())
                               else if (resultState == 'history')
                                 _HistorySection(

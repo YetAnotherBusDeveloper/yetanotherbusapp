@@ -56,7 +56,13 @@ class FavoriteGroupTypeMismatchException implements Exception {
   String toString() => '群組「$groupName」不接受 ${itemType.name} 收藏。';
 }
 
-enum AppLocalData { account, favorites, routeHistory, smartUsage, announcements }
+enum AppLocalData {
+  account,
+  favorites,
+  routeHistory,
+  smartUsage,
+  announcements,
+}
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -158,12 +164,16 @@ class AppController extends ChangeNotifier {
   bool get favoritesReady => isLocalDataReady(AppLocalData.favorites);
   bool get routeHistoryReady => isLocalDataReady(AppLocalData.routeHistory);
   bool get accountReady => isLocalDataReady(AppLocalData.account);
-  bool get recommendationDataReady => favoritesReady && routeHistoryReady &&
+  bool get recommendationDataReady =>
+      favoritesReady &&
+      routeHistoryReady &&
       isLocalDataReady(AppLocalData.smartUsage);
   int get recommendationRevision => _recommendationRevision;
-  bool isLocalDataReady(AppLocalData domain) => _readyLocalData.contains(domain);
+  bool isLocalDataReady(AppLocalData domain) =>
+      _readyLocalData.contains(domain);
   Object? localDataError(AppLocalData domain) => _localDataErrors[domain];
-  bool isDatabaseStateKnown(BusProvider provider) => _knownDatabaseStates.contains(provider);
+  bool isDatabaseStateKnown(BusProvider provider) =>
+      _knownDatabaseStates.contains(provider);
 
   AppSettings get settings => _settings;
   ValueListenable<int> get rootRevision => _rootRevision;
@@ -188,36 +198,37 @@ class AppController extends ChangeNotifier {
     0,
     (total, entry) => total + entry.totalSelections,
   );
-  String get smartRouteSignature => _cachedSmartRouteSignature ??= _routeUsageProfiles
-      .map(
-        (entry) =>
-            '${entry.provider.name}:'
-            '${entry.routeKey}:'
-            '${entry.pathId}:'
-            '${entry.totalOpens}:'
-            '${entry.lastOpenedAtMs}:'
-            '${entry.totalSelections}:'
-            '${entry.lastSelectedAtMs}',
-      )
-      .followedBy(
-        _favoriteUsageProfiles.map(
-          (entry) =>
-              '${entry.provider.name}:'
-              '${entry.routeKey}:'
-              '${entry.pathId}:'
-              '${entry.stopId}:'
-              '${entry.totalSelectionsAt()}:'
-              '${entry.lastSelectedAtMsAt()}',
-        ),
-      )
-      .followedBy(
-        _favoriteGroups.entries.expand(
-          (entry) => entry.value.map(
-            (favorite) => '${entry.key}:${jsonEncode(favorite.toJson())}',
-          ),
-        ),
-      )
-      .join('|');
+  String get smartRouteSignature =>
+      _cachedSmartRouteSignature ??= _routeUsageProfiles
+          .map(
+            (entry) =>
+                '${entry.provider.name}:'
+                '${entry.routeKey}:'
+                '${entry.pathId}:'
+                '${entry.totalOpens}:'
+                '${entry.lastOpenedAtMs}:'
+                '${entry.totalSelections}:'
+                '${entry.lastSelectedAtMs}',
+          )
+          .followedBy(
+            _favoriteUsageProfiles.map(
+              (entry) =>
+                  '${entry.provider.name}:'
+                  '${entry.routeKey}:'
+                  '${entry.pathId}:'
+                  '${entry.stopId}:'
+                  '${entry.totalSelectionsAt()}:'
+                  '${entry.lastSelectedAtMsAt()}',
+            ),
+          )
+          .followedBy(
+            _favoriteGroups.entries.expand(
+              (entry) => entry.value.map(
+                (favorite) => '${entry.key}:${jsonEncode(favorite.toJson())}',
+              ),
+            ),
+          )
+          .join('|');
   bool get initialized => _initialized;
   bool get databaseReady => isDatabaseReady(_settings.provider);
   List<BusProvider> get selectedProviders =>
@@ -266,7 +277,9 @@ class AppController extends ChangeNotifier {
   bool get routeHistoryDeletionPending =>
       _accountSyncLocalState.routeHistoryDeletionPending;
   bool get shouldPromptToEnableAccountSync =>
-      accountReady && isAuthenticated && _accountSyncLocalState.syncEnabled == null;
+      accountReady &&
+      isAuthenticated &&
+      _accountSyncLocalState.syncEnabled == null;
   DateTime? get settingsLastModifiedAt =>
       _dateTimeFromMs(_settingsLastModifiedAtMs);
   DateTime? get favoriteGroupsLastModifiedAt =>
@@ -317,7 +330,8 @@ class AppController extends ChangeNotifier {
   }
 
   /// Only authoritative appearance and entry decisions belong before runApp.
-  Future<void> initializeForFirstFrame() => _bootstrapFuture ??= _loadBootstrap();
+  Future<void> initializeForFirstFrame() =>
+      _bootstrapFuture ??= _loadBootstrap();
 
   Future<void> _loadBootstrap() async {
     _settings = await storage.loadSettings();
@@ -343,8 +357,10 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> ensureFavoritesReady() => ensureLocalData(AppLocalData.favorites);
-  Future<void> ensureRouteHistoryReady() => ensureLocalData(AppLocalData.routeHistory);
+  Future<void> ensureFavoritesReady() =>
+      ensureLocalData(AppLocalData.favorites);
+  Future<void> ensureRouteHistoryReady() =>
+      ensureLocalData(AppLocalData.routeHistory);
   Future<void> ensureAccountReady() => ensureLocalData(AppLocalData.account);
   Future<void> ensureRecommendationDataReady() async {
     await ensureFavoritesReady();
@@ -353,20 +369,27 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> ensureLocalData(AppLocalData domain) {
-    if (_disposed) return Future<void>.error(StateError('AppController disposed'));
+    if (_disposed) {
+      return Future<void>.error(StateError('AppController disposed'));
+    }
     if (isLocalDataReady(domain)) return Future<void>.value();
     final pending = _localDataLoads[domain];
     if (pending != null) return pending;
     _localDataErrors.remove(domain);
     final load = _loadLocalData(domain);
     _localDataLoads[domain] = load;
-    unawaited(load.then<void>((_) {
-      _localDataLoads.remove(domain);
-    }, onError: (Object error, StackTrace stackTrace) {
-      _localDataLoads.remove(domain);
-      _localDataErrors[domain] = error;
-      notifyListeners();
-    }));
+    unawaited(
+      load.then<void>(
+        (_) {
+          _localDataLoads.remove(domain);
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          _localDataLoads.remove(domain);
+          _localDataErrors[domain] = error;
+          notifyListeners();
+        },
+      ),
+    );
     return load;
   }
 
@@ -411,25 +434,34 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> _normalizeBackgroundSettings() => _backgroundNormalizationFuture ??= _runBackgroundImageOperation(() async {
-    while (!_disposed) {
-      final paths = Map<String, String>.from(_settings.pageBackgroundImagePaths);
-      final normalized = await _backgroundImageStore.normalizeSettingsPaths(paths, cleanup: false);
-      // Remote settings may change paths while files are being imported.
-      if (!mapEquals(paths, _settings.pageBackgroundImagePaths)) continue;
-      final opacities = Map<String, double>.from(_settings.pageBackgroundImageOpacities)
-        ..removeWhere((key, _) => !normalized.containsKey(key));
-      if (!mapEquals(paths, normalized) ||
-          !mapEquals(opacities, _settings.pageBackgroundImageOpacities)) {
-        _settings = _settings.copyWith(pageBackgroundImagePaths: normalized,
-          pageBackgroundImageOpacities: opacities);
-        // Housekeeping is not a user change and must not trigger cloud sync.
-        await storage.saveNormalizedSettings(_settings);
-        notifyListeners();
-      }
-      return;
-    }
-  });
+  Future<void> _normalizeBackgroundSettings() =>
+      _backgroundNormalizationFuture ??= _runBackgroundImageOperation(() async {
+        while (!_disposed) {
+          final paths = Map<String, String>.from(
+            _settings.pageBackgroundImagePaths,
+          );
+          final normalized = await _backgroundImageStore.normalizeSettingsPaths(
+            paths,
+            cleanup: false,
+          );
+          // Remote settings may change paths while files are being imported.
+          if (!mapEquals(paths, _settings.pageBackgroundImagePaths)) continue;
+          final opacities = Map<String, double>.from(
+            _settings.pageBackgroundImageOpacities,
+          )..removeWhere((key, _) => !normalized.containsKey(key));
+          if (!mapEquals(paths, normalized) ||
+              !mapEquals(opacities, _settings.pageBackgroundImageOpacities)) {
+            _settings = _settings.copyWith(
+              pageBackgroundImagePaths: normalized,
+              pageBackgroundImageOpacities: opacities,
+            );
+            // Housekeeping is not a user change and must not trigger cloud sync.
+            await storage.saveNormalizedSettings(_settings);
+            notifyListeners();
+          }
+          return;
+        }
+      });
 
   Future<void> initializeAfterFirstFrame() async {
     if (!_initialized || _postFrameInitializationStarted) {
@@ -439,14 +471,23 @@ class AppController extends ChangeNotifier {
     await Future<void>.delayed(Duration.zero);
     // Database discovery and maintenance must not wait for Wear/network work.
     unawaited(_runNonCriticalStartupTask(refreshDatabaseState));
-    unawaited(_runNonCriticalStartupTask(() async {
-      await storage.migrateLegacyApiDataIfNeeded();
-      await _normalizeBackgroundSettings();
-      await _runBackgroundImageOperation(() =>
-        _backgroundImageStore.cleanupUnusedImages(_settings.pageBackgroundImagePaths.values));
-    }));
-    await _runNonCriticalStartupTask(() => ensureLocalDataReady(yieldBetweenBundles: true));
-    if (_disposed || _readyLocalData.length != AppLocalData.values.length) return;
+    unawaited(
+      _runNonCriticalStartupTask(() async {
+        await storage.migrateLegacyApiDataIfNeeded();
+        await _normalizeBackgroundSettings();
+        await _runBackgroundImageOperation(
+          () => _backgroundImageStore.cleanupUnusedImages(
+            _settings.pageBackgroundImagePaths.values,
+          ),
+        );
+      }),
+    );
+    await _runNonCriticalStartupTask(
+      () => ensureLocalDataReady(yieldBetweenBundles: true),
+    );
+    if (_disposed || _readyLocalData.length != AppLocalData.values.length) {
+      return;
+    }
     await _runNonCriticalStartupTask(
       () => AndroidHomeIntegration.updateFavoriteWidgetAutoRefreshMinutes(
         _settings.favoriteWidgetAutoRefreshMinutes,
@@ -1789,18 +1830,28 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await ensureProviderDatabaseState(_settings.provider, force: true);
-      await Future.wait(BusProvider.values.where((provider) => provider != _settings.provider)
-        .map((provider) => ensureProviderDatabaseState(provider, force: true)));
+      await Future.wait(
+        BusProvider.values
+            .where((provider) => provider != _settings.provider)
+            .map(
+              (provider) => ensureProviderDatabaseState(provider, force: true),
+            ),
+      );
     } finally {
       _checkingDatabase = false;
       notifyListeners();
     }
   }
 
-  Future<void> ensureProviderDatabaseState(BusProvider provider, {bool force = false}) {
+  Future<void> ensureProviderDatabaseState(
+    BusProvider provider, {
+    bool force = false,
+  }) {
     final pending = _databaseStateLoads[provider];
     if (pending != null) return pending;
-    if (!force && _knownDatabaseStates.contains(provider)) return Future<void>.value();
+    if (!force && _knownDatabaseStates.contains(provider)) {
+      return Future<void>.value();
+    }
     final load = () async {
       final exists = await repository.databaseExists(provider);
       if (_disposed) return;
@@ -1809,8 +1860,14 @@ class AppController extends ChangeNotifier {
       if (provider == _settings.provider) notifyListeners();
     }();
     _databaseStateLoads[provider] = load;
-    unawaited(load.then<void>((_) => _databaseStateLoads.remove(provider),
-      onError: (Object error, StackTrace stackTrace) { _databaseStateLoads.remove(provider); }));
+    unawaited(
+      load.then<void>(
+        (_) => _databaseStateLoads.remove(provider),
+        onError: (Object error, StackTrace stackTrace) {
+          _databaseStateLoads.remove(provider);
+        },
+      ),
+    );
     return load;
   }
 
@@ -3209,7 +3266,10 @@ class AppController extends ChangeNotifier {
         hourlyOpens: <int, int>{timestamp.hour: 1},
       ),
     );
-    await _persistSmartRouteProfiles(favoriteUsageChanged: false, stopVisitsChanged: false);
+    await _persistSmartRouteProfiles(
+      favoriteUsageChanged: false,
+      stopVisitsChanged: false,
+    );
     await _recordSyncedRouteUsage(
       provider: provider,
       routeKey: route.routeKey,
@@ -3323,8 +3383,12 @@ class AppController extends ChangeNotifier {
     bool stopVisitsChanged = true,
   }) async {
     await storage.saveRouteUsageProfiles(_routeUsageProfiles);
-    if (favoriteUsageChanged) await storage.saveFavoriteUsageProfiles(_favoriteUsageProfiles);
-    if (stopVisitsChanged) await storage.saveStopVisitProfiles(_stopVisitProfiles);
+    if (favoriteUsageChanged) {
+      await storage.saveFavoriteUsageProfiles(_favoriteUsageProfiles);
+    }
+    if (stopVisitsChanged) {
+      await storage.saveStopVisitProfiles(_stopVisitProfiles);
+    }
     await AndroidHomeIntegration.syncSmartRouteNotifications(
       _settings.enableSmartRouteNotifications,
     );

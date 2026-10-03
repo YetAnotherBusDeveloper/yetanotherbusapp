@@ -378,7 +378,10 @@ class _AutomaticBackgroundColorState extends State<_AutomaticBackgroundColor> {
       if (color != _seedColor) setState(() => _seedColor = color);
       if (color != null) {
         try {
-          await widget.controller.storage.saveBackgroundColorCache(path, color.toARGB32());
+          await widget.controller.storage.saveBackgroundColorCache(
+            path,
+            color.toARGB32(),
+          );
         } catch (_) {
           // A palette cache failure must not change the resolved theme.
         }
@@ -773,7 +776,10 @@ class _AppHomeState extends State<_AppHome> with WidgetsBindingObserver {
       try {
         await widget.controller.ensureFavoritesReady();
         if (!mounted) return;
-        await IOSWidgetIntegration.syncFavoriteGroups(widget.controller.favoriteGroups, waitForBridge: true);
+        await IOSWidgetIntegration.syncFavoriteGroups(
+          widget.controller.favoriteGroups,
+          waitForBridge: true,
+        );
       } catch (_) {
         // Never publish a default-empty collection when hydration fails.
       }

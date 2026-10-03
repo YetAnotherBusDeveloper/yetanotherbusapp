@@ -164,14 +164,19 @@ void main() {
     AdService.instance.deferUntil(ready.future);
     await pumpBanner(tester);
     expect(loadCount(), 0);
-    expect(calls.where((call) => call.method == 'MobileAds#initialize'), isEmpty);
+    expect(
+      calls.where((call) => call.method == 'MobileAds#initialize'),
+      isEmpty,
+    );
     ready.complete();
     await tester.pump();
     await tester.pump();
     expect(loadCount(), 1);
   });
 
-  adTestWidgets('a slot disabled before readiness never requests an ad', (tester) async {
+  adTestWidgets('a slot disabled before readiness never requests an ad', (
+    tester,
+  ) async {
     final ready = Completer<void>();
     AdService.instance.deferUntil(ready.future);
     await pumpBanner(tester);
@@ -180,7 +185,10 @@ void main() {
     ready.complete();
     await tester.pump();
     expect(loadCount(), 0);
-    expect(calls.where((call) => call.method == 'MobileAds#initialize'), isEmpty);
+    expect(
+      calls.where((call) => call.method == 'MobileAds#initialize'),
+      isEmpty,
+    );
   });
 
   adTestWidgets(

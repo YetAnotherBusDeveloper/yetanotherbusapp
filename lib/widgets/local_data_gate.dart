@@ -8,7 +8,12 @@ import '../l10n/localized_labels.dart';
 /// An unloaded collection is not an empty collection. Keep management screens
 /// out of their empty state until their authoritative local bundle is ready.
 class LocalDataGate extends StatefulWidget {
-  const LocalDataGate({required this.domain, required this.title, required this.child, super.key});
+  const LocalDataGate({
+    required this.domain,
+    required this.title,
+    required this.child,
+    super.key,
+  });
   final AppLocalData domain;
   final String title;
   final Widget child;
@@ -42,18 +47,31 @@ class _LocalDataGateState extends State<LocalDataGate> {
       body: FutureBuilder<void>(
         future: _load,
         builder: (context, snapshot) {
-          if (!snapshot.hasError) return const Center(child: CircularProgressIndicator());
+          if (!snapshot.hasError) {
+            return const Center(child: CircularProgressIndicator());
+          }
           final l10n = AppLocalizations.of(context);
-          return Center(child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text(localizedFriendlyError(l10n, snapshot.error!), textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              FilledButton(onPressed: () => setState(() {
-                _load = controller.ensureLocalData(widget.domain);
-              }), child: Text(l10n.commonRetry)),
-            ]),
-          ));
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    localizedFriendlyError(l10n, snapshot.error!),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: () => setState(() {
+                      _load = controller.ensureLocalData(widget.domain);
+                    }),
+                    child: Text(l10n.commonRetry),
+                  ),
+                ],
+              ),
+            ),
+          );
         },
       ),
     );

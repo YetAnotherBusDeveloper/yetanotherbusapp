@@ -648,8 +648,11 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
   }
 
   void _reloadIfNeeded() {
-    final ready = widget.controller.recommendationDataReady &&
-        widget.controller.isDatabaseStateKnown(widget.controller.settings.provider);
+    final ready =
+        widget.controller.recommendationDataReady &&
+        widget.controller.isDatabaseStateKnown(
+          widget.controller.settings.provider,
+        );
     final nextKey = [
       widget.controller.settings.provider.name,
       widget.controller.settings.enableSmartRecommendations,
@@ -675,7 +678,9 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
 
   Future<void> _prepareRecommendations() async {
     try {
-      await widget.controller.ensureProviderDatabaseState(widget.controller.settings.provider);
+      await widget.controller.ensureProviderDatabaseState(
+        widget.controller.settings.provider,
+      );
       await widget.controller.ensureRecommendationDataReady();
     } catch (error) {
       if (mounted) setState(() => _preparationError = error);
@@ -1290,9 +1295,14 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
         final l10n = AppLocalizations.of(context);
         final Widget state;
         final String stateKey;
-        if ((!(controller.recommendationDataReady && controller.isDatabaseStateKnown(controller.settings.provider)) && !snapshot.hasError && _preparationError == null) ||
+        if ((!(controller.recommendationDataReady &&
+                    controller.isDatabaseStateKnown(
+                      controller.settings.provider,
+                    )) &&
+                !snapshot.hasError &&
+                _preparationError == null) ||
             snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
+                !snapshot.hasData) {
           stateKey = 'loading';
           state = _SmartRecommendationShell(
             title: l10n.smartRecommendationsTitle,

@@ -72,9 +72,7 @@ class _AccountScreenState extends State<_AccountView> {
       // is 429?
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(l10n.errorRateLimited)),
-        );
+        messenger.showSnackBar(SnackBar(content: Text(l10n.errorRateLimited)));
         return;
       }
       messenger.showSnackBar(
@@ -104,9 +102,7 @@ class _AccountScreenState extends State<_AccountView> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(l10n.errorRateLimited)),
-        );
+        messenger.showSnackBar(SnackBar(content: Text(l10n.errorRateLimited)));
         return;
       }
       messenger.showSnackBar(
@@ -133,9 +129,7 @@ class _AccountScreenState extends State<_AccountView> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(l10n.errorRateLimited)),
-        );
+        messenger.showSnackBar(SnackBar(content: Text(l10n.errorRateLimited)));
         return;
       }
       messenger.showSnackBar(
@@ -171,17 +165,13 @@ class _AccountScreenState extends State<_AccountView> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(l10n.errorRateLimited)),
-        );
+        messenger.showSnackBar(SnackBar(content: Text(l10n.errorRateLimited)));
         return;
       }
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            l10n.accountSyncSettingsFailed(
-              localizedFriendlyError(l10n, error),
-            ),
+            l10n.accountSyncSettingsFailed(localizedFriendlyError(l10n, error)),
           ),
         ),
       );
@@ -255,9 +245,7 @@ class _AccountScreenState extends State<_AccountView> {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        SnackBar(content: Text(l10n.accountSyncComplete)),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(l10n.accountSyncComplete)));
     } catch (error) {
       if (error is AccountSyncConflictException) {
         await _showSyncConflictDialog(controller, error);
@@ -268,9 +256,7 @@ class _AccountScreenState extends State<_AccountView> {
       }
       if (error.toString().contains('Too Many Requests') ||
           error.toString().contains('429')) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(l10n.errorRateLimited)),
-        );
+        messenger.showSnackBar(SnackBar(content: Text(l10n.errorRateLimited)));
         return;
       }
       messenger.showSnackBar(
@@ -356,9 +342,7 @@ class _AccountScreenState extends State<_AccountView> {
       if (!mounted) {
         return;
       }
-      messenger.showSnackBar(
-        SnackBar(content: Text(l10n.accountSyncComplete)),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(l10n.accountSyncComplete)));
     } catch (error) {
       if (!mounted) {
         return;
@@ -366,9 +350,7 @@ class _AccountScreenState extends State<_AccountView> {
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            l10n.accountSyncConflictFailed(
-              localizedFriendlyError(l10n, error),
-            ),
+            l10n.accountSyncConflictFailed(localizedFriendlyError(l10n, error)),
           ),
         ),
       );
@@ -657,9 +639,7 @@ class _SyncCard extends StatelessWidget {
               title: Text(l10n.accountEnableCloudSync),
               subtitle: Text(
                 enabled
-                    ? l10n.accountLastSync(
-                        _formatDateTime(l10n, lastSyncAt),
-                      )
+                    ? l10n.accountLastSync(_formatDateTime(l10n, lastSyncAt))
                     : l10n.accountSyncDisabled,
               ),
             ),
@@ -788,9 +768,7 @@ class _ProviderTile extends StatelessWidget {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: CircleAvatar(child: _providerIcon(provider)),
-      title: Text(
-        label.trim().isEmpty ? _providerName(l10n, provider) : label,
-      ),
+      title: Text(label.trim().isEmpty ? _providerName(l10n, provider) : label),
       subtitle: Text(
         detail.trim().isEmpty ? _providerName(l10n, provider) : detail,
       ),
