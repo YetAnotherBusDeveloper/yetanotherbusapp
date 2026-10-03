@@ -121,6 +121,10 @@ jobs:
           --dart-define=YABUS_GOOGLE_IOS_CLIENT_ID=${{ env.YABUS_GOOGLE_IOS_CLIENT_ID }}
           --dart-define=APP_NIGHTLY_ARTIFACT=android-apk-release
 
+      - name: Test Android widget ETA and rendering
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest --tests 'tw.avianjay.taiwanbus.flutter.*Widget*Test'
+
       - name: Upload Android artifact
         uses: actions/upload-artifact@v6
         with:
