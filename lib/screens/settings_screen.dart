@@ -457,13 +457,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final controller = AppControllerScope.of(context);
     final l10n = AppLocalizations.of(context);
     final category = _selectedCategory;
+    final isDialog = ModalRoute.of(context) is PopupRoute;
     final hasSettingsBackgroundImage = hasBackgroundImageForPage(
       controller.settings,
       pageKey: 'settings',
     );
 
     return PopScope<void>(
-      canPop: category == null,
+      // Scrim clicks and Escape dismiss the dialog. Category back is handled
+      // by the app bar there, and by system back on full-page settings.
+      canPop: isDialog || category == null,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop && _selectedCategory != null) {
           _returnToCategories();

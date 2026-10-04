@@ -34,7 +34,7 @@ void main() {
   });
 
   for (final width in [390.0, 1400.0]) {
-    _settingsTest('category and system back navigation at width $width', (
+    _settingsTest('category back and settings dismissal at width $width', (
       tester,
     ) async {
       await _pumpHost(tester, width: width);
@@ -56,7 +56,11 @@ void main() {
         width >= 1100 ? findsOneWidget : findsNothing,
       );
 
-      await tester.binding.handlePopRoute();
+      if (width >= 1100) {
+        await tester.tap(find.byType(BackButton));
+      } else {
+        await tester.binding.handlePopRoute();
+      }
       await tester.pumpAndSettle();
       expect(find.text('設定'), findsOneWidget);
       expect(find.byType(SwitchListTile), findsNothing);
@@ -86,6 +90,48 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  for (final dismissWithEscape in [false, true]) {
+    for (final openCategory in [false, true]) {
+      _settingsTest(
+        'desktop dismiss via ${dismissWithEscape ? 'Escape' : 'scrim'} with category=$openCategory',
+        (tester) async {
+          await _pumpHost(tester, width: 1400);
+          if (openCategory) {
+            await _openCategory(tester, '外觀');
+          }
+
+          if (dismissWithEscape) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          } else {
+            await tester.tapAt(const Offset(10, 10));
+          }
+          await tester.pumpAndSettle();
+
+          expect(find.byType(SettingsScreen), findsNothing);
+          expect(find.byType(Dialog), findsNothing);
+          expect(find.text('Open settings'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  _settingsTest('full-page settings preserve category back at desktop width', (
+    tester,
+  ) async {
+    await _pumpHost(tester, width: 1400, adaptive: false);
+    expect(find.byType(Dialog), findsNothing);
+    await _openCategory(tester, '外觀');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('設定'), findsOneWidget);
+    expect(find.byType(SwitchListTile), findsNothing);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsScreen), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   _settingsTest('settings persist when moving between categories', (
     tester,
@@ -289,6 +335,7 @@ Future<AppController> _pumpHost(
   double height = 844,
   double scale = 1,
   Locale locale = const Locale('zh', 'TW'),
+  bool adaptive = true,
 }) async {
   final controller = await createAdTestController(
     repository: _SettingsRepository(),
@@ -319,7 +366,17 @@ Future<AppController> _pumpHost(
           body: Builder(
             builder: (context) => Center(
               child: FilledButton(
-                onPressed: () => openAdaptiveSettingsScreen(context),
+                onPressed: () {
+                  if (adaptive) {
+                    openAdaptiveSettingsScreen(context);
+                  } else {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SettingsScreen(),
+                      ),
+                    );
+                  }
+                },
                 child: const Text('Open settings'),
               ),
             ),

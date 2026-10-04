@@ -97,6 +97,9 @@ void main() {
     Navigator.of(context).pushNamed(AppRoutes.settings);
     await tester.pumpAndSettle();
 
+    await tester.tap(find.widgetWithText(ListTile, 'Appearance'));
+    await tester.pumpAndSettle();
+
     final dropdown = find.byType(AppDropdownFormField<Locale?>);
     expect(dropdown, findsOneWidget);
     expect(
@@ -169,6 +172,9 @@ void main() {
     Navigator.of(
       tester.element(find.byType(Navigator).first),
     ).pushNamed(AppRoutes.settings);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(ListTile, '外觀'));
     await tester.pumpAndSettle();
 
     final dropdown = find.byType(AppDropdownFormField<Locale?>);
