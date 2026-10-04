@@ -67,8 +67,7 @@ void main() {
     try {
       final controller = await createAdTestController();
       addTearDown(controller.dispose);
-      // A tall viewport keeps the whole settings list built so the density
-      // section can be found without scrolling.
+      // A tall viewport keeps all controls in the usage category visible.
       tester.view.physicalSize = const Size(900, 8000);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -85,6 +84,10 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AdDensitySetting), findsNothing);
+      await tester.tap(find.text('使用與更新'));
       await tester.pumpAndSettle();
 
       expect(controller.settings.enableAds, isTrue);

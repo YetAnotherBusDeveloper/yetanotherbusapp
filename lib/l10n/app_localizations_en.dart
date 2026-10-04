@@ -12,6 +12,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'YetAnotherBusApp';
 
   @override
+  String get settingsAppearanceDescription =>
+      'Language, theme, interface size and personalization';
+
+  @override
+  String get settingsUsageDescription =>
+      'Arrival refresh, smart recommendations and preferences';
+
+  @override
+  String get settingsUpdatesDescription =>
+      'Update channel, automatic checks and app updates';
+
+  @override
+  String get settingsHistoryDescription =>
+      'Search history, clearing data and privacy policy';
+
+  @override
+  String get settingsOnboardingDescription => 'Run the first-time setup again';
+
+  @override
+  String get settingsAboutDescription =>
+      'Version information, contributors, community and feedback';
+
+  @override
   String get settingsTitle => 'Settings';
 
   @override

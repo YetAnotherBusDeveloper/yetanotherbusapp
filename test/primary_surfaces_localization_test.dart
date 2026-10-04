@@ -113,7 +113,7 @@ void main() {
     );
 
     testWidgets(
-      'settings localize and scroll at narrow width in ${language.locale}',
+      'settings categories and details localize at narrow width in ${language.locale}',
       (tester) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.windows;
         final controller = await _createController();
@@ -128,12 +128,22 @@ void main() {
 
           expect(find.text(language.settings), findsOneWidget);
           expect(find.text(language.appearance), findsOneWidget);
+          expect(find.byType(Slider), findsNothing);
+          expect(find.byType(SwitchListTile), findsNothing);
           await tester.scrollUntilVisible(
             find.text(language.usage),
             400,
             scrollable: find.byType(Scrollable).first,
           );
           expect(find.text(language.usage), findsOneWidget);
+          await tester.tap(find.text(language.usage));
+          await tester.pump();
+          expect(find.text(language.usage), findsOneWidget);
+          expect(find.byType(SwitchListTile), findsWidgets);
+          expect(find.text(language.appearance), findsNothing);
+          await tester.tap(find.byType(BackButton));
+          await tester.pump();
+          expect(find.text(language.settings), findsOneWidget);
           expect(tester.takeException(), isNull);
         } finally {
           await tester.pumpWidget(const SizedBox.shrink());
