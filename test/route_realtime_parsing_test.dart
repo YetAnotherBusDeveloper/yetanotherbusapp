@@ -13,6 +13,7 @@ void main() {
   test(
     'route detail parsing preserves backfilled eta and bus metadata',
     () async {
+      final updatedAt = DateTime.now();
       final client = MockClient((request) async {
         final path = request.url.path;
         if (path.endsWith('/api/v1/routes/TXG307/stops')) {
@@ -59,7 +60,8 @@ void main() {
                       'stopid': 'STOP2',
                       'eta': 0,
                       'message': '',
-                      'updated_at': '2026-06-22T10:00:05+08:00',
+                      'updated_at': updatedAt.toIso8601String(),
+                      'eta_reference_at': updatedAt.toIso8601String(),
                       'buses': [
                         {
                           'id': 'BBB-0002',
@@ -81,7 +83,8 @@ void main() {
                       'stopid': 'STOP3',
                       'eta': 90,
                       'message': '',
-                      'updated_at': '2026-06-22T10:00:05+08:00',
+                      'updated_at': updatedAt.toIso8601String(),
+                      'eta_reference_at': updatedAt.toIso8601String(),
                       'buses': const [],
                       'etas': [
                         {
@@ -121,7 +124,10 @@ void main() {
       expect(stop2.etas.single.vehicleId, 'BBB-0002');
       expect(stop2.etas.single.source, 'backfill_buses');
       expect(stop2.etas.single.estimated, isTrue);
-      expect(effectiveStopEtaSecondsForVehicle(stop3, 'BBB-0002'), 90);
+      expect(
+        effectiveStopEtaSecondsForVehicle(stop3, 'BBB-0002', now: updatedAt),
+        90,
+      );
     },
   );
 }

@@ -1992,6 +1992,8 @@ class StopEta {
     this.vehicleId,
     this.source = 'tdx',
     this.estimated = false,
+    this.etaReferenceAt,
+    this.updatedAt,
   });
 
   final int? sec;
@@ -1999,6 +2001,8 @@ class StopEta {
   final String? vehicleId;
   final String source;
   final bool estimated;
+  final String? etaReferenceAt;
+  final String? updatedAt;
 }
 
 class StopInfo {
@@ -2015,6 +2019,7 @@ class StopInfo {
     this.sec,
     this.msg,
     this.t,
+    this.etaReferenceAt,
     this.buses = const [],
     this.etas = const [],
   });
@@ -2050,6 +2055,9 @@ class StopInfo {
   final int? sec;
   final String? msg;
   final String? t;
+
+  /// Time against which [sec] was calculated, distinct from source time [t].
+  final String? etaReferenceAt;
   final List<BusVehicle> buses;
   final List<StopEta> etas;
 
@@ -2063,6 +2071,7 @@ class StopInfo {
     int? sec,
     String? msg,
     String? t,
+    String? etaReferenceAt,
     List<BusVehicle>? buses,
     List<StopEta>? etas,
   }) {
@@ -2079,6 +2088,7 @@ class StopInfo {
       sec: sec ?? this.sec,
       msg: msg ?? this.msg,
       t: t ?? this.t,
+      etaReferenceAt: etaReferenceAt ?? this.etaReferenceAt,
       buses: buses ?? this.buses,
       etas: etas ?? this.etas,
     );
@@ -2178,11 +2188,13 @@ class StationPassbyData {
   StationRouteArrival? get nextArrival {
     StationRouteArrival? best;
     for (final arrival in routes) {
-      final seconds = arrival.result.matchedStop.sec;
+      final seconds = effectiveStopEtaSeconds(arrival.result.matchedStop);
       if (seconds == null || seconds < 0) {
         continue;
       }
-      final bestSeconds = best?.result.matchedStop.sec;
+      final bestSeconds = best == null
+          ? null
+          : effectiveStopEtaSeconds(best.result.matchedStop);
       if (bestSeconds == null || seconds < bestSeconds) {
         best = arrival;
       }
@@ -2288,22 +2300,22 @@ DateTime? _parseStopRealtimeUpdatedAt(String? value, DateTime now) {
   }
 
   final numericValue = int.tryParse(text);
+  DateTime? parsed;
   if (numericValue != null) {
     if (numericValue > 1000000000000) {
-      return DateTime.fromMillisecondsSinceEpoch(
+      parsed = DateTime.fromMillisecondsSinceEpoch(
         numericValue,
         isUtc: true,
       ).toLocal();
-    }
-    if (numericValue > 1000000000) {
-      return DateTime.fromMillisecondsSinceEpoch(
+    } else if (numericValue > 1000000000) {
+      parsed = DateTime.fromMillisecondsSinceEpoch(
         numericValue * 1000,
         isUtc: true,
       ).toLocal();
     }
   }
 
-  final parsed = DateTime.tryParse(text)?.toLocal();
+  parsed ??= DateTime.tryParse(text)?.toLocal();
   if (parsed == null || parsed.isAfter(now.add(const Duration(seconds: 15)))) {
     return null;
   }
@@ -2340,12 +2352,38 @@ bool hasSyntheticVehicleEta(StopInfo stop, String? vehicleId) {
   return eta.estimated || isBackfillBusSource(eta.source);
 }
 
-int? _effectiveEtaSeconds(int? seconds, String? updatedAtText, DateTime now) {
+const maxRealtimeStopAge = Duration(seconds: 90);
+
+DateTime? stopRealtimeUpdatedAt(StopInfo stop, {DateTime? now}) {
+  final clock = now ?? DateTime.now();
+  return _parseStopRealtimeUpdatedAt(stop.t, clock) ??
+      _parseStopRealtimeUpdatedAt(stop.etaReferenceAt, clock);
+}
+
+bool isStopRealtimeStale(StopInfo stop, {DateTime? now}) {
+  final clock = now ?? DateTime.now();
+  final updatedAt = stopRealtimeUpdatedAt(stop, now: clock);
+  return updatedAt != null && clock.difference(updatedAt) > maxRealtimeStopAge;
+}
+
+int? _effectiveEtaSeconds(
+  int? seconds,
+  String? updatedAtText,
+  String? referenceAtText,
+  DateTime now,
+) {
+  final sourceTime =
+      _parseStopRealtimeUpdatedAt(updatedAtText, now) ??
+      _parseStopRealtimeUpdatedAt(referenceAtText, now);
+  if (sourceTime != null && now.difference(sourceTime) > maxRealtimeStopAge) {
+    return null;
+  }
   if (seconds == null || seconds <= 0) {
     return seconds;
   }
 
-  final updatedAt = _parseStopRealtimeUpdatedAt(updatedAtText, now);
+  final updatedAt =
+      _parseStopRealtimeUpdatedAt(referenceAtText, now) ?? sourceTime;
   if (updatedAt == null) {
     return seconds;
   }
@@ -2355,16 +2393,16 @@ int? _effectiveEtaSeconds(int? seconds, String? updatedAtText, DateTime now) {
     return seconds;
   }
 
-  // Avoid turning very stale fallback data into fake arrivals.
-  if (elapsedSeconds > math.max(seconds + 120, 600)) {
-    return seconds;
-  }
-
   return math.max(0, seconds - elapsedSeconds);
 }
 
 int? effectiveStopEtaSeconds(StopInfo stop, {DateTime? now}) {
-  return _effectiveEtaSeconds(stop.sec, stop.t, now ?? DateTime.now());
+  return _effectiveEtaSeconds(
+    stop.sec,
+    stop.t,
+    stop.etaReferenceAt,
+    now ?? DateTime.now(),
+  );
 }
 
 int? effectiveStopEtaSecondsForVehicle(
@@ -2376,7 +2414,12 @@ int? effectiveStopEtaSecondsForVehicle(
   if (eta == null) {
     return effectiveStopEtaSeconds(stop, now: now);
   }
-  return _effectiveEtaSeconds(eta.sec, stop.t, now ?? DateTime.now());
+  return _effectiveEtaSeconds(
+    eta.sec,
+    eta.updatedAt ?? stop.t,
+    eta.etaReferenceAt ?? stop.etaReferenceAt,
+    now ?? DateTime.now(),
+  );
 }
 
 String? effectiveStopEtaMessageForVehicle(StopInfo stop, String? vehicleId) {
@@ -2393,12 +2436,20 @@ EtaPresentation buildEtaPresentation(
   Brightness brightness = Brightness.light,
   ColorScheme? colorScheme,
   String arrivingText = '進站中',
+  String staleText = '資料已過期',
   String Function(int seconds)? secondsText,
   String Function(int minutes)? minutesText,
   String Function(int minutes, int seconds)? minutesSecondsText,
 }) {
   final isDark = brightness == Brightness.dark;
   final cs = colorScheme;
+  if (isStopRealtimeStale(stop)) {
+    return EtaPresentation(
+      text: staleText,
+      backgroundColor: cs?.surfaceContainerHighest ?? const Color(0xFF364152),
+      foregroundColor: cs?.onSurfaceVariant ?? const Color(0xFFD8E2F1),
+    );
+  }
   final message = stop.msg?.trim() ?? '';
   if (message.isNotEmpty) {
     return EtaPresentation(
@@ -2516,14 +2567,14 @@ class RouteAlert {
     final sourceUrl = rawSource is Map
         ? _firstString(rawSource, const ['url', 'uri', 'link'])
         : _firstString(json, const [
-            'source_url',
-            'official_url',
-            'info_url',
-            'url',
-          ]) ??
-          (source != null && Uri.tryParse(source)?.hasScheme == true
-              ? source
-              : null);
+                'source_url',
+                'official_url',
+                'info_url',
+                'url',
+              ]) ??
+              (source != null && Uri.tryParse(source)?.hasScheme == true
+                  ? source
+                  : null);
     return RouteAlert(
       alertId: json['alert_id']?.toString() ?? '',
       title: json['title']?.toString() ?? '',

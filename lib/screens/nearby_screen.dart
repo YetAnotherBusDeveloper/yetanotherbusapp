@@ -263,6 +263,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       sec: payload.sec,
       msg: payload.msg,
       t: payload.t,
+      etaReferenceAt: payload.etaReferenceAt,
       buses: payload.buses,
       etas: payload.etas,
     );

@@ -1043,6 +1043,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           sec: previousStop.sec,
           msg: previousStop.msg,
           t: previousStop.t,
+          etaReferenceAt: previousStop.etaReferenceAt,
           buses: previousStop.buses,
           etas: previousStop.etas,
         );
@@ -4745,6 +4746,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
               sec: livePayload.sec,
               msg: livePayload.msg,
               t: livePayload.t,
+              etaReferenceAt: livePayload.etaReferenceAt,
               buses: livePayload.buses,
             );
       return _RelatedStopRouteEta(result: result, liveStop: liveStop);

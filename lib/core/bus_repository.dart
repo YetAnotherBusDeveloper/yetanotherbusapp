@@ -1335,27 +1335,57 @@ class BusRepository {
     RouteDetailData selected, {
     required BusProvider provider,
   }) async {
+    final generation = _routeDataGeneration;
     try {
       final family = await getRouteFamily(selected.route, provider: provider);
-      final variants = await Future.wait(
-        family.where((route) => route.routeId != selected.route.routeId).map((
-          route,
-        ) async {
-          try {
-            return await getCompleteBusInfo(
-              route.routeKey,
-              provider: provider,
-              routeIdHint: route.routeId,
-              routeNameHint: route.routeName,
-            );
-          } catch (_) {
-            return null;
-          }
-        }),
-      );
+      if (generation != _routeDataGeneration) return selected;
+      final routes = family
+          .where((route) => route.routeId != selected.route.routeId)
+          .toList();
+      if (routes.isEmpty) return selected;
+      // Start one shared batch while static topology loads. Never fan out a
+      // realtime request per variant, or make the selected route wait for it.
+      final liveFuture = getBatchLiveStopMaps(
+        routes.map((route) => route.routeId).toList(),
+      ).catchError((Object _) => <String, LiveStopMap>{});
+      final topologies = <RouteDetailData>[];
+      const topologyConcurrency = 4;
+      for (
+        var offset = 0;
+        offset < routes.length;
+        offset += topologyConcurrency
+      ) {
+        if (generation != _routeDataGeneration) return selected;
+        final chunk = routes.skip(offset).take(topologyConcurrency);
+        final loaded = await Future.wait(
+          chunk.map((route) async {
+            try {
+              return await _getRouteTopologyById(
+                provider: provider,
+                routeId: route.routeId,
+                routeNameHint: route.routeName,
+              );
+            } catch (_) {
+              return null;
+            }
+          }),
+        );
+        topologies.addAll(loaded.whereType<RouteDetailData>());
+      }
+      final maps = await liveFuture;
+      if (generation != _routeDataGeneration) return selected;
       return mergeRouteFamilyLiveData(
         selected,
-        variants.whereType<RouteDetailData>().toList(growable: false),
+        topologies
+            .map(
+              (topology) => _applyLiveStopMap(
+                topology,
+                maps[topology.route.routeId] ??
+                    const <String, LiveStopPayload>{},
+                hasLiveData: maps.containsKey(topology.route.routeId),
+              ),
+            )
+            .toList(growable: false),
       );
     } catch (_) {
       // Variants supplement a route but must not prevent the selected route
@@ -1857,6 +1887,7 @@ class BusRepository {
             sec: stationStop.sec,
             msg: stationStop.msg,
             t: stationStop.t,
+            etaReferenceAt: stationStop.etaReferenceAt,
             buses: stationStop.buses,
             etas: stationStop.etas,
           );
@@ -2049,6 +2080,7 @@ class BusRepository {
         sec: livePayload?.sec,
         msg: livePayload?.msg,
         t: livePayload?.t,
+        etaReferenceAt: livePayload?.etaReferenceAt,
         buses: livePayload?.buses ?? const [],
         etas: livePayload?.etas ?? const [],
       );
@@ -2165,6 +2197,7 @@ class BusRepository {
         sec: livePayload?.sec,
         msg: livePayload?.msg,
         t: livePayload?.t,
+        etaReferenceAt: livePayload?.etaReferenceAt,
         buses: livePayload?.buses ?? const [],
         etas: livePayload?.etas ?? const [],
       );
@@ -2277,6 +2310,7 @@ class BusRepository {
                 sec: payload?.sec,
                 msg: payload?.msg,
                 t: payload?.t,
+                etaReferenceAt: payload?.etaReferenceAt,
                 buses: payload?.buses ?? const [],
                 etas: payload?.etas ?? const [],
               );
@@ -2647,6 +2681,7 @@ class BusRepository {
           sec: _nullableInt(rawStop['eta']),
           msg: rawStop['message']?.toString(),
           t: rawStop['updated_at']?.toString(),
+          etaReferenceAt: _etaReferenceAt(rawStop),
           buses: (rawStop['buses'] as List<dynamic>? ?? const [])
               .whereType<Map>()
               .map(_parseBusVehicle)
@@ -2824,6 +2859,7 @@ class BusRepository {
           sec: _nullableInt(rawRoute['eta']),
           msg: rawRoute['message']?.toString(),
           t: rawRoute['updated_at']?.toString(),
+          etaReferenceAt: _etaReferenceAt(rawRoute),
           buses: (rawRoute['buses'] as List? ?? const [])
               .whereType<Map>()
               .map(_parseBusVehicle)
@@ -2950,6 +2986,7 @@ class BusRepository {
         sec: _nullableInt(rawRoute['eta']),
         msg: rawRoute['message']?.toString(),
         t: rawRoute['updated_at']?.toString(),
+        etaReferenceAt: _etaReferenceAt(rawRoute),
         buses: (rawRoute['buses'] as List<dynamic>? ?? const [])
             .whereType<Map>()
             .map(_parseBusVehicle)
@@ -3123,6 +3160,7 @@ class BusRepository {
             sec: _nullableInt(rawStop['eta']),
             msg: rawStop['message']?.toString(),
             t: rawStop['updated_at']?.toString(),
+            etaReferenceAt: _etaReferenceAt(rawStop),
             buses: (rawStop['buses'] as List<dynamic>? ?? const [])
                 .whereType<Map>()
                 .map(_parseBusVehicle)
@@ -3436,6 +3474,12 @@ class BusRepository {
       source: _nonEmptyString(payload['source']) ?? 'tdx',
     );
   }
+
+  // Older servers already adjust ETA but do not provide the calculation
+  // time. Anchor those values on receipt instead of subtracting source age
+  // twice; source timestamps still independently expire old observations.
+  String _etaReferenceAt(Map raw) =>
+      raw['eta_reference_at']?.toString() ?? DateTime.now().toIso8601String();
 
   List<StopEta> _parseStopEtas(Object? rawEtas) {
     if (rawEtas is! List) {
@@ -5220,6 +5264,7 @@ class LiveStopPayload {
     required this.sec,
     required this.msg,
     required this.t,
+    this.etaReferenceAt,
     required this.buses,
     required this.etas,
   });
@@ -5227,6 +5272,7 @@ class LiveStopPayload {
   final int? sec;
   final String? msg;
   final String? t;
+  final String? etaReferenceAt;
   final List<BusVehicle> buses;
   final List<StopEta> etas;
 }

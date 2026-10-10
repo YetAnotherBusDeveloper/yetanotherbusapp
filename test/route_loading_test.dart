@@ -172,6 +172,102 @@ void main() {
     expect(family.single.routeId, 'TXG5000');
     expect(searchRequests, 2);
   });
+
+  test(
+    'actual family enrichment batches variants and tolerates a failed topology',
+    () async {
+      var singleRealtimeRequests = 0;
+      var batchRequests = 0;
+      final updatedAt = DateTime.now().toIso8601String();
+      Map<String, Object> live(String id, int seconds) => {
+        'routeid': id,
+        'paths': [
+          {
+            'pathid': 0,
+            'stops': [
+              {
+                'stopid': 'STOP-1',
+                'eta': seconds,
+                'updated_at': updatedAt,
+                'eta_reference_at': updatedAt,
+                'message': '',
+                'buses': [],
+                'etas': [],
+              },
+            ],
+          },
+        ],
+      };
+      final client = MockClient((request) async {
+        final path = request.url.path;
+        if (path.endsWith('/api/v1/cities/Taichung/routes')) {
+          return _jsonResponse([
+            for (final entry in {
+              'TXG5000': '500',
+              'TXG5002': '500延',
+              'TXG5003': '500跳蛙',
+              'TXG5004': '500延跳蛙',
+            }.entries)
+              {
+                'routeid': entry.key,
+                'route_name': entry.value,
+                'pathid': 0,
+                'path_name': '主線',
+              },
+          ]);
+        }
+        if (path.contains('/batchroutes/')) {
+          batchRequests++;
+          expect(
+            request.url.pathSegments[3].split(','),
+            unorderedEquals(['TXG5002', 'TXG5003', 'TXG5004']),
+          );
+          return _jsonResponse({
+            'routes': {
+              'TXG5002': live('TXG5002', 60),
+              'TXG5003': live('TXG5003', 90),
+            },
+          });
+        }
+        if (path.endsWith('/realtime')) {
+          singleRealtimeRequests++;
+          expect(path, endsWith('/TXG5000/realtime'));
+          return _jsonResponse(live('TXG5000', 120));
+        }
+        if (path.endsWith('/stops')) {
+          if (path.contains('TXG5004')) {
+            return http.Response('unavailable', 503);
+          }
+          return _jsonResponse({
+            ..._routeStopsPayload,
+            'routeid': request.url.pathSegments[3],
+          });
+        }
+        return http.Response('not found', 404);
+      });
+      final repository = BusRepository(client: client);
+      final selected = await repository.getCompleteBusInfo(
+        500,
+        provider: BusProvider.txg,
+        routeIdHint: 'TXG5000',
+        routeNameHint: '500',
+      );
+      final results = await Future.wait([
+        repository.enrichRouteWithFamily(selected, provider: BusProvider.txg),
+        repository.enrichRouteWithFamily(selected, provider: BusProvider.txg),
+      ]);
+      expect(singleRealtimeRequests, 1);
+      expect(batchRequests, 1);
+      expect(selected.stopsByPath[0]!.single.sec, 120);
+      for (final result in results) {
+        expect(result.stopsByPath[0]!.single.sec, 60);
+        expect(
+          result.familyRouteIds,
+          unorderedEquals(['TXG5000', 'TXG5002', 'TXG5003']),
+        );
+      }
+    },
+  );
 }
 
 http.Response _jsonResponse(Object body) {

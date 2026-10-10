@@ -118,7 +118,7 @@ void main() {
     expect(effectiveStopEtaSeconds(stop, now: now), 55);
   });
 
-  test('effective stop eta ignores stale timestamps', () {
+  test('effective stop eta expires stale timestamps including arrivals', () {
     final now = DateTime(2026, 6, 9, 8, 0);
     final stop = StopInfo(
       routeKey: 1,
@@ -132,7 +132,33 @@ void main() {
       t: now.subtract(const Duration(minutes: 20)).toIso8601String(),
     );
 
-    expect(effectiveStopEtaSeconds(stop, now: now), 90);
+    expect(effectiveStopEtaSeconds(stop, now: now), isNull);
+    expect(effectiveStopEtaSeconds(stop.copyWith(sec: 0), now: now), isNull);
+  });
+
+  test('server-adjusted ETA uses its calculation time, not source age', () {
+    final now = DateTime(2026, 10, 10, 8, 0, 35);
+    final stop = StopInfo(
+      routeKey: 1,
+      pathId: 0,
+      stopId: 1,
+      stopName: 'Station',
+      sequence: 1,
+      lon: 121.5,
+      lat: 25,
+      sec: 85,
+      t: now.subtract(const Duration(seconds: 35)).toIso8601String(),
+      etaReferenceAt: now.toIso8601String(),
+    );
+    expect(effectiveStopEtaSeconds(stop, now: now), 85);
+    expect(
+      effectiveStopEtaSeconds(stop, now: now.add(const Duration(seconds: 10))),
+      75,
+    );
+    expect(
+      effectiveStopEtaSeconds(stop, now: now.add(const Duration(seconds: 56))),
+      isNull,
+    );
   });
 
   test('vehicle eta lookup normalizes plate ids', () {

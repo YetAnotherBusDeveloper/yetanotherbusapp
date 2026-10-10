@@ -59,6 +59,7 @@ StopInfo mergeRouteFamilyStopLiveData(
   final busesById = <String, BusVehicle>{};
   final etasByKey = <String, StopEta>{};
   for (final stop in allStops) {
+    if (isStopRealtimeStale(stop)) continue;
     for (final bus in stop.buses) {
       busesById.putIfAbsent(
         bus.id.trim().isEmpty ? '${bus.source}:${busesById.length}' : bus.id,
@@ -68,7 +69,18 @@ StopInfo mergeRouteFamilyStopLiveData(
     for (final eta in stop.etas) {
       final key =
           '${eta.vehicleId}:${eta.sec}:${eta.msg}:${eta.source}:${eta.estimated}';
-      etasByKey.putIfAbsent(key, () => eta);
+      etasByKey.putIfAbsent(
+        key,
+        () => StopEta(
+          sec: eta.sec,
+          msg: eta.msg,
+          vehicleId: eta.vehicleId,
+          source: eta.source,
+          estimated: eta.estimated,
+          etaReferenceAt: eta.etaReferenceAt ?? stop.etaReferenceAt,
+          updatedAt: eta.updatedAt ?? stop.t,
+        ),
+      );
     }
   }
 
@@ -84,7 +96,8 @@ StopInfo mergeRouteFamilyStopLiveData(
     lat: baseStop.lat,
     sec: primaryEtaStop?.sec,
     msg: primaryEtaStop == null ? primaryMessageStop.msg : null,
-    t: primaryEtaStop?.t,
+    t: (primaryEtaStop ?? primaryMessageStop).t,
+    etaReferenceAt: (primaryEtaStop ?? primaryMessageStop).etaReferenceAt,
     buses: busesById.values.toList(growable: false),
     etas: etasByKey.values.toList(growable: false),
   );
