@@ -627,6 +627,12 @@ abstract class AppLocalizations {
   /// **'Search by bus route or stop name'**
   String get searchHint;
 
+  /// No description provided for @searchPartialResults.
+  ///
+  /// In en, this message translates to:
+  /// **'Some searches could not be completed. Available results are shown.'**
+  String get searchPartialResults;
+
   /// No description provided for @searchClearTooltip.
   ///
   /// In en, this message translates to:
@@ -648,13 +654,13 @@ abstract class AppLocalizations {
   /// No description provided for @searchResolvingTitle.
   ///
   /// In en, this message translates to:
-  /// **'Checking nearby stops'**
+  /// **'Looking up stops'**
   String get searchResolvingTitle;
 
   /// No description provided for @searchResolvingMessage.
   ///
   /// In en, this message translates to:
-  /// **'Searching for stops you can board nearby...'**
+  /// **'Finding routes that serve matching stops...'**
   String get searchResolvingMessage;
 
   /// No description provided for @searchEmptyTitle.
@@ -2061,6 +2067,18 @@ abstract class AppLocalizations {
   /// **'Arriving'**
   String get etaArriving;
 
+  /// No description provided for @etaStale.
+  ///
+  /// In en, this message translates to:
+  /// **'Outdated'**
+  String get etaStale;
+
+  /// No description provided for @etaLastUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Last updated: {time}'**
+  String etaLastUpdated(String time);
+
   /// No description provided for @etaSeconds.
   ///
   /// In en, this message translates to:
@@ -2762,21 +2780,39 @@ abstract class AppLocalizations {
   String get routeDetailOperationsNotice;
 
   /// No description provided for @routeAlertAffectedRoute.
+  ///
+  /// In en, this message translates to:
+  /// **'Affected route'**
   String get routeAlertAffectedRoute;
 
   /// No description provided for @routeAlertType.
+  ///
+  /// In en, this message translates to:
+  /// **'Type'**
   String get routeAlertType;
 
   /// No description provided for @routeAlertTime.
+  ///
+  /// In en, this message translates to:
+  /// **'Time'**
   String get routeAlertTime;
 
   /// No description provided for @routeAlertImpact.
+  ///
+  /// In en, this message translates to:
+  /// **'Impact'**
   String get routeAlertImpact;
 
   /// No description provided for @routeAlertSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Official source'**
   String get routeAlertSource;
 
   /// No description provided for @routeAlertOpenSource.
+  ///
+  /// In en, this message translates to:
+  /// **'Open official source'**
   String get routeAlertOpenSource;
 
   /// No description provided for @routeDetailViewRoutePresence.

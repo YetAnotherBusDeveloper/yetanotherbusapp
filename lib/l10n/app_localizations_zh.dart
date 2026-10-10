@@ -289,6 +289,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get searchHint => '搜尋公車路線或站牌名稱';
 
   @override
+  String get searchPartialResults => '部分搜尋暫時無法完成，已顯示可用結果。';
+
+  @override
   String get searchClearTooltip => '清除搜尋';
 
   @override
@@ -301,7 +304,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get searchResolvingTitle => '貓貓正在翻站牌';
 
   @override
-  String get searchResolvingMessage => '正在搜尋附近可搭的站牌...';
+  String get searchResolvingMessage => '正在尋找行經這些站牌的路線...';
 
   @override
   String get searchEmptyTitle => '沒有找到這台貓公車';
@@ -1120,6 +1123,14 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get etaArriving => '進站中';
+
+  @override
+  String get etaStale => '資料已過期';
+
+  @override
+  String etaLastUpdated(String time) {
+    return '最後更新：$time';
+  }
 
   @override
   String etaSeconds(int seconds) {
@@ -3510,6 +3521,9 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get searchHint => '搜尋公車路線或站牌名稱';
 
   @override
+  String get searchPartialResults => '部分搜尋暫時無法完成，已顯示可用結果。';
+
+  @override
   String get searchClearTooltip => '清除搜尋';
 
   @override
@@ -3522,7 +3536,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get searchResolvingTitle => '貓貓正在翻站牌';
 
   @override
-  String get searchResolvingMessage => '正在搜尋附近可搭的站牌...';
+  String get searchResolvingMessage => '正在尋找行經這些站牌的路線...';
 
   @override
   String get searchEmptyTitle => '沒有找到這台貓公車';
@@ -4341,6 +4355,14 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get etaArriving => '進站中';
+
+  @override
+  String get etaStale => '資料已過期';
+
+  @override
+  String etaLastUpdated(String time) {
+    return '最後更新：$time';
+  }
 
   @override
   String etaSeconds(int seconds) {

@@ -160,6 +160,41 @@ void main() {
   );
 
   test(
+    'stop-name search falls back to one API request without a local database',
+    () async {
+      var calls = 0;
+      final repository = BusRepository(
+        client: MockClient((request) async {
+          calls++;
+          expect(request.url.path, '/api/v1/stops/search');
+          expect(request.url.queryParameters['cities'], 'Taichung');
+          return jsonResponse([
+            {
+              'routeid': 'TXG500',
+              'city_code': 'TXG',
+              'route_name': '500',
+              'pathid': 1,
+              'path_name': '返程',
+              'stopid': 'S1',
+              'stop_name': '市政府',
+              'seq': 2,
+              'lat': 24.1,
+              'lon': 120.65,
+            },
+          ]);
+        }),
+      );
+      final results = await repository.searchRoutesByStopName(
+        '市政府',
+        provider: BusProvider.txg,
+      );
+      expect(results.single.matchedStop.pathId, 1);
+      expect(results.single.matchedStop.rawStopId, 'S1');
+      expect(calls, 1);
+    },
+  );
+
+  test(
     'concurrent watchers coalesce stops, realtime and negative family lookups',
     () async {
       final paths = <String>[];

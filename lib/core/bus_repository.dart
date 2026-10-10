@@ -93,6 +93,8 @@ class BusRepository {
     _routePathGeometryInFlight.clear();
     _searchRoutesApiCache.clear();
     _searchRoutesApiInFlight.clear();
+    _stopSearchApiCache.clear();
+    _stopSearchApiInFlight.clear();
   }
 
   final Map<BusProvider, int> _staticRouteCacheGeneration =
@@ -101,6 +103,12 @@ class BusRepository {
       <String, _TimedValue<List<RouteSummary>>>{};
   final Map<String, Future<List<RouteSummary>>> _searchRoutesApiInFlight =
       <String, Future<List<RouteSummary>>>{};
+  static const _stopSearchApiCacheTtl = Duration(seconds: 30);
+  static const _stopSearchCacheCapacity = 32;
+  final Map<String, _TimedValue<List<StopRouteSearchResult>>>
+  _stopSearchApiCache = {};
+  final Map<String, Future<List<StopRouteSearchResult>>>
+  _stopSearchApiInFlight = {};
   final Map<String, _TimedValue<LiveStopMap>> _realtimeCache =
       <String, _TimedValue<LiveStopMap>>{};
   final Map<String, Future<LiveStopMap>> _realtimeInFlight =
@@ -590,6 +598,124 @@ class BusRepository {
   }
 
   Future<List<StopRouteSearchResult>> searchRoutesByStopName(
+    String query, {
+    required BusProvider provider,
+    int limit = 40,
+  }) async {
+    try {
+      return await _searchRoutesByStopNameFromLocal(
+        query,
+        provider: provider,
+        limit: limit,
+      );
+    } on DatabaseNotReadyException {
+      return searchRoutesByStopFromApi(
+        query,
+        providers: [provider],
+        limit: limit,
+      );
+    }
+  }
+
+  /// One remote search for all requested authorities. Null searches nationwide;
+  /// an empty provider list intentionally searches nowhere.
+  Future<List<StopRouteSearchResult>> searchRoutesByStopFromApi(
+    String query, {
+    Iterable<BusProvider>? providers,
+    int limit = 40,
+  }) async {
+    final normalizedQuery = _normalizeStopSearchText(query);
+    final cities = providers?.map(_providerDatabaseName).toSet().toList();
+    cities?.sort();
+    if (normalizedQuery.isEmpty || cities?.isEmpty == true) return const [];
+    final cacheKey = '${cities?.join(',') ?? '*'}:$normalizedQuery:$limit';
+    final cached = _readFreshCache(
+      _stopSearchApiCache,
+      cacheKey,
+      _stopSearchApiCacheTtl,
+    );
+    if (cached != null) return cached;
+    final inFlight = _stopSearchApiInFlight[cacheKey];
+    if (inFlight != null) return inFlight;
+    final generation = _routeDataGeneration;
+    final future = _fetchStopSearch(query.trim(), cities: cities, limit: limit);
+    _stopSearchApiInFlight[cacheKey] = future;
+    try {
+      final result = await future;
+      if (generation == _routeDataGeneration) {
+        while (_stopSearchApiCache.length >= _stopSearchCacheCapacity) {
+          _stopSearchApiCache.remove(_stopSearchApiCache.keys.first);
+        }
+        _stopSearchApiCache[cacheKey] = _TimedValue(result);
+      }
+      return result;
+    } finally {
+      if (identical(_stopSearchApiInFlight[cacheKey], future)) {
+        _stopSearchApiInFlight.remove(cacheKey);
+      }
+    }
+  }
+
+  Future<List<StopRouteSearchResult>> _fetchStopSearch(
+    String query, {
+    required List<String>? cities,
+    required int limit,
+  }) async {
+    final uri = Uri.parse('$_apiBaseUrl/api/v1/stops/search').replace(
+      queryParameters: {
+        'query': query,
+        'limit': '$limit',
+        if (cities != null) 'cities': cities.join(','),
+      },
+    );
+    final response = await _client.get(uri, headers: _apiJsonHeaders);
+    if (response.statusCode != 200) {
+      throw HttpException('無法查詢站名 (${response.statusCode})。');
+    }
+    final decoded = await apiDecodeJsonResponseAsync(response);
+    if (decoded is! List) {
+      throw const FormatException('Invalid stop search response.');
+    }
+    final results = <StopRouteSearchResult>[];
+    for (final row in decoded.whereType<Map>()) {
+      final routeId = row['routeid']?.toString() ?? '';
+      final rawStopId = _rawStopIdString(row['stopid']);
+      final pathId = _nullableInt(row['pathid']);
+      if (routeId.isEmpty || rawStopId == null || pathId == null) continue;
+      final route = _routeSummaryFromPathRow(
+        provider: _providerFromRouteSearchRow(row),
+        routeId: routeId,
+        routeName: row['route_name']?.toString() ?? '',
+        routeNameEn: row['route_name_en']?.toString() ?? '',
+        pathId: pathId,
+        pathName: row['path_name']?.toString() ?? '',
+        pathNameEn: row['path_name_en']?.toString() ?? '',
+      );
+      results.add(
+        StopRouteSearchResult(
+          route: route,
+          matchedStop: StopInfo(
+            routeKey: route.routeKey,
+            pathId: pathId,
+            stopId: _parseStopId(rawStopId),
+            rawStopId: rawStopId,
+            stopName: row['stop_name']?.toString() ?? '',
+            stopNameEn: _nonEmptyString(row['stop_name_en']),
+            sequence: _toInt(row['seq']),
+            lon: _toDouble(row['lon']),
+            lat: _toDouble(row['lat']),
+          ),
+        ),
+      );
+    }
+    results.sort(
+      (left, right) =>
+          _compareStopRouteSearchResults(left, right, query: query),
+    );
+    return List.unmodifiable(results);
+  }
+
+  Future<List<StopRouteSearchResult>> _searchRoutesByStopNameFromLocal(
     String query, {
     required BusProvider provider,
     int limit = 40,
@@ -2457,7 +2583,7 @@ class BusRepository {
   }
 
   String _normalizeStopSearchText(String value) {
-    return value.trim().toLowerCase();
+    return value.trim().toLowerCase().replaceAll('臺', '台');
   }
 
   String _bestStopSearchName(_CityStopRow row, String normalizedQuery) {
@@ -4279,15 +4405,15 @@ class BusRepository {
       whereClauses.add('stops.routeid = ?');
       parameters.add(routeId);
     }
-    final normalizedStopNameQuery = stopNameQuery?.trim() ?? '';
+    final normalizedStopNameQuery = _normalizeStopSearchText(
+      stopNameQuery ?? '',
+    );
     if (normalizedStopNameQuery.isNotEmpty) {
       whereClauses.add(
-        "(stops.name LIKE ? OR COALESCE(stops.name_en, '') LIKE ?)",
+        "(INSTR(REPLACE(LOWER(stops.name), '臺', '台'), ?) > 0 "
+        "OR INSTR(LOWER(COALESCE(stops.name_en, '')), ?) > 0)",
       );
-      parameters.addAll([
-        '%$normalizedStopNameQuery%',
-        '%$normalizedStopNameQuery%',
-      ]);
+      parameters.addAll([normalizedStopNameQuery, normalizedStopNameQuery]);
     }
     if (latitude != null &&
         longitude != null &&
@@ -4353,15 +4479,15 @@ class BusRepository {
       whereClauses.add('stops.routeid = ?');
       parameters.add(routeId);
     }
-    final normalizedStopNameQuery = stopNameQuery?.trim() ?? '';
+    final normalizedStopNameQuery = _normalizeStopSearchText(
+      stopNameQuery ?? '',
+    );
     if (normalizedStopNameQuery.isNotEmpty) {
       whereClauses.add(
-        "(stops.name LIKE ? OR COALESCE(stops.name_en, '') LIKE ?)",
+        "(INSTR(REPLACE(LOWER(stops.name), '臺', '台'), ?) > 0 "
+        "OR INSTR(LOWER(COALESCE(stops.name_en, '')), ?) > 0)",
       );
-      parameters.addAll([
-        '%$normalizedStopNameQuery%',
-        '%$normalizedStopNameQuery%',
-      ]);
+      parameters.addAll([normalizedStopNameQuery, normalizedStopNameQuery]);
     }
     if (latitude != null &&
         longitude != null &&

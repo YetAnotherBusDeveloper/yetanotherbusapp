@@ -309,6 +309,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchHint => 'Search by bus route or stop name';
 
   @override
+  String get searchPartialResults =>
+      'Some searches could not be completed. Available results are shown.';
+
+  @override
   String get searchClearTooltip => 'Clear search';
 
   @override
@@ -318,11 +322,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchErrorTitle => 'Search hit a snag';
 
   @override
-  String get searchResolvingTitle => 'Checking nearby stops';
+  String get searchResolvingTitle => 'Looking up stops';
 
   @override
   String get searchResolvingMessage =>
-      'Searching for stops you can board nearby...';
+      'Finding routes that serve matching stops...';
 
   @override
   String get searchEmptyTitle => 'No matching bus found';
@@ -1243,6 +1247,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get etaArriving => 'Arriving';
+
+  @override
+  String get etaStale => 'Outdated';
+
+  @override
+  String etaLastUpdated(String time) {
+    return 'Last updated: $time';
+  }
 
   @override
   String etaSeconds(int seconds) {

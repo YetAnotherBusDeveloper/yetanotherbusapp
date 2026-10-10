@@ -35,6 +35,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Timer? _debounce;
   bool _isLoading = false;
   bool _isResolvingStopDistances = false;
+  bool _hasPartialStopResults = false;
   String? _error;
   List<_SearchDisplayItem> _results = const <_SearchDisplayItem>[];
   BusProvider? _webPreferredProvider;
@@ -194,9 +195,16 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _onQueryChanged(String value) {
     _debounce?.cancel();
-    setState(() {});
+    // Invalidate immediately, including the debounce window before the next
+    // request starts. Slow replies must not replace a newer query's results.
+    _activeSearchToken += 1;
+    setState(() {
+      _isLoading = value.trim().isNotEmpty;
+      _isResolvingStopDistances = false;
+      _hasPartialStopResults = false;
+      _error = null;
+    });
     if (value.trim().isEmpty) {
-      _activeSearchToken += 1;
       setState(() {
         _results = const <_SearchDisplayItem>[];
         _isLoading = false;
@@ -285,19 +293,25 @@ class _SearchScreenState extends State<SearchScreen> {
     }
 
     final leftMatchTier = _stopSearchMatchTier(
-      left.matchedStop.stopName,
+      _bestStopSearchName(left.matchedStop, query),
       query,
     );
     final rightMatchTier = _stopSearchMatchTier(
-      right.matchedStop.stopName,
+      _bestStopSearchName(right.matchedStop, query),
       query,
     );
     if (leftMatchTier != rightMatchTier) {
       return leftMatchTier.compareTo(rightMatchTier);
     }
 
-    final leftGap = _stopSearchLengthGap(left.matchedStop.stopName, query);
-    final rightGap = _stopSearchLengthGap(right.matchedStop.stopName, query);
+    final leftGap = _stopSearchLengthGap(
+      _bestStopSearchName(left.matchedStop, query),
+      query,
+    );
+    final rightGap = _stopSearchLengthGap(
+      _bestStopSearchName(right.matchedStop, query),
+      query,
+    );
     if (leftGap != rightGap) {
       return leftGap.compareTo(rightGap);
     }
@@ -353,6 +367,26 @@ class _SearchScreenState extends State<SearchScreen> {
       return 2;
     }
     return 3;
+  }
+
+  String _bestStopSearchName(StopInfo stop, String query) {
+    final names = [
+      stop.stopName,
+      if (stop.stopNameEn?.isNotEmpty == true) stop.stopNameEn!,
+    ];
+    names.sort((left, right) {
+      final tier = _stopSearchMatchTier(
+        left,
+        query,
+      ).compareTo(_stopSearchMatchTier(right, query));
+      return tier != 0
+          ? tier
+          : _stopSearchLengthGap(
+              left,
+              query,
+            ).compareTo(_stopSearchLengthGap(right, query));
+    });
+    return names.first;
   }
 
   int _stopSearchLengthGap(String stopName, String query) {
@@ -450,6 +484,7 @@ class _SearchScreenState extends State<SearchScreen> {
           r'^[a-z0-9][a-z0-9\-/]*$',
           caseSensitive: false,
         ).hasMatch(normalized) &&
+        RegExp(r'\d').hasMatch(normalized) &&
         normalized.length <= 10) {
       return true;
     }
@@ -529,12 +564,16 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   String _normalizeSearchText(String value) {
-    return value.trim().toLowerCase();
+    return value.trim().toLowerCase().replaceAll('臺', '台');
   }
 
   Future<void> _search(String query) async {
     final busController = AppControllerScope.read(context);
     final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) {
+      _onQueryChanged('');
+      return;
+    }
     final token = ++_activeSearchToken;
     final providerCount = busController.searchProviders.length;
     final localProviderCount = busController.searchProviders
@@ -545,12 +584,12 @@ class _SearchScreenState extends State<SearchScreen> {
         )
         .length;
     final remoteProviderCount = providerCount - localProviderCount;
-    final likelyStopSearch =
-        localProviderCount > 0 && !_looksLikeRouteQuery(trimmedQuery);
+    final likelyStopSearch = !_looksLikeRouteQuery(trimmedQuery);
 
     setState(() {
       _isLoading = true;
       _isResolvingStopDistances = likelyStopSearch;
+      _hasPartialStopResults = false;
       _error = null;
     });
 
@@ -566,16 +605,23 @@ class _SearchScreenState extends State<SearchScreen> {
       }
 
       final shouldTryStopSearch =
-          localProviderCount > 0 &&
-          !_looksLikeRouteQuery(trimmedQuery) &&
+          (routeResults.isEmpty || !_looksLikeRouteQuery(trimmedQuery)) &&
           !_hasStrongRouteMatch(trimmedQuery, routeResults);
 
       if (shouldTryStopSearch) {
-        final stopResults = await _runProgressiveStopSearchFallback(
-          trimmedQuery,
-          token: token,
-          busController: busController,
-        );
+        List<StopRouteSearchResult> stopResults;
+        try {
+          stopResults = await _runProgressiveStopSearchFallback(
+            trimmedQuery,
+            token: token,
+            busController: busController,
+          );
+        } catch (_) {
+          if (routeResults.isEmpty) rethrow;
+          if (!mounted || token != _activeSearchToken) return;
+          stopResults = const [];
+          _hasPartialStopResults = true;
+        }
 
         if (!mounted || token != _activeSearchToken) {
           return;
@@ -641,10 +687,26 @@ class _SearchScreenState extends State<SearchScreen> {
     required int token,
     required AppController busController,
   }) async {
-    final providers = busController.searchProviders
+    final searchProviders = busController.searchProviders;
+    if (!kIsWeb) {
+      await Future.wait(
+        searchProviders.map((provider) async {
+          try {
+            await busController.ensureProviderDatabaseState(provider);
+          } catch (_) {
+            // An unreadable local database can still use the remote search.
+          }
+        }),
+      );
+    }
+    if (!mounted || token != _activeSearchToken) return const [];
+    final providers = searchProviders
         .where(busController.isDatabaseReady)
         .toList();
-    if (providers.isEmpty) {
+    final remoteProviders = searchProviders
+        .where((provider) => !busController.isDatabaseReady(provider))
+        .toList();
+    if (providers.isEmpty && remoteProviders.isEmpty) {
       if (mounted && token == _activeSearchToken) {
         setState(() {
           _isResolvingStopDistances = false;
@@ -653,10 +715,13 @@ class _SearchScreenState extends State<SearchScreen> {
       return const <StopRouteSearchResult>[];
     }
 
-    final positionFuture = _resolveSearchPosition();
+    final positionFuture = providers.isEmpty
+        ? Future<Position?>.value(null)
+        : _resolveSearchPosition();
     final collectedResults = <StopRouteSearchResult>[];
     final baseOrder = <String, int>{};
     var nextBaseOrder = 0;
+    Object? firstError;
 
     if (mounted && token == _activeSearchToken) {
       setState(() {
@@ -673,6 +738,28 @@ class _SearchScreenState extends State<SearchScreen> {
             .then(
               (results) =>
                   _StopSearchBatch(providerIndex: index, results: results),
+              onError: (Object error) => _StopSearchBatch(
+                providerIndex: index,
+                results: const [],
+                error: error,
+              ),
+            ),
+      if (remoteProviders.isNotEmpty)
+        providers.length: busController
+            .searchRoutesByStopFromApi(
+              query,
+              providers: kIsWeb ? null : remoteProviders,
+            )
+            .then(
+              (results) => _StopSearchBatch(
+                providerIndex: providers.length,
+                results: results,
+              ),
+              onError: (Object error) => _StopSearchBatch(
+                providerIndex: providers.length,
+                results: const [],
+                error: error,
+              ),
             ),
     };
 
@@ -681,6 +768,11 @@ class _SearchScreenState extends State<SearchScreen> {
       pendingBatches.remove(batch.providerIndex);
       if (!mounted || token != _activeSearchToken) {
         return const <StopRouteSearchResult>[];
+      }
+      if (batch.error != null) {
+        firstError ??= batch.error;
+        setState(() => _hasPartialStopResults = true);
+        continue;
       }
 
       final sortedProviderResults = _sortStopResults(
@@ -698,23 +790,23 @@ class _SearchScreenState extends State<SearchScreen> {
         nextBaseOrder += 1;
         collectedResults.add(result);
         didAppend = true;
-
-        setState(() {
-          _results = _sortStopResults(
-            collectedResults,
-            query,
-            busController,
-            baseOrder: baseOrder,
-          ).map(_SearchDisplayItem.stop).toList();
-        });
       }
 
       if (!didAppend) {
         continue;
       }
+      setState(() {
+        _results = _sortStopResults(
+          collectedResults,
+          query,
+          busController,
+          baseOrder: baseOrder,
+        ).map(_SearchDisplayItem.stop).toList();
+      });
     }
 
     if (collectedResults.isEmpty) {
+      if (firstError != null) throw firstError;
       if (mounted && token == _activeSearchToken) {
         setState(() {
           _isResolvingStopDistances = false;
@@ -767,6 +859,14 @@ class _SearchScreenState extends State<SearchScreen> {
       for (final result in initialResults) {
         if (!mounted || token != _activeSearchToken) {
           return workingResults;
+        }
+        // Remote search is a compact lookup. Fetching every matching route's
+        // full stop list here would turn one query into dozens of API calls.
+        // Resolve a remote route's boarding stop only when the rider selects it.
+        if (!busController.isDatabaseReady(
+          busProviderFromString(result.route.sourceProvider),
+        )) {
+          continue;
         }
 
         final resolvedResult = await _resolveNearestStopSearchResult(
@@ -888,7 +988,6 @@ class _SearchScreenState extends State<SearchScreen> {
         stopSearch.nearestStop ?? stopSearch.matchedStop;
     final fallbackSuppressAutoDestination =
         enableAutoDestination &&
-        stopSearch.nearestStop != null &&
         _isSamePhysicalStop(fallbackInitialStop, stopSearch.matchedStop);
     final fallback = _ResolvedStopSearchLaunch(
       pathId: stopSearch.matchedStop.pathId,
@@ -911,11 +1010,16 @@ class _SearchScreenState extends State<SearchScreen> {
     }
 
     final provider = busProviderFromString(stopSearch.route.sourceProvider);
-    final routeStops = await busController.getStopsByRoute(
-      stopSearch.route.routeKey,
-      provider: provider,
-      routeIdHint: stopSearch.route.routeId,
-    );
+    final List<StopInfo> routeStops;
+    try {
+      routeStops = await busController.getStopsByRoute(
+        stopSearch.route.routeKey,
+        provider: provider,
+        routeIdHint: stopSearch.route.routeId,
+      );
+    } catch (_) {
+      return fallback;
+    }
     if (routeStops.isEmpty) {
       return fallback;
     }
@@ -1267,6 +1371,7 @@ class _SearchScreenState extends State<SearchScreen> {
         final resolvedStopSearchLaunch = stopSearch == null
             ? null
             : await _resolveStopSearchLaunch(stopSearch, busController);
+        if (!mounted) return;
         await _openRoute(
           provider: routeProvider,
           routeKey: route.routeKey,
@@ -1294,14 +1399,10 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     final busController = AppControllerScope.of(context);
     final l10n = AppLocalizations.of(context);
-    final selectedProviders = busController.selectedProviders;
     final hasSearchBackgroundImage = hasBackgroundImageForPage(
       busController.settings,
       pageKey: 'search',
     );
-    final missingProviders = selectedProviders
-        .where((provider) => !busController.isDatabaseReady(provider))
-        .toList();
     final resultState = _controller.text.trim().isEmpty
         ? 'history'
         : _isLoading
@@ -1340,6 +1441,21 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   ),
                 ),
+                if (_hasPartialStopResults && _results.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        Expanded(child: Text(l10n.searchPartialResults)),
+                        TextButton(
+                          onPressed: _isLoading
+                              ? null
+                              : () => unawaited(_search(_controller.text)),
+                          child: Text(l10n.commonRetry),
+                        ),
+                      ],
+                    ),
+                  ),
                 if (_isResolvingStopDistances) ...[
                   const LinearProgressIndicator(),
                   const SizedBox(height: 12),
@@ -1405,6 +1521,9 @@ class _SearchScreenState extends State<SearchScreen> {
                                   mood: CatStateMood.cry,
                                   title: l10n.searchErrorTitle,
                                   message: _error,
+                                  actionLabel: l10n.commonRetry,
+                                  onAction: () =>
+                                      unawaited(_search(_controller.text)),
                                 )
                               else if (_isResolvingStopDistances &&
                                   _results.isEmpty)
@@ -1417,9 +1536,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                 CatStateCard(
                                   mood: CatStateMood.sad,
                                   title: l10n.searchEmptyTitle,
-                                  message: missingProviders.isEmpty
-                                      ? l10n.searchEmptyMessage
-                                      : l10n.searchEmptyNeedsDatabase,
+                                  message: l10n.searchEmptyMessage,
                                 ),
                               if (resultState == 'history' &&
                                   busController.history.isNotEmpty)
@@ -1471,7 +1588,13 @@ class _SearchDisplayItem {
 }
 
 class _StopSearchBatch {
-  const _StopSearchBatch({required this.providerIndex, required this.results});
+  const _StopSearchBatch({
+    required this.providerIndex,
+    required this.results,
+    this.error,
+  });
+
+  final Object? error;
 
   final int providerIndex;
   final List<StopRouteSearchResult> results;

@@ -2607,18 +2607,31 @@ class AppController extends ChangeNotifier {
   Future<List<StopRouteSearchResult>> searchRoutesByStopAcrossSelected(
     String query,
   ) async {
+    if (kIsWeb) return searchRoutesByStopFromApi(query);
     final results = <StopRouteSearchResult>[];
+    final remoteProviders = <BusProvider>[];
     for (final provider in searchProviders) {
       await ensureProviderDatabaseState(provider);
       if (!isDatabaseReady(provider)) {
+        remoteProviders.add(provider);
         continue;
       }
       results.addAll(
         await repository.searchRoutesByStopName(query, provider: provider),
       );
     }
+    if (remoteProviders.isNotEmpty) {
+      results.addAll(
+        await searchRoutesByStopFromApi(query, providers: remoteProviders),
+      );
+    }
     return results;
   }
+
+  Future<List<StopRouteSearchResult>> searchRoutesByStopFromApi(
+    String query, {
+    Iterable<BusProvider>? providers,
+  }) => repository.searchRoutesByStopFromApi(query, providers: providers);
 
   Future<List<StopRouteSearchResult>> searchRoutesByStop(
     String query, {
