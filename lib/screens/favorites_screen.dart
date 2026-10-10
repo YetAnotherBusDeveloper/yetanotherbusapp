@@ -11,6 +11,7 @@ import '../core/haptic_feedback_service.dart';
 import '../core/app_route_observer.dart';
 import '../core/bus_repository.dart';
 import '../core/models.dart';
+import '../core/refresh_backoff.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 import '../widgets/eta_badge.dart';
@@ -46,6 +47,7 @@ class _FavoritesScreenState extends State<_FavoritesView>
     with TickerProviderStateMixin, RouteAware {
   TabController? _tabController;
   Timer? _countdownTimer;
+  final _refreshBackoff = RefreshBackoff();
   late final AnimationController _countdownProgressController;
   ModalRoute<dynamic>? _route;
   List<FavoriteResolvedItem> _items = const [];
@@ -438,9 +440,12 @@ class _FavoritesScreenState extends State<_FavoritesView>
       });
 
       _startCountdown(
-        hasAnyLiveData
-            ? controller.settings.busUpdateTime
-            : controller.settings.busErrorUpdateTime,
+        _refreshBackoff.nextSeconds(
+          succeeded: failedRequestCount == 0,
+          normalSeconds: controller.settings.busUpdateTime,
+          errorSeconds: controller.settings.busErrorUpdateTime,
+          retryAfter: controller.repository.realtimeRetryAfter,
+        ),
       );
     } catch (error) {
       if (!mounted || requestId != _refreshRequestId) {
@@ -456,7 +461,14 @@ class _FavoritesScreenState extends State<_FavoritesView>
             ? l10n.favoritesLoadFailed
             : l10n.favoritesUpdateFailedKeepingData;
       });
-      _startCountdown(controller.settings.busErrorUpdateTime);
+      _startCountdown(
+        _refreshBackoff.nextSeconds(
+          succeeded: false,
+          normalSeconds: controller.settings.busUpdateTime,
+          errorSeconds: controller.settings.busErrorUpdateTime,
+          retryAfter: controller.repository.realtimeRetryAfter,
+        ),
+      );
     }
   }
 

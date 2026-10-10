@@ -39,7 +39,9 @@ class BusRepository {
   static const _webLocalDatabaseUnsupportedMessage =
       'Web 版目前不支援本 app 使用的本機 SQLite 資料庫。';
 
-  final http.Client _client;
+  final TimedHttpClient _client;
+  Duration? get realtimeRetryAfter =>
+      _client.retryAfterFor(Uri.parse(_apiBaseUrl));
   Map<String, String> get _apiJsonHeaders =>
       ApiUserAgent.applyTo(apiJsonHeaders);
   static const _routeDetailCacheTtl = Duration(seconds: 2);
@@ -4519,8 +4521,9 @@ class BusRepository {
   ) async {
     final request = http.Request('GET', uri)
       ..headers.addAll(ApiUserAgent.applyTo(const <String, String>{}));
-    final response = await _client.send(request);
+    final response = await _client.sendStreaming(request);
     if (response.statusCode != 200) {
+      await response.stream.listen((_) {}).cancel();
       return response;
     }
 

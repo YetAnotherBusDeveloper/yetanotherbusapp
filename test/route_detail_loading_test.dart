@@ -266,17 +266,25 @@ void main() {
     'early realtime error is handled while stops are still loading',
     () async {
       final stops = Completer<http.Response>();
+      final stopsStarted = Completer<void>();
       final repository = BusRepository(
         client: MockClient((request) async {
-          if (request.url.path.endsWith('/stops')) return stops.future;
+          if (request.url.path.endsWith('/stops')) {
+            stopsStarted.complete();
+            return stops.future;
+          }
           if (request.url.path.endsWith('/realtime')) {
+            // A 429 gates *new* requests. This test covers a topology request
+            // already in flight when realtime fails, not one sent in cooldown.
+            await stopsStarted.future;
             return jsonResponse({}, 429);
           }
           return jsonResponse([]);
         }),
       );
       final work = watch(repository).toList();
-      await Future<void>.delayed(const Duration(milliseconds: 30));
+      await stopsStarted.future;
+      await Future<void>.delayed(Duration.zero);
       stops.complete(jsonResponse(stopsPayload('TXG500')));
       final updates = await work;
       expect(updates.map((u) => u.phase), [

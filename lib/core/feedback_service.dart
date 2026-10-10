@@ -62,12 +62,21 @@ class FeedbackService {
       throw ArgumentError('內容不能超過 4000 字。');
     }
 
-    final response = await apiPost(
-      _client,
-      Uri.parse('${ApiConfig.baseUrl}/api/v1/feedback'),
-      headers: ApiUserAgent.applyTo(apiJsonContentHeaders),
-      body: jsonEncode({'title': cleanedTitle, 'content': cleanedContent}),
-    );
+    final http.Response response;
+    try {
+      response = await apiPost(
+        _client,
+        Uri.parse('${ApiConfig.baseUrl}/api/v1/feedback'),
+        headers: ApiUserAgent.applyTo(apiJsonContentHeaders),
+        body: jsonEncode({'title': cleanedTitle, 'content': cleanedContent}),
+      );
+    } on ApiRequestException catch (error) {
+      if (error.statusCode != 429) rethrow;
+      throw FeedbackRateLimitException(
+        message: rateLimitedErrorMessage,
+        retryAfterSeconds: (error.retryAfter.inMilliseconds / 1000).ceil(),
+      );
+    }
 
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw const AuthTokenExpiredException('登入已失效，請重新登入。');

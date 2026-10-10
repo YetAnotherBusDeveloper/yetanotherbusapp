@@ -22,6 +22,7 @@ import '../core/bus_repository.dart';
 import '../core/desktop_discord_presence_service.dart';
 import '../core/live_activity_service.dart';
 import '../core/models.dart';
+import '../core/refresh_backoff.dart';
 import '../core/route_detail_launch_bridge.dart';
 import '../core/samsung_live_notification_prompt_service.dart';
 import '../core/stop_route_merge.dart';
@@ -130,9 +131,10 @@ enum _RouteDetailStatus {
 class _RouteDetailScreenState extends State<RouteDetailScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver, RouteAware {
   static const double _wideLayoutBreakpoint = 1080;
-  static const Duration _maxMergedPreviousLiveAge = Duration(seconds: 90);
+  static const Duration _maxMergedPreviousLiveAge = maxRealtimeStopAge;
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _refreshBackoff = RefreshBackoff();
   late final RouteDetailLaunchHandler _launchHandler;
   late final ValueNotifier<int?> _selectedMapPathId;
   String? _focusedMapVehicleId;
@@ -519,9 +521,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         unawaited(_loadSupplementaryNotices(displayDetail));
       }
       _startCountdown(
-        fetchedDetail.hasLiveData
-            ? controller.settings.busUpdateTime
-            : controller.settings.busErrorUpdateTime,
+        _refreshBackoff.nextSeconds(
+          succeeded: fetchedDetail.hasLiveData,
+          normalSeconds: controller.settings.busUpdateTime,
+          errorSeconds: controller.settings.busErrorUpdateTime,
+          retryAfter: controller.repository.realtimeRetryAfter,
+        ),
       );
       unawaited(
         _loadRouteFamilyAfterCurrentFrame(displayDetail, requestId: requestId),
@@ -550,7 +555,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             : _RouteDetailStatus.realtimeUnavailable;
       });
       _updateDesktopPresence();
-      _startCountdown(controller.settings.busErrorUpdateTime);
+      _startCountdown(
+        _refreshBackoff.nextSeconds(
+          succeeded: false,
+          normalSeconds: controller.settings.busUpdateTime,
+          errorSeconds: controller.settings.busErrorUpdateTime,
+          retryAfter: controller.repository.realtimeRetryAfter,
+        ),
+      );
     }
   }
 
