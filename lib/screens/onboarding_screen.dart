@@ -496,141 +496,178 @@ class _DatabaseStep extends StatelessWidget {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
 
-    return _OnboardingStepLayout(
-      content: [
-        const SizedBox(height: 12),
-        Text(
-          l10n.onboardingDownloadTitle,
-          style: theme.textTheme.headlineSmall,
-        ),
-        const SizedBox(height: 10),
-        Text(
-          l10n.onboardingDownloadDescription,
-          style: theme.textTheme.bodyLarge,
-        ),
-        const SizedBox(height: 16),
-        Text(l10n.onboardingRegionList, style: theme.textTheme.titleMedium),
-        const SizedBox(height: 8),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: downloadableBusProviders().map((item) {
-                return FilterChip(
-                  label: Text(item.label),
-                  selected: selectedProviders.contains(item),
-                  onSelected: (selected) {
-                    onProviderToggled(item, selected);
-                  },
-                  avatar: controller.isDatabaseReady(item)
-                      ? const Icon(Icons.download_done_rounded, size: 18)
-                      : const Icon(Icons.cloud_outlined, size: 18),
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-        if (suggestedProvider != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            l10n.onboardingNearestSuggestion(suggestedProvider!.label),
-            style: theme.textTheme.bodyMedium,
-          ),
-        ],
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(l10n.onboardingDefaultSource(provider.label)),
-                const SizedBox(height: 8),
-                Text(
-                  l10n.onboardingSelectedDatabases(
-                    localizedList(
-                      l10n,
-                      selectedProviders.map((item) => item.label),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 600;
+        return Padding(
+          padding: EdgeInsets.only(bottom: compact ? 12 : 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(height: compact ? 0 : 12),
+              Text(
+                l10n.onboardingDownloadTitle,
+                style: compact
+                    ? theme.textTheme.titleLarge
+                    : theme.textTheme.headlineSmall,
+              ),
+              SizedBox(height: compact ? 8 : 10),
+              Text(
+                l10n.onboardingDownloadDescription,
+                style: compact
+                    ? theme.textTheme.bodyMedium
+                    : theme.textTheme.bodyLarge,
+                maxLines: compact ? 2 : null,
+                overflow: compact ? TextOverflow.ellipsis : null,
+              ),
+              SizedBox(height: compact ? 12 : 16),
+              Text(
+                l10n.onboardingRegionList,
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                  ),
+                  child: SingleChildScrollView(
+                    primary: false,
+                    physics: const ClampingScrollPhysics(),
+                    padding: const EdgeInsets.all(12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: downloadableBusProviders().map((item) {
+                        return FilterChip(
+                          label: Text(item.label),
+                          selected: selectedProviders.contains(item),
+                          onSelected: (selected) {
+                            onProviderToggled(item, selected);
+                          },
+                          avatar: controller.isDatabaseReady(item)
+                              ? const Icon(
+                                  Icons.download_done_rounded,
+                                  size: 18,
+                                )
+                              : const Icon(Icons.cloud_outlined, size: 18),
+                        );
+                      }).toList(),
                     ),
                   ),
                 ),
-                const SizedBox(height: 8),
+              ),
+              if (suggestedProvider != null) ...[
+                SizedBox(height: compact ? 8 : 12),
                 Text(
-                  l10n.onboardingDatabaseProgress(
-                    downloadedCount,
-                    selectedProviders.length,
-                  ),
+                  l10n.onboardingNearestSuggestion(suggestedProvider!.label),
+                  style: theme.textTheme.bodyMedium,
                 ),
               ],
-            ),
-          ),
-        ),
-      ],
-      footer: [
-        _OnboardingButtonRow(
-          leading: OutlinedButton(
-            onPressed: onBack,
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 52),
-            ),
-            child: Text(l10n.commonBack),
-          ),
-          trailing: FilledButton(
-            onPressed: controller.downloadingDatabase
-                ? null
-                : () async {
-                    try {
-                      await controller.downloadSelectedProviderDatabases();
-                      if (!context.mounted) {
-                        return;
-                      }
-                      await onFinish();
-                    } catch (error) {
-                      if (!context.mounted) {
-                        return;
-                      }
-                      final messenger = ScaffoldMessenger.of(context);
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            l10n.onboardingDownloadFailed(
-                              localizedFriendlyError(l10n, error),
+              SizedBox(height: compact ? 8 : 12),
+              Card(
+                child: Padding(
+                  padding: EdgeInsets.all(compact ? 8 : 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (!compact) ...[
+                        Text(
+                          l10n.onboardingDefaultSource(provider.label),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          l10n.onboardingSelectedDatabases(
+                            localizedList(
+                              l10n,
+                              selectedProviders.map((item) => item.label),
                             ),
                           ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      );
-                    }
-                  },
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(double.infinity, 52),
-            ),
-            child: Text(
-              controller.downloadingDatabase
-                  ? l10n.commonDownloading
-                  : l10n.commonDownload,
-            ),
+                        const SizedBox(height: 4),
+                      ],
+                      Text(
+                        l10n.onboardingDatabaseProgress(
+                          downloadedCount,
+                          selectedProviders.length,
+                        ),
+                        style: compact ? theme.textTheme.bodySmall : null,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(height: compact ? 12 : 20),
+              _OnboardingButtonRow(
+                allowStacking: false,
+                leading: OutlinedButton(
+                  onPressed: onBack,
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 52),
+                  ),
+                  child: Text(l10n.commonBack),
+                ),
+                trailing: FilledButton(
+                  onPressed: controller.downloadingDatabase
+                      ? null
+                      : () async {
+                          try {
+                            await controller
+                                .downloadSelectedProviderDatabases();
+                            if (!context.mounted) {
+                              return;
+                            }
+                            await onFinish();
+                          } catch (error) {
+                            if (!context.mounted) {
+                              return;
+                            }
+                            final messenger = ScaffoldMessenger.of(context);
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  l10n.onboardingDownloadFailed(
+                                    localizedFriendlyError(l10n, error),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 52),
+                  ),
+                  child: Text(
+                    controller.downloadingDatabase
+                        ? l10n.commonDownloading
+                        : l10n.commonDownload,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonal(
+                  onPressed: onFinish,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 52),
+                  ),
+                  child: Text(
+                    controller.databaseReady
+                        ? l10n.commonDone
+                        : l10n.commonLater,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.tonal(
-            onPressed: onFinish,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(double.infinity, 52),
-            ),
-            child: Text(
-              controller.databaseReady ? l10n.commonDone : l10n.commonLater,
-            ),
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -673,16 +710,22 @@ class _OnboardingStepLayout extends StatelessWidget {
 }
 
 class _OnboardingButtonRow extends StatelessWidget {
-  const _OnboardingButtonRow({required this.leading, required this.trailing});
+  const _OnboardingButtonRow({
+    required this.leading,
+    required this.trailing,
+    this.allowStacking = true,
+  });
 
   final Widget leading;
   final Widget trailing;
+  final bool allowStacking;
 
   @override
   Widget build(BuildContext context) {
     final shouldStack =
-        MediaQuery.sizeOf(context).width < 360 ||
-        MediaQuery.textScalerOf(context).scale(1) > 1.15;
+        allowStacking &&
+        (MediaQuery.sizeOf(context).width < 360 ||
+            MediaQuery.textScalerOf(context).scale(1) > 1.15);
     if (shouldStack) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
