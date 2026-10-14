@@ -118,6 +118,7 @@
   "refreshNearbyStops": "Refresh nearby stops",
   "nearbyNoStopsToDisplay": "There are no nearby stops to display right now.",
   "mapNoLocations": "There are no stop locations to display.",
+  "mapCompassResetNorth": "Turn map to north",
   "locationServicesDisabled": "Location services are turned off.",
   "locationPermissionDenied": "Location permission was not granted.",
   "searchTitle": "Search routes or stops",
