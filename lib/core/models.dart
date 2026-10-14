@@ -2436,20 +2436,12 @@ EtaPresentation buildEtaPresentation(
   Brightness brightness = Brightness.light,
   ColorScheme? colorScheme,
   String arrivingText = '進站中',
-  String staleText = '資料已過期',
   String Function(int seconds)? secondsText,
   String Function(int minutes)? minutesText,
   String Function(int minutes, int seconds)? minutesSecondsText,
 }) {
   final isDark = brightness == Brightness.dark;
   final cs = colorScheme;
-  if (isStopRealtimeStale(stop)) {
-    return EtaPresentation(
-      text: staleText,
-      backgroundColor: cs?.surfaceContainerHighest ?? const Color(0xFF364152),
-      foregroundColor: cs?.onSurfaceVariant ?? const Color(0xFFD8E2F1),
-    );
-  }
   final message = stop.msg?.trim() ?? '';
   if (message.isNotEmpty) {
     return EtaPresentation(

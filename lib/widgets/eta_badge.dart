@@ -74,7 +74,6 @@ class _EtaBadgeState extends State<EtaBadge> {
       brightness: theme.brightness,
       colorScheme: theme.colorScheme,
       arrivingText: l10n.etaArriving,
-      staleText: l10n.etaStale,
       secondsText: l10n.etaSeconds,
       minutesText: l10n.etaMinutes,
       minutesSecondsText: l10n.etaMinutesSeconds,
