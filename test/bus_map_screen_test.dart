@@ -471,27 +471,23 @@ void main() {
     expect((arrowCenter.dy - busCenter.dy).abs(), lessThan(1));
   });
 
-  test('Google bus icon headings use bounded cache buckets', () {
-    String key(double heading) => googleBusIconKey(
-      color: Colors.blue,
-      selected: false,
-      pixelRatio: 2,
-      heading: heading,
-    );
+  test('Google bus bitmaps leave the heading to the map', () {
+    String badge(Color color) =>
+        googleBusIconKey(color: color, selected: false, pixelRatio: 2);
+    String pointer(Color color, {bool selected = false}) =>
+        googleBusHeadingIconKey(
+          color: color,
+          selected: selected,
+          pixelRatio: 2,
+        );
 
-    expect(key(1), key(7));
-    expect(key(7), isNot(key(8)));
-    expect(key(-2), key(358));
-    expect(
-      GoogleBusIconRequest(
-        key: 'test',
-        color: Colors.blue,
-        selected: false,
-        pixelRatio: 2,
-        heading: 358,
-      ).heading,
-      0,
-    );
+    expect(badge(Colors.blue), isNot(badge(Colors.indigo)));
+    // Every dark badge carries the same white pointer, every light one the
+    // same dark pointer, whichever way the bus is heading.
+    expect(pointer(Colors.blue), pointer(Colors.indigo));
+    expect(pointer(Colors.blue), isNot(pointer(Colors.yellow)));
+    expect(pointer(Colors.blue), isNot(pointer(Colors.blue, selected: true)));
+    expect(pointer(Colors.blue), isNot(badge(Colors.blue)));
   });
 
   test(
@@ -559,6 +555,44 @@ void main() {
     expect(eastbound.heading, 90);
     expect(find.byType(BusMapHeadingIndicator), findsNWidgets(2));
     expect(log.count('/cities/TPE/buses'), 1);
+  });
+
+  _mapTest('a turned map shows a compass that turns it back north', (
+    tester,
+    log,
+    controller,
+  ) async {
+    await _pumpMap(tester, controller, locale: const Locale('en'));
+    await _pumpUntil(
+      tester,
+      () => find.byType(BusMapBusMarker).evaluate().length == 2,
+      reason: 'bus markers never rendered',
+    );
+    final compass = find.byTooltip('Turn map to north');
+    expect(compass, findsNothing);
+
+    final map = MapController.of(
+      tester.element(find.byType(MarkerLayer).first),
+    );
+    map.rotate(45);
+    await tester.pump();
+    expect(compass, findsOneWidget);
+    // Bus markers stay upright on the turned map.
+    for (final layer in tester.widgetList<MarkerLayer>(
+      find.byType(MarkerLayer),
+    )) {
+      expect(layer.rotate, isTrue);
+    }
+
+    await tester.tap(compass);
+    await tester.pump();
+    // The refresh countdown never settles, so step through the turn and the
+    // compass fading out instead.
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(map.camera.rotation, 0);
+    expect(compass, findsNothing);
   });
 
   _mapTest('localizes map controls in English at narrow width', (

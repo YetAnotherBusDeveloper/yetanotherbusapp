@@ -277,6 +277,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get mapNoLocations => '目前沒有可顯示的站點位置。';
 
   @override
+  String get mapCompassResetNorth => '地圖轉回正北';
+
+  @override
   String get locationServicesDisabled => '定位服務尚未開啓。';
 
   @override
@@ -3507,6 +3510,9 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get mapNoLocations => '目前沒有可顯示的站點位置。';
+
+  @override
+  String get mapCompassResetNorth => '地圖轉回正北';
 
   @override
   String get locationServicesDisabled => '定位服務尚未開啓。';

@@ -603,6 +603,12 @@ abstract class AppLocalizations {
   /// **'There are no stop locations to display.'**
   String get mapNoLocations;
 
+  /// No description provided for @mapCompassResetNorth.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn map to north'**
+  String get mapCompassResetNorth;
+
   /// No description provided for @locationServicesDisabled.
   ///
   /// In en, this message translates to:

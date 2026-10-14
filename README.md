@@ -61,6 +61,7 @@ YetAnotherBusApp（YABus）是一個以 Flutter 開發的跨平台公車動態�
 
 - 顯示公車即時位置
 - 路線視覺化
+- Google Maps 與 OpenStreetMap 都能用兩指旋轉；旋轉後會出現指北針，點一下即轉回正北，公車方向箭頭仍指向實際行進方向
 
 ### 現代化介面
 

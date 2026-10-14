@@ -297,6 +297,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mapNoLocations => 'There are no stop locations to display.';
 
   @override
+  String get mapCompassResetNorth => 'Turn map to north';
+
+  @override
   String get locationServicesDisabled => 'Location services are turned off.';
 
   @override

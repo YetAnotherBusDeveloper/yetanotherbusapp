@@ -9,6 +9,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:latlong2/latlong.dart';
 
 import '../app/bus_app.dart';
+import '../core/app_motion.dart';
 import '../core/debouncer.dart';
 import '../core/request_sequence.dart';
 import '../core/transit_repository.dart';
@@ -16,6 +17,7 @@ import '../core/transit_name.dart';
 import '../core/user_location.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/background_image_wrapper.dart';
+import '../widgets/map_compass.dart';
 import '../widgets/platform_map_provider.dart';
 import '../widgets/ad_banner_widget.dart';
 import '../widgets/transit_station_name.dart';
@@ -37,10 +39,11 @@ class YouBikeScreen extends StatefulWidget {
 }
 
 class _YouBikeScreenState extends State<YouBikeScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final TransitRepository _repo = TransitRepository.shared;
   final MapController _mapController = MapController();
   late final AnimationController _osmCameraAnimation;
+  late final MapBearing _mapBearing;
   gmaps.GoogleMapController? _googleMapController;
   final Map<String, gmaps.BitmapDescriptor> _googleStationIcons =
       <String, gmaps.BitmapDescriptor>{};
@@ -85,6 +88,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
       vsync: this,
       duration: _cameraAnimationDuration,
     )..addListener(_animateOsmCamera);
+    _mapBearing = MapBearing(vsync: this);
     _initLocation();
   }
 
@@ -95,6 +99,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
     _osmCameraAnimation
       ..removeListener(_animateOsmCamera)
       ..dispose();
+    _mapBearing.dispose();
     _googleMapController?.dispose();
     super.dispose();
   }
@@ -253,6 +258,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
   void _onGoogleCameraMove(gmaps.CameraPosition position) {
     _googleCameraCenter = fromGoogleLatLng(position.target);
     _googleCameraZoom = position.zoom;
+    _mapBearing.followGoogleMap(position);
   }
 
   void _onGoogleMapIdle() {
@@ -307,6 +313,20 @@ class _YouBikeScreenState extends State<YouBikeScreen>
         _animateOsmCameraTo(_userLocation!, _defaultZoom);
       }
       _loadNearby(_userLocation!);
+    }
+  }
+
+  void _turnMapNorth() {
+    if (!_useGoogleMapsPointProvider) {
+      _mapBearing.turnFlutterMapNorth(
+        _mapController,
+        duration: AppMotion.duration(context),
+      );
+      return;
+    }
+    final northUp = _mapBearing.googleNorthUp;
+    if (northUp != null) {
+      _googleMapController?.animateCamera(northUp);
     }
   }
 
@@ -796,7 +816,8 @@ class _YouBikeScreenState extends State<YouBikeScreen>
             mapType: gmaps.MapType.normal,
             style: googleMapStyleForBrightness(theme.brightness),
             gestureRecognizers: buildGoogleMapGestureRecognizers(),
-            rotateGesturesEnabled: false,
+            // [MapCompass] stands in, in the same corner as on flutter_map.
+            compassEnabled: false,
             scrollGesturesEnabled: true,
             zoomGesturesEnabled: true,
             myLocationButtonEnabled: false,
@@ -807,6 +828,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
               _googleMapController = controller;
               _googleCameraCenter = _center;
               _googleCameraZoom = _defaultZoom;
+              _mapBearing.resetForNewMap();
             },
             onCameraMove: _onGoogleCameraMove,
             onCameraIdle: _onGoogleMapIdle,
@@ -817,14 +839,16 @@ class _YouBikeScreenState extends State<YouBikeScreen>
             options: MapOptions(
               initialCenter: _center,
               initialZoom: _defaultZoom,
+              onMapReady: _mapBearing.resetForNewMap,
               onMapEvent: (event) {
-                if (event is MapEventMoveEnd) {
+                _mapBearing.followFlutterMap(event);
+                // A twist turns about the fingers, so it can shift the
+                // centre without a MoveEnd.
+                if (event is MapEventMoveEnd || event is MapEventRotateEnd) {
                   _onMapMoved();
                 }
               },
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
+              interactionOptions: mapInteractionOptions,
             ),
             children: [
               TileLayer(
@@ -834,6 +858,9 @@ class _YouBikeScreenState extends State<YouBikeScreen>
               ),
               if (_userLocation != null)
                 MarkerLayer(
+                  // Counter-rotates the markers, keeping them upright when the
+                  // map is turned.
+                  rotate: true,
                   markers: [
                     Marker(
                       point: _userLocation!,
@@ -856,6 +883,7 @@ class _YouBikeScreenState extends State<YouBikeScreen>
                   ],
                 ),
               MarkerLayer(
+                rotate: true,
                 markers: _stations
                     .map((station) {
                       final point = _stationPointIfValid(station);
@@ -926,6 +954,11 @@ class _YouBikeScreenState extends State<YouBikeScreen>
             right: 0,
             child: LinearProgressIndicator(),
           ),
+        Positioned(
+          top: 16,
+          right: 16,
+          child: MapCompass(bearing: _mapBearing, onPressed: _turnMapNorth),
+        ),
         Positioned(
           right: 16,
           bottom: 24,

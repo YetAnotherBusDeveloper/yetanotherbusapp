@@ -20,6 +20,7 @@ import 'bus_map_geometry.dart';
 import 'bus_map_markers.dart';
 import 'bus_map_motion.dart';
 import 'eta_badge.dart';
+import 'map_compass.dart';
 import 'platform_map_provider.dart';
 import 'transit_station_name.dart';
 
@@ -72,7 +73,7 @@ class RouteBusMapSheet extends StatefulWidget {
 }
 
 class _RouteBusMapSheetState extends State<RouteBusMapSheet>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   static const _simulationTick = Duration(milliseconds: 250);
   static const _cameraPadding = EdgeInsets.fromLTRB(20, 20, 20, 140);
   static const _userLocationFocusZoom = 16.4;
@@ -80,6 +81,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
   final MapController _mapController = MapController();
   gmaps.GoogleMapController? _googleMapController;
   late final AnimationController _refreshProgressController;
+  late final MapBearing _mapBearing;
 
   Timer? _refreshTimer;
   Timer? _simulationTimer;
@@ -133,6 +135,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
         widget.selectedPathIdListenable.value ?? widget.paths.first.pathId;
     _stopsByPath = _copyStopsByPath(widget.stopsByPath);
     _refreshProgressController = AnimationController(vsync: this);
+    _mapBearing = MapBearing(vsync: this);
     widget.selectedPathIdListenable.addListener(_handleExternalPathSelection);
     widget.familyRouteIdsListenable?.addListener(_handleFamilyRouteIdsUpdate);
     widget.liveStopsByPathListenable?.addListener(_handleExternalStopsUpdate);
@@ -227,6 +230,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     _userLocationSubscription?.cancel();
     _invalidateMapLifecycle();
     _refreshProgressController.dispose();
+    _mapBearing.dispose();
     super.dispose();
   }
 
@@ -893,6 +897,21 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     }
   }
 
+  void _turnMapNorth() {
+    if (!_useGoogleMapsRouteProvider) {
+      _mapBearing.turnFlutterMapNorth(
+        _mapController,
+        duration: AppMotion.duration(context),
+      );
+      return;
+    }
+    // Through [_moveGoogleCamera], so turning north keeps following a bus.
+    final northUp = _mapBearing.googleNorthUp;
+    if (northUp != null) {
+      _moveGoogleCamera(northUp);
+    }
+  }
+
   LatLng? get _googleCameraCenter {
     final position = _googleCameraPosition;
     if (position == null) {
@@ -1255,6 +1274,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                         return;
                       }
                       _osmMapReady = true;
+                      _mapBearing.resetForNewMap();
                       _applyViewportAfterMapReady(
                         geometry,
                         mapGeneration: mapGeneration,
@@ -1278,9 +1298,8 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                         _followSelectedBus = false;
                       });
                     },
-                    interactionOptions: const InteractionOptions(
-                      flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                    ),
+                    onMapEvent: _mapBearing.followFlutterMap,
+                    interactionOptions: mapInteractionOptions,
                   ),
                   children: [
                     TileLayer(
@@ -1307,6 +1326,9 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                     ),
                     if (_userLocation != null)
                       MarkerLayer(
+                        // Counter-rotates the markers, keeping them upright
+                        // when the map is turned.
+                        rotate: true,
                         markers: [
                           Marker(
                             point: _userLocation!,
@@ -1318,6 +1340,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                       ),
                     if (_showStops)
                       MarkerLayer(
+                        rotate: true,
                         markers: displayStops.map((stop) {
                           final selected = _selectedStopId == stop.stop.stopId;
                           return Marker(
@@ -1346,6 +1369,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                       ),
                     if (_showBuses)
                       MarkerLayer(
+                        rotate: true,
                         markers: displayBuses.map((bus) {
                           final selected = _selectedBusId == bus.stateId;
                           return Marker(
@@ -1380,6 +1404,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                       ),
                     if (_showBuses && selectedDisplayBus != null)
                       MarkerLayer(
+                        rotate: true,
                         markers: [
                           () {
                             final displayedBus = selectedDisplayBus!;
@@ -1405,6 +1430,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
                       ),
                     if (_showStops && selectedDisplayStop != null)
                       MarkerLayer(
+                        rotate: true,
                         markers: [
                           () {
                             final displayedStop = selectedDisplayStop!;
@@ -1441,6 +1467,11 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
             top: 0,
             child: IgnorePointer(child: _buildTopProgressBar()),
           ),
+        Positioned(
+          top: 12,
+          right: 16,
+          child: MapCompass(bearing: _mapBearing, onPressed: _turnMapNorth),
+        ),
         if (_useGoogleMapsRouteProvider &&
             _showBuses &&
             selectedDisplayBus != null)
@@ -1685,27 +1716,35 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     final requests = <GoogleBusIconRequest>[];
 
     for (final bus in displayBuses) {
+      final color = bus.state.status.color;
       for (final selected in <bool>[false, _selectedBusId == bus.stateId]) {
-        final key = googleBusIconKey(
-          color: bus.state.status.color,
-          selected: selected,
-          pixelRatio: pixelRatio,
-          heading: bus.heading,
-        );
-        if (_googleBusIcons.containsKey(key) ||
-            _pendingGoogleBusIconKeys.contains(key)) {
-          continue;
+        for (final headingPointer in const <bool>[false, true]) {
+          final key = headingPointer
+              ? googleBusHeadingIconKey(
+                  color: color,
+                  selected: selected,
+                  pixelRatio: pixelRatio,
+                )
+              : googleBusIconKey(
+                  color: color,
+                  selected: selected,
+                  pixelRatio: pixelRatio,
+                );
+          if (_googleBusIcons.containsKey(key) ||
+              _pendingGoogleBusIconKeys.contains(key)) {
+            continue;
+          }
+          _pendingGoogleBusIconKeys.add(key);
+          requests.add(
+            GoogleBusIconRequest(
+              key: key,
+              color: color,
+              selected: selected,
+              pixelRatio: pixelRatio,
+              headingPointer: headingPointer,
+            ),
+          );
         }
-        _pendingGoogleBusIconKeys.add(key);
-        requests.add(
-          GoogleBusIconRequest(
-            key: key,
-            color: bus.state.status.color,
-            selected: selected,
-            pixelRatio: pixelRatio,
-            heading: bus.heading,
-          ),
-        );
       }
     }
 
@@ -1757,7 +1796,8 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
       mapType: gmaps.MapType.normal,
       style: googleMapStyleForBrightness(theme.brightness),
       gestureRecognizers: buildGoogleMapGestureRecognizers(),
-      rotateGesturesEnabled: false,
+      // [MapCompass] stands in, in the same corner as on flutter_map.
+      compassEnabled: false,
       scrollGesturesEnabled: true,
       zoomGesturesEnabled: true,
       myLocationButtonEnabled: false,
@@ -1780,6 +1820,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
           target: toGoogleLatLng(geometry.points.first),
           zoom: 13.5,
         );
+        _mapBearing.resetForNewMap();
         if (previousController != null &&
             !identical(previousController, controller)) {
           try {
@@ -1810,6 +1851,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
       },
       onCameraMove: (position) {
         _googleCameraPosition = position;
+        _mapBearing.followGoogleMap(position);
       },
     );
   }
@@ -1916,30 +1958,45 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
     }
 
     if (_showBuses) {
+      final pixelRatio = MediaQuery.of(
+        context,
+      ).devicePixelRatio.clamp(1.0, 3.0).toDouble();
       for (final bus in displayBuses) {
         final selected = _selectedBusId == bus.stateId;
-        final iconKey = googleBusIconKey(
-          color: bus.state.status.color,
-          selected: selected,
-          pixelRatio: MediaQuery.of(
-            context,
-          ).devicePixelRatio.clamp(1.0, 3.0).toDouble(),
-          heading: bus.heading,
-        );
-        final icon = _googleBusIcons[iconKey];
+        final color = bus.state.status.color;
+        final position = toGoogleLatLng(bus.point);
+        void onTap() {
+          final nextSelectedBusId = _selectedBusId == bus.stateId
+              ? null
+              : bus.stateId;
+          setState(() {
+            _selectedBusId = nextSelectedBusId;
+            _selectedStopId = null;
+            _followSelectedBus = nextSelectedBusId != null;
+          });
+          if (nextSelectedBusId != null) {
+            _syncSelectedBusCamera(force: true);
+          }
+        }
+
+        final icon =
+            _googleBusIcons[googleBusIconKey(
+              color: color,
+              selected: selected,
+              pixelRatio: pixelRatio,
+            )];
         markers.add(
           gmaps.Marker(
             markerId: gmaps.MarkerId('bus:${bus.state.bus.id}'),
             consumeTapEvents: true,
-            position: toGoogleLatLng(bus.point),
-            flat: true,
+            position: position,
             anchor: icon == null
                 ? const Offset(0.5, 1)
                 : const Offset(0.5, 0.5),
             icon:
                 icon ??
                 gmaps.BitmapDescriptor.defaultMarkerWithHue(
-                  googleMarkerHueForColor(bus.state.status.color),
+                  googleMarkerHueForColor(color),
                 ),
             infoWindow: gmaps.InfoWindow(
               title: bus.state.bus.id,
@@ -1949,21 +2006,34 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
               ),
             ),
             zIndexInt: selected ? 5 : 2,
-            onTap: () {
-              final nextSelectedBusId = _selectedBusId == bus.stateId
-                  ? null
-                  : bus.stateId;
-              setState(() {
-                _selectedBusId = nextSelectedBusId;
-                _selectedStopId = null;
-                _followSelectedBus = nextSelectedBusId != null;
-              });
-              if (nextSelectedBusId != null) {
-                _syncSelectedBusCamera(force: true);
-              }
-            },
+            onTap: onTap,
           ),
         );
+        final pointer =
+            _googleBusIcons[googleBusHeadingIconKey(
+              color: color,
+              selected: selected,
+              pixelRatio: pixelRatio,
+            )];
+        // The pointer orbits the badge, so it waits for the badge's bitmap
+        // rather than circling the fallback pin.
+        if (icon != null && pointer != null) {
+          markers.add(
+            gmaps.Marker(
+              markerId: gmaps.MarkerId('bus-heading:${bus.state.bus.id}'),
+              consumeTapEvents: true,
+              position: position,
+              // Flat, so the map keeps it pointing along the street however
+              // the camera turns.
+              flat: true,
+              rotation: normalizeMarkerHeading(bus.heading),
+              anchor: const Offset(0.5, 0.5),
+              icon: pointer,
+              zIndexInt: selected ? 5 : 2,
+              onTap: onTap,
+            ),
+          );
+        }
       }
     }
 

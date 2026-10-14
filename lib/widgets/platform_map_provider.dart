@@ -2,7 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart'
-    show TileBuilder, darkModeTileBuilder;
+    show
+        InteractionOptions,
+        MultiFingerGesture,
+        TileBuilder,
+        darkModeTileBuilder;
 import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:latlong2/latlong.dart' as latlong;
 import 'package:url_launcher/url_launcher.dart';
@@ -24,6 +28,22 @@ bool get supportsGoogleMapsProvider {
 bool useGoogleMapsProviderFor(MobileMapProvider provider) {
   return supportsGoogleMapsProvider && provider == MobileMapProvider.googleMaps;
 }
+
+/// Gestures shared by every flutter_map in the app.
+///
+/// Rotation is on, but only for a deliberate twist. Applying every
+/// multi-finger gesture at once would let each pinch-zoom nudge the map a few
+/// degrees off north, so the gestures race instead: a pinch zooms and pans
+/// without turning, while a twist that wins may still zoom and pan as it
+/// turns, the way Google Maps behaves.
+const InteractionOptions mapInteractionOptions = InteractionOptions(
+  enableMultiFingerGestureRace: true,
+  rotationThreshold: 15,
+  rotationWinGestures: MultiFingerGesture.all,
+  // The default half zoom level leaves a pinch feeling stuck before it
+  // takes; this is still enough for a twist to reach its threshold first.
+  pinchZoomThreshold: 0.2,
+);
 
 /// Identifies this app to the tile servers it talks to.
 ///
