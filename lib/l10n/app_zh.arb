@@ -1,6 +1,12 @@
 {
   "@@locale": "zh",
   "appTitle": "YetAnotherBusApp",
+  "settingsAppearanceDescription": "語言、主題、介面大小與個人化",
+  "settingsUsageDescription": "到站資訊更新、智慧推薦與使用偏好",
+  "settingsUpdatesDescription": "更新頻道、自動檢查與版本更新",
+  "settingsHistoryDescription": "搜尋紀錄、資料清除與隱私政策",
+  "settingsOnboardingDescription": "重新進行初次使用設定",
+  "settingsAboutDescription": "版本資訊、貢獻者、社群與意見回饋",
   "settingsTitle": "設定",
   "appearanceSectionTitle": "外觀",
   "languageLabel": "語言",

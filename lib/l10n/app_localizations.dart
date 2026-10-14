@@ -105,6 +105,42 @@ abstract class AppLocalizations {
   /// **'YetAnotherBusApp'**
   String get appTitle;
 
+  /// No description provided for @settingsAppearanceDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Language, theme, interface size and personalization'**
+  String get settingsAppearanceDescription;
+
+  /// No description provided for @settingsUsageDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrival refresh, smart recommendations and preferences'**
+  String get settingsUsageDescription;
+
+  /// No description provided for @settingsUpdatesDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Update channel, automatic checks and app updates'**
+  String get settingsUpdatesDescription;
+
+  /// No description provided for @settingsHistoryDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Search history, clearing data and privacy policy'**
+  String get settingsHistoryDescription;
+
+  /// No description provided for @settingsOnboardingDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Run the first-time setup again'**
+  String get settingsOnboardingDescription;
+
+  /// No description provided for @settingsAboutDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Version information, contributors, community and feedback'**
+  String get settingsAboutDescription;
+
   /// No description provided for @settingsTitle.
   ///
   /// In en, this message translates to:

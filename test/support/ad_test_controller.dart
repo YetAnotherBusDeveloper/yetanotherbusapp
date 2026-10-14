@@ -12,7 +12,9 @@ import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
 
-Future<AppController> createAdTestController() async {
+Future<AppController> createAdTestController({
+  BusRepository? repository,
+}) async {
   const buildInfo = AppBuildInfo(
     version: '1.0.0',
     buildNumber: '1',
@@ -29,7 +31,7 @@ Future<AppController> createAdTestController() async {
     debugDefaultTargetPlatformOverride = previousPlatform;
   }
   return AppController(
-    repository: BusRepository(client: client),
+    repository: repository ?? BusRepository(client: client),
     storage: StorageService(),
     analytics: analytics,
     buildInfo: buildInfo,

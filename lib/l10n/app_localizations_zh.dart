@@ -12,6 +12,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appTitle => 'YetAnotherBusApp';
 
   @override
+  String get settingsAppearanceDescription => '語言、主題、介面大小與個人化';
+
+  @override
+  String get settingsUsageDescription => '到站資訊更新、智慧推薦與使用偏好';
+
+  @override
+  String get settingsUpdatesDescription => '更新頻道、自動檢查與版本更新';
+
+  @override
+  String get settingsHistoryDescription => '搜尋紀錄、資料清除與隱私政策';
+
+  @override
+  String get settingsOnboardingDescription => '重新進行初次使用設定';
+
+  @override
+  String get settingsAboutDescription => '版本資訊、貢獻者、社群與意見回饋';
+
+  @override
   String get settingsTitle => '設定';
 
   @override
@@ -3242,6 +3260,24 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get appTitle => 'YetAnotherBusApp';
+
+  @override
+  String get settingsAppearanceDescription => '語言、主題、介面大小與個人化';
+
+  @override
+  String get settingsUsageDescription => '到站資訊更新、智慧推薦與使用偏好';
+
+  @override
+  String get settingsUpdatesDescription => '更新頻道、自動檢查與版本更新';
+
+  @override
+  String get settingsHistoryDescription => '搜尋紀錄、資料清除與隱私政策';
+
+  @override
+  String get settingsOnboardingDescription => '重新進行初次使用設定';
+
+  @override
+  String get settingsAboutDescription => '版本資訊、貢獻者、社群與意見回饋';
 
   @override
   String get settingsTitle => '設定';

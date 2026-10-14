@@ -1,6 +1,12 @@
 {
   "@@locale": "en",
   "appTitle": "YetAnotherBusApp",
+  "settingsAppearanceDescription": "Language, theme, interface size and personalization",
+  "settingsUsageDescription": "Arrival refresh, smart recommendations and preferences",
+  "settingsUpdatesDescription": "Update channel, automatic checks and app updates",
+  "settingsHistoryDescription": "Search history, clearing data and privacy policy",
+  "settingsOnboardingDescription": "Run the first-time setup again",
+  "settingsAboutDescription": "Version information, contributors, community and feedback",
   "settingsTitle": "Settings",
   "appearanceSectionTitle": "Appearance",
   "languageLabel": "Language",
