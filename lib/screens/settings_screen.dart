@@ -452,6 +452,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _SettingsCategory.about => _buildAbout(context),
       };
 
+  Widget _buildSettingDescription(String description) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 12),
+    child: Text(
+      description,
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        height: 1.6,
+      ),
+    ),
+  );
+
+  Widget _buildHistoryAction({
+    required IconData icon,
+    required String label,
+    required String description,
+    required VoidCallback onPressed,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon),
+        label: Text(label),
+      ),
+      _buildSettingDescription(description),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
@@ -501,7 +529,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (category == null)
                       ..._buildCategories(context)
                     else
-                      _buildCategory(context, category),
+                      ListTileTheme(
+                        data: ListTileThemeData(
+                          minVerticalPadding: 12,
+                          subtitleTextStyle: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                                height: 1.6,
+                              ),
+                        ),
+                        child: _buildCategory(context, category),
+                      ),
                     const AdBannerWidget(minimumDensity: 4, isInline: true),
                   ],
                 ),
@@ -558,6 +600,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
               onChanged: controller.updateLanguage,
             ),
+            _buildSettingDescription(l10n.languageDescription),
             const SizedBox(height: 16),
             Text(
               '${l10n.interfaceScaleLabel}: '
@@ -567,7 +610,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 4),
             Text(
               l10n.interfaceScaleDescription,
-              style: theme.textTheme.bodySmall,
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.6),
             ),
             Slider(
               min: AppSettings.minInterfaceScale,
@@ -606,6 +649,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
               },
             ),
+            _buildSettingDescription(l10n.themeModeDescription),
             const SizedBox(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
@@ -641,6 +685,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   }
                 },
               ),
+              _buildSettingDescription(l10n.mapProviderDescription),
             ],
             const SizedBox(height: 12),
             ListTile(
@@ -779,6 +824,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         }
                       },
                     ),
+                    _buildSettingDescription(l10n.wearSyncCategoryDescription),
                   ],
                 ],
               ],
@@ -805,10 +851,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(l10n.alwaysShowSecondsTitle),
-              subtitle: Text(
-                l10n.alwaysShowSecondsDescription,
-                style: const TextStyle(decoration: TextDecoration.lineThrough),
-              ),
+              subtitle: Text(l10n.alwaysShowSecondsDescription),
               value: controller.settings.alwaysShowSeconds,
               onChanged: controller.updateAlwaysShowSeconds,
             ),
@@ -925,7 +968,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     controller.settings.favoriteWidgetAutoRefreshMinutes,
                 decoration: InputDecoration(
                   labelText: l10n.favoriteWidgetRefreshLabel,
-                  helperText: l10n.favoriteWidgetRefreshHelper,
                 ),
                 items: _favoriteWidgetRefreshOptions
                     .map(
@@ -941,9 +983,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   }
                 },
               ),
+              _buildSettingDescription(l10n.favoriteWidgetRefreshHelper),
             ],
             const SizedBox(height: 8),
             Text(l10n.normalUpdateInterval(controller.settings.busUpdateTime)),
+            _buildSettingDescription(l10n.normalUpdateIntervalDescription),
             Slider(
               min: 5,
               max: 60,
@@ -956,6 +1000,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 8),
             Text(l10n.retryInterval(controller.settings.busErrorUpdateTime)),
+            _buildSettingDescription(l10n.retryIntervalDescription),
             Slider(
               min: 1,
               max: 15,
@@ -999,6 +1044,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
               },
             ),
+            _buildSettingDescription(
+              localizedAppUpdateChannelDescription(
+                l10n,
+                controller.settings.appUpdateChannel,
+              ),
+            ),
             const SizedBox(height: 12),
             AppDropdownFormField<AppUpdateCheckMode>(
               isExpanded: true,
@@ -1020,23 +1071,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
               },
             ),
-            const SizedBox(height: 12),
-            Text(
-              localizedAppUpdateChannelDescription(
-                l10n,
-                controller.settings.appUpdateChannel,
-              ),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 4),
-            Text(
+            _buildSettingDescription(
               localizedAppUpdateCheckModeDescription(
                 l10n,
                 controller.settings.appUpdateCheckMode,
               ),
-              style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
+            _buildSettingDescription(l10n.appUpdateManualCheckDescription),
             FilledButton.icon(
               onPressed: controller.checkingAppUpdate
                   ? null
@@ -1078,6 +1120,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(l10n.searchHistoryLimit(controller.settings.maxHistory)),
+            _buildSettingDescription(l10n.searchHistoryLimitDescription),
             Slider(
               min: 0,
               max: 30,
@@ -1093,32 +1136,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 4),
             Text(l10n.routeSelectionsCount(controller.recordedRouteSelections)),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: controller.clearHistory,
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  label: Text(l10n.clearSearchHistory),
-                ),
-                OutlinedButton.icon(
-                  onPressed: controller.clearRouteUsageProfiles,
-                  icon: const Icon(Icons.psychology_alt_outlined),
-                  label: Text(l10n.clearSmartHistory),
-                ),
-                OutlinedButton.icon(
-                  onPressed: controller.clearRouteSelectionHistory,
-                  icon: const Icon(Icons.route_outlined),
-                  label: Text(l10n.clearRouteSelectionHistory),
-                ),
-              ],
+            _buildHistoryAction(
+              onPressed: controller.clearHistory,
+              icon: Icons.delete_outline_rounded,
+              label: l10n.clearSearchHistory,
+              description: l10n.clearSearchHistoryDescription,
+            ),
+            _buildHistoryAction(
+              onPressed: controller.clearRouteUsageProfiles,
+              icon: Icons.psychology_alt_outlined,
+              label: l10n.clearSmartHistory,
+              description: l10n.clearSmartHistoryDescription,
+            ),
+            _buildHistoryAction(
+              onPressed: controller.clearRouteSelectionHistory,
+              icon: Icons.route_outlined,
+              label: l10n.clearRouteSelectionHistory,
+              description: l10n.clearRouteSelectionHistoryDescription,
             ),
             const SizedBox(height: 16),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.gavel_outlined),
               title: Text(l10n.termsOfService),
+              subtitle: Text(l10n.termsOfServiceDescription),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Navigator.of(context).pushNamed(AppRoutes.termsOfService);
@@ -1128,6 +1169,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.privacy_tip_outlined),
               title: Text(l10n.privacyPolicy),
+              subtitle: Text(l10n.privacyPolicyDescription),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Navigator.of(context).pushNamed(AppRoutes.privacyPolicy);
@@ -1148,6 +1190,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _buildSettingDescription(l10n.restartOnboardingDescription),
             OutlinedButton.icon(
               onPressed: () async {
                 await controller.setOnboardingCompleted(false);

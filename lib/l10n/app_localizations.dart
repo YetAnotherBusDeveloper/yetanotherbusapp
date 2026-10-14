@@ -159,6 +159,90 @@ abstract class AppLocalizations {
   /// **'Language'**
   String get languageLabel;
 
+  /// No description provided for @languageDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the language used throughout YABus. Follow system uses your device language. Changes apply immediately without restarting the app.'**
+  String get languageDescription;
+
+  /// No description provided for @themeModeDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a light or dark interface, or follow your device theme automatically. To change accent colors, AMOLED black mode or background images, open Personalization below.'**
+  String get themeModeDescription;
+
+  /// No description provided for @mapProviderDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the base map service used to display stops and bus maps. This changes the map presentation, not the source of routes, stops or live arrival data.'**
+  String get mapProviderDescription;
+
+  /// No description provided for @wearSyncCategoryDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a favorites group to send to your watch, or sync all groups. Organize stops in Favorites on your phone first; synced content is available when the watch is connected.'**
+  String get wearSyncCategoryDescription;
+
+  /// No description provided for @normalUpdateIntervalDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Set how often route pages request live arrivals, from 5 to 60 seconds. Shorter intervals update more frequently but use more network requests and battery. Arrival estimates still depend on the data source.'**
+  String get normalUpdateIntervalDescription;
+
+  /// No description provided for @retryIntervalDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Set a reference delay for failed arrival requests, from 1 to 15 seconds. Actual retries wait at least as long as the normal update interval, slow down after repeated failures and honor server-requested delays. Successful requests restore the normal interval.'**
+  String get retryIntervalDescription;
+
+  /// No description provided for @appUpdateManualCheckDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Check the selected update channel now and display the result. If an update is available, review its changes before deciding whether to download and install it.'**
+  String get appUpdateManualCheckDescription;
+
+  /// No description provided for @searchHistoryLimitDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep recently opened routes so you can return to them from Search. Store up to 30 entries; setting this to 0 clears the list and stops retaining search history. Smart recommendation learning records are managed separately.'**
+  String get searchHistoryLimitDescription;
+
+  /// No description provided for @clearSearchHistoryDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear the recent routes list in Search. Favorites and smart recommendation learning records are kept. New route visits build the list again according to your history limit.'**
+  String get clearSearchHistoryDescription;
+
+  /// No description provided for @clearSmartHistoryDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset route opens, route selections, favorite and stop usage, and destination choices used by smart recommendations. Suggestions will learn again from future activity. Saved favorites are kept.'**
+  String get clearSmartHistoryDescription;
+
+  /// No description provided for @clearRouteSelectionHistoryDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear route selection counts, favorite and stop usage, and destination choices. Route open counts are kept, so recommendations may still use your previous route viewing patterns.'**
+  String get clearRouteSelectionHistoryDescription;
+
+  /// No description provided for @termsOfServiceDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Read the service rules, the scope of arrival information and the terms that apply when using YABus.'**
+  String get termsOfServiceDescription;
+
+  /// No description provided for @privacyPolicyDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Read how location, account and usage data are handled, along with information about personal data.'**
+  String get privacyPolicyDescription;
+
+  /// No description provided for @restartOnboardingDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Run the first-time setup again to review features, location permissions and database selection. This closes Settings and returns to setup. It does not reset all your existing favorites and preferences.'**
+  String get restartOnboardingDescription;
+
   /// No description provided for @languageSystem.
   ///
   /// In en, this message translates to:
@@ -180,7 +264,7 @@ abstract class AppLocalizations {
   /// No description provided for @interfaceScaleDescription.
   ///
   /// In en, this message translates to:
-  /// **'Adjust the size of text and interface elements.'**
+  /// **'Adjust text and interface sizes throughout the app. Changes apply immediately. Increase the scale for easier reading or reduce it to fit more information on screen. Your device text size setting also affects the result.'**
   String get interfaceScaleDescription;
 
   /// No description provided for @interfaceScaleValue.
@@ -222,7 +306,7 @@ abstract class AppLocalizations {
   /// No description provided for @compactModeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Show less descriptive text on the home screen and some cards; desktop always uses compact mode.'**
+  /// **'Reduce supporting descriptions on the home screen and some cards to keep common actions together. Turn it off for fuller explanations. The desktop home screen always uses a compact layout.'**
   String get compactModeDescription;
 
   /// No description provided for @showWeatherTitle.
@@ -234,7 +318,7 @@ abstract class AppLocalizations {
   /// No description provided for @showWeatherDescription.
   ///
   /// In en, this message translates to:
-  /// **'Show the current temperature beside the home title. Tap it to open the full forecast.'**
+  /// **'Show temperature and weather for your current location next to the home title. Tap it to open the full forecast. Available location and network information are required. Turn it off to hide weather from the title.'**
   String get showWeatherDescription;
 
   /// No description provided for @mapProviderLabel.
@@ -252,7 +336,7 @@ abstract class AppLocalizations {
   /// No description provided for @personalizationDescription.
   ///
   /// In en, this message translates to:
-  /// **'Colors and background opacity'**
+  /// **'Customize theme colors, AMOLED black mode, background images for individual pages and background opacity to suit your reading preferences.'**
   String get personalizationDescription;
 
   /// No description provided for @commonCancel.
@@ -561,6 +645,12 @@ abstract class AppLocalizations {
   /// **'Routes suggested from your usage patterns'**
   String get smartRecommendationsSubtitle;
 
+  /// No description provided for @smartRecommendationsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'There are no recommendations to show yet. Open your usual routes a few times so YABus can learn when you use them. You can also grant location access in Nearby stops, then return and refresh to find nearby routes.'**
+  String get smartRecommendationsEmpty;
+
   /// No description provided for @smartRecommendationsDisabled.
   ///
   /// In en, this message translates to:
@@ -576,7 +666,7 @@ abstract class AppLocalizations {
   /// No description provided for @smartRecommendationsNeedDatabase.
   ///
   /// In en, this message translates to:
-  /// **'Download a local database first. This card will then learn your usage patterns and show arrivals at nearby stops.'**
+  /// **'No local database is downloaded for the current region, so usage-based route suggestions are unavailable. Download it in Databases and downloads. Nearby stops can still be found when location is available.'**
   String get smartRecommendationsNeedDatabase;
 
   /// No description provided for @destinationStopId.
@@ -1098,7 +1188,7 @@ abstract class AppLocalizations {
   /// No description provided for @wearSyncDescription.
   ///
   /// In en, this message translates to:
-  /// **'Sync favorite stops to your watch'**
+  /// **'Sync favorite stops from selected groups to connected Wear OS watches for quick access. Choose a group below after enabling sync. Your phone and watch need to be able to connect.'**
   String get wearSyncDescription;
 
   /// No description provided for @wearNoFavorites.
@@ -1158,7 +1248,7 @@ abstract class AppLocalizations {
   /// No description provided for @alwaysShowSecondsDescription.
   ///
   /// In en, this message translates to:
-  /// **'They are usually not very accurate'**
+  /// **'Show a more detailed countdown when arrival data includes seconds. These are estimates affected by traffic, vehicle positions and data refresh frequency, not a guarantee that the bus arrives when the countdown ends.'**
   String get alwaysShowSecondsDescription;
 
   /// No description provided for @hapticFeedbackTitle.
@@ -1170,7 +1260,7 @@ abstract class AppLocalizations {
   /// No description provided for @hapticFeedbackDescription.
   ///
   /// In en, this message translates to:
-  /// **'Provide haptic feedback for taps and actions'**
+  /// **'Provide a short vibration for supported taps and interactions to confirm input. Turn it off to disable this feedback. The effect also depends on your device and system settings.'**
   String get hapticFeedbackDescription;
 
   /// No description provided for @showAdsTitle.
@@ -1242,7 +1332,7 @@ abstract class AppLocalizations {
   /// No description provided for @smartRecommendationsDescription.
   ///
   /// In en, this message translates to:
-  /// **'Show suggestions on the home screen based on routes you open and when you use them.'**
+  /// **'Suggest routes on the home screen based on how often and when you open or select them. With insufficient history, nearby stops are used when location is available. Usage-based suggestions require a local database for your region. Turning this off hides the card; learning records can be cleared in History and privacy.'**
   String get smartRecommendationsDescription;
 
   /// No description provided for @autoFavoriteTitle.
@@ -1254,7 +1344,7 @@ abstract class AppLocalizations {
   /// No description provided for @autoFavoriteDescription.
   ///
   /// In en, this message translates to:
-  /// **'Automatically add a stop to the “Frequent” group after several trips in a short period.'**
+  /// **'Automatically add a stop to the Frequent favorites group after you select it for boarding several times in a short period. You can organize or remove these stops in Favorites. Turning this off stops new automatic additions and keeps existing favorites.'**
   String get autoFavoriteDescription;
 
   /// No description provided for @smartNotificationTitle.
@@ -1266,7 +1356,7 @@ abstract class AppLocalizations {
   /// No description provided for @smartNotificationDescription.
   ///
   /// In en, this message translates to:
-  /// **'Suggest routes in the background around times you often travel.'**
+  /// **'Check usual routes and nearby stops in the background around the times you often use them, and send arrival reminders when conditions match. Sufficient usage history, notification permission and background location are required. Battery restrictions may delay checks, and notifications are not sent every time.'**
   String get smartNotificationDescription;
 
   /// No description provided for @smartNotificationPermissionRequired.
@@ -1284,7 +1374,7 @@ abstract class AppLocalizations {
   /// No description provided for @keepScreenAwakeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Keep the screen awake on route detail pages.'**
+  /// **'Prevent the screen from turning off due to inactivity while viewing route details, so you can watch the countdown while waiting. Normal screen behavior resumes when you leave the page. Keeping the screen on uses more battery.'**
   String get keepScreenAwakeDescription;
 
   /// No description provided for @backgroundTripTitle.
@@ -1296,13 +1386,13 @@ abstract class AppLocalizations {
   /// No description provided for @backgroundTripDescription.
   ///
   /// In en, this message translates to:
-  /// **'Notification and location permissions are required for trip alerts in the background.'**
+  /// **'Keep receiving trip status reminders during tracking when you switch apps or lock the screen. Notification and location permissions are required, and battery settings may limit background execution. Turning this off stops current background tracking.'**
   String get backgroundTripDescription;
 
   /// No description provided for @backgroundTripIosDescription.
   ///
   /// In en, this message translates to:
-  /// **'Notification and background location permissions are required for trip alerts in the background.'**
+  /// **'Keep displaying trip status during tracking when you switch apps or lock the screen. Notification and background location permissions are required; iOS controls background update timing. Turning this off ends the current background trip status.'**
   String get backgroundTripIosDescription;
 
   /// No description provided for @favoriteWidgetRefreshLabel.
@@ -1314,7 +1404,7 @@ abstract class AppLocalizations {
   /// No description provided for @favoriteWidgetRefreshHelper.
   ///
   /// In en, this message translates to:
-  /// **'Android widgets have a minimum refresh interval of 15 minutes.'**
+  /// **'Set how often Android home screen favorites widgets refresh in the background, with a minimum of 15 minutes. Battery management may delay updates. Off disables scheduled refreshes without removing widgets or saved stops.'**
   String get favoriteWidgetRefreshHelper;
 
   /// No description provided for @minutesValue.
@@ -1380,19 +1470,19 @@ abstract class AppLocalizations {
   /// No description provided for @updateChannelDeveloperDescription.
   ///
   /// In en, this message translates to:
-  /// **'Do not check for app updates'**
+  /// **'For development or self-built versions; app updates are not checked. Choose Nightly or Release to receive public update information.'**
   String get updateChannelDeveloperDescription;
 
   /// No description provided for @updateChannelNightlyDescription.
   ///
   /// In en, this message translates to:
-  /// **'Compare against the latest successful build commit'**
+  /// **'Compare against the latest successful build to get new features and fixes earlier. Nightly updates are more frequent and may include features still being refined.'**
   String get updateChannelNightlyDescription;
 
   /// No description provided for @updateChannelReleaseDescription.
   ///
   /// In en, this message translates to:
-  /// **'Compare against the latest GitHub release'**
+  /// **'Compare against the latest public GitHub release, suitable for everyday use. Updates are offered for new Releases rather than every Nightly build.'**
   String get updateChannelReleaseDescription;
 
   /// No description provided for @updateCheckOff.
@@ -1416,19 +1506,19 @@ abstract class AppLocalizations {
   /// No description provided for @updateCheckOffDescription.
   ///
   /// In en, this message translates to:
-  /// **'Only show results for manual checks'**
+  /// **'Do not check automatically when the app starts. Use Check for app updates below whenever you want to check manually.'**
   String get updateCheckOffDescription;
 
   /// No description provided for @updateCheckNotifyDescription.
   ///
   /// In en, this message translates to:
-  /// **'Show a notification after launch'**
+  /// **'Check the selected channel after launch and notify you when an update is available. You decide whether to review and install it.'**
   String get updateCheckNotifyDescription;
 
   /// No description provided for @updateCheckPopupDescription.
   ///
   /// In en, this message translates to:
-  /// **'Open the update window after launch'**
+  /// **'Check the selected channel after launch and open the update dialog when a new version is available, with its changes and download options.'**
   String get updateCheckPopupDescription;
 
   /// No description provided for @appUpdateChecking.

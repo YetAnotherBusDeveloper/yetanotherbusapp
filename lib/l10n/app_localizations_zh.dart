@@ -39,6 +39,61 @@ class AppLocalizationsZh extends AppLocalizations {
   String get languageLabel => '語言';
 
   @override
+  String get languageDescription =>
+      '選擇 YABus 的介面語言。「跟隨系統」會依裝置的語言設定顯示；變更後立即套用，不需要重新開啟 App。';
+
+  @override
+  String get themeModeDescription =>
+      '選擇淺色或深色介面，也可以跟隨裝置的系統主題自動切換。想調整主色、純黑背景或背景圖片，請進入下方的「個人化」。';
+
+  @override
+  String get mapProviderDescription =>
+      '選擇 App 內地圖使用的底圖服務，影響站牌位置與公車地圖的呈現。這項設定不會改變路線、站牌或即時到站資料的來源。';
+
+  @override
+  String get wearSyncCategoryDescription =>
+      '選擇要傳送到手錶的最愛分類，或一次同步所有分類。請先在手機的最愛頁整理站牌；手錶連線後即可使用同步的內容。';
+
+  @override
+  String get normalUpdateIntervalDescription =>
+      '設定路線頁重新取得即時到站資訊的間隔，可選 5～60 秒。間隔越短，畫面更新越頻繁，也會增加網路請求與耗電；到站預估仍以資料來源提供的資訊為準。';
+
+  @override
+  String get retryIntervalDescription =>
+      '設定取得到站資訊失敗後的重試參考間隔，可選 1～15 秒。實際等待時間不會短於一般更新間隔，連續失敗時會逐步延長，也會遵守伺服器指定的等待時間；成功取得資料後恢復一般更新間隔。';
+
+  @override
+  String get appUpdateManualCheckDescription =>
+      '立即依目前選擇的更新通道查詢新版本，並顯示檢查結果。有可用更新時，可以查看更新內容，再決定是否下載與安裝。';
+
+  @override
+  String get searchHistoryLimitDescription =>
+      '保留最近開啟的路線紀錄，方便從搜尋頁快速回到之前查過的路線。最多可保留 30 筆，設為 0 會清空並停止保留搜尋紀錄；智慧推薦的學習紀錄另行管理。';
+
+  @override
+  String get clearSearchHistoryDescription =>
+      '清除搜尋頁中的最近路線清單。已收藏的最愛與智慧推薦的學習紀錄會保留，之後開啟路線時會依紀錄上限重新累積。';
+
+  @override
+  String get clearSmartHistoryDescription =>
+      '重設智慧推薦使用的路線開啟、路線選擇、最愛使用與站牌使用紀錄，以及目的地選擇紀錄。推薦會從之後的操作重新學習；已收藏的最愛不會被刪除。';
+
+  @override
+  String get clearRouteSelectionHistoryDescription =>
+      '清除路線選擇次數、最愛與站牌使用紀錄，以及目的地選擇紀錄。路線開啟次數會保留，因此智慧推薦仍可能依過去開啟路線的習慣提供建議。';
+
+  @override
+  String get termsOfServiceDescription =>
+      '查看服務使用規範、到站資料的適用範圍，以及使用 YABus 時的相關約定。';
+
+  @override
+  String get privacyPolicyDescription => '查看定位、帳戶及使用資料如何處理，以及與個人資料相關的說明。';
+
+  @override
+  String get restartOnboardingDescription =>
+      '重新開啟第一次使用 YABus 的設定流程，依序查看功能介紹、定位授權與資料庫選擇。按下後會離開設定頁，回到開始流程；既有的最愛與其他設定不會因此全部重設。';
+
+  @override
   String get languageSystem => '跟隨系統';
 
   @override
@@ -48,7 +103,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interfaceScaleLabel => '介面縮放';
 
   @override
-  String get interfaceScaleDescription => '調整文字與介面元素的大小。';
+  String get interfaceScaleDescription =>
+      '調整 App 內文字與介面元素的大小，變更後立即套用。想讓資訊更容易閱讀可以放大；想在同一畫面看到更多內容則可以縮小，裝置本身的文字大小設定也會一起影響顯示。';
 
   @override
   String interfaceScaleValue(int percent) {
@@ -71,13 +127,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get compactModeTitle => '精簡模式';
 
   @override
-  String get compactModeDescription => '首頁與部分卡片減少說明文字顯示；桌面首頁固定維持精簡。';
+  String get compactModeDescription =>
+      '減少首頁與部分卡片的輔助說明，讓常用功能更集中，適合熟悉操作後使用。關閉後會顯示較完整的說明；桌面版首頁固定使用精簡版面。';
 
   @override
   String get showWeatherTitle => '顯示天氣';
 
   @override
-  String get showWeatherDescription => '在首頁標題旁顯示目前氣溫，點一下可開啟完整預報。';
+  String get showWeatherDescription =>
+      '在首頁標題旁顯示目前位置的氣溫與天氣，點一下可查看完整預報。需要可用的位置與網路資訊；關閉後首頁標題就不會顯示天氣。';
 
   @override
   String get mapProviderLabel => '地圖提供者';
@@ -86,7 +144,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get personalizationTitle => '個人化';
 
   @override
-  String get personalizationDescription => '配色、背景透明度';
+  String get personalizationDescription =>
+      '調整主題配色、AMOLED 純黑模式與各頁面的背景圖片，也能設定背景透明度。進入後可依自己的閱讀習慣搭配顏色與背景。';
 
   @override
   String get commonCancel => '取消';
@@ -246,6 +305,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get smartRecommendationsSubtitle => '根據你的使用習慣推薦路線';
 
   @override
+  String get smartRecommendationsEmpty =>
+      '目前沒有可顯示的推薦。多開啟幾次常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
+
+  @override
   String get smartRecommendationsDisabled =>
       '這個功能目前已關閉。開啓後，YABus 會學習你在不同時段最常點開的路線，並在首頁直接推薦。';
 
@@ -254,7 +317,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get smartRecommendationsNeedDatabase =>
-      '請先下載本地資料庫。下載完成後，這張卡片才會開始學習你的使用習慣並顯示附近站牌到站時間。';
+      '目前地區尚未下載本地資料庫，無法依使用紀錄產生路線推薦。請到「資料庫與下載」下載目前地區的資料；若有可用定位，仍可查詢附近站牌。';
 
   @override
   String destinationStopId(int stopId) {
@@ -551,7 +614,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get wearSyncTitle => '啓用 Wear OS 同步';
 
   @override
-  String get wearSyncDescription => '將最愛站牌同步到手錶';
+  String get wearSyncDescription =>
+      '將選定分類的最愛站牌同步到已連線的 Wear OS 手錶，方便在手錶上查詢常搭站牌。開啟後請在下方選擇同步分類；同步需要手機與手錶保持可連線狀態。';
 
   @override
   String get wearNoFavorites => '尚無最愛站牌。請先新增最愛，再進行同步。';
@@ -587,13 +651,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get alwaysShowSecondsTitle => '強制顯示秒數';
 
   @override
-  String get alwaysShowSecondsDescription => '這個通常不太準';
+  String get alwaysShowSecondsDescription =>
+      '到站預估有秒數資料時，以秒數呈現更細的倒數資訊。秒數只是預估，會受路況、車輛位置與資料更新頻率影響，不代表公車一定會在倒數結束時抵達。';
 
   @override
   String get hapticFeedbackTitle => '震動回饋';
 
   @override
-  String get hapticFeedbackDescription => '點選及操作時提供觸覺回饋';
+  String get hapticFeedbackDescription =>
+      '在支援的點選與操作中提供短暫震動，幫助確認操作已被接收。關閉後不會提供這類觸覺回饋，實際震動效果也會受裝置與系統設定影響。';
 
   @override
   String get showAdsTitle => '顯示廣告';
@@ -629,19 +695,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adsDisableConfirm => '確定關閉';
 
   @override
-  String get smartRecommendationsDescription => '依照你常開啓的時段與路線，在首頁顯示推薦。';
+  String get smartRecommendationsDescription =>
+      '依照你開啟與選擇路線的次數、常用時段，在首頁推薦可能想搭的路線。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
 
   @override
   String get autoFavoriteTitle => '自動加入常用最愛';
 
   @override
-  String get autoFavoriteDescription => '同一站牌短期內搭乘多次後，自動加入「常用」最愛群組。';
+  String get autoFavoriteDescription =>
+      '短期內多次選擇同一站牌搭乘時，自動將它加入「常用」最愛群組，減少手動收藏的步驟。自動新增的站牌仍可在最愛頁整理或移除；關閉後會停止自動新增，已加入的最愛會保留。';
 
   @override
   String get smartNotificationTitle => '智慧推薦通知';
 
   @override
-  String get smartNotificationDescription => '在常用時段背景提醒你可能想看的路線。';
+  String get smartNotificationDescription =>
+      '在你常查詢路線的時段，於背景檢查常用路線與附近站牌，符合條件時發送到站提醒。需要足夠的使用紀錄、通知權限與背景定位；系統省電限制可能延後檢查，並非每次都會發送通知。';
 
   @override
   String get smartNotificationPermissionRequired => '需要通知權限才能啓用智慧推薦通知。';
@@ -650,22 +719,26 @@ class AppLocalizationsZh extends AppLocalizations {
   String get keepScreenAwakeTitle => '進入公車頁保持亮屏';
 
   @override
-  String get keepScreenAwakeDescription => '在路線詳細頁面維持螢幕常亮。';
+  String get keepScreenAwakeDescription =>
+      '查看路線詳細頁時，避免螢幕因閒置自動熄滅，方便候車時持續看倒數。離開路線頁後恢復一般螢幕行為；長時間保持亮屏會增加耗電。';
 
   @override
   String get backgroundTripTitle => '背景乘車提醒';
 
   @override
-  String get backgroundTripDescription => '需要通知與定位權限，才能在背景持續提醒搭車狀態。';
+  String get backgroundTripDescription =>
+      '開啟後可在乘車追蹤期間，切到其他 App 或鎖定螢幕時繼續接收搭車狀態提醒。需要通知與定位權限，背景執行也可能受系統省電設定限制；關閉會停止目前的背景追蹤。';
 
   @override
-  String get backgroundTripIosDescription => '需要通知與背景定位權限，才能在背景持續提醒搭車狀態。';
+  String get backgroundTripIosDescription =>
+      '開啟後可在乘車追蹤期間，切到其他 App 或鎖定螢幕時繼續顯示乘車狀態。需要通知與背景定位權限，更新時機由 iOS 的背景執行機制決定；關閉會結束目前的背景乘車狀態。';
 
   @override
   String get favoriteWidgetRefreshLabel => '最愛小工具背景更新';
 
   @override
-  String get favoriteWidgetRefreshHelper => 'Android 小工具最低更新間隔為 15 分鐘。';
+  String get favoriteWidgetRefreshHelper =>
+      '設定 Android 桌面最愛小工具在背景更新的頻率，最短為 15 分鐘。系統省電機制可能延後更新；選擇「關閉」會停止定時更新，不會移除小工具或已收藏的站牌。';
 
   @override
   String minutesValue(int minutes) {
@@ -706,13 +779,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateChannelRelease => 'Release';
 
   @override
-  String get updateChannelDeveloperDescription => '不檢查 app 更新';
+  String get updateChannelDeveloperDescription =>
+      '供自行建置或開發時使用，不檢查 App 更新。若要接收公開版本的更新資訊，請改選 Nightly 或 Release。';
 
   @override
-  String get updateChannelNightlyDescription => '比對最新成功建置的 commit';
+  String get updateChannelNightlyDescription =>
+      '比對最新成功建置的程式版本，可較早取得新功能與修正。Nightly 更新較頻繁，也可能包含仍在調整中的功能。';
 
   @override
-  String get updateChannelReleaseDescription => '比對 GitHub 最新發行版';
+  String get updateChannelReleaseDescription =>
+      '比對 GitHub 最新公開發行版，適合日常使用。僅在有新的 Release 發行時提示更新，不會追蹤每一次 Nightly 建置。';
 
   @override
   String get updateCheckOff => '關閉';
@@ -724,13 +800,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get updateCheckPopup => '跳窗';
 
   @override
-  String get updateCheckOffDescription => '只在手動檢查時顯示';
+  String get updateCheckOffDescription =>
+      'App 啟動時不自動檢查新版本。需要更新時，可使用下方的「立即檢查 App 更新」手動查詢。';
 
   @override
-  String get updateCheckNotifyDescription => '啓動後用通知提示';
+  String get updateCheckNotifyDescription =>
+      'App 啟動後自動檢查目前更新通道，有新版本時以提示通知你，再由你決定是否查看與安裝。';
 
   @override
-  String get updateCheckPopupDescription => '啓動後直接跳出更新視窗';
+  String get updateCheckPopupDescription =>
+      'App 啟動後自動檢查目前更新通道，有新版本時直接開啟更新視窗，方便查看更新內容與下載選項。';
 
   @override
   String get appUpdateChecking => '檢查中…';
@@ -3289,6 +3368,61 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get languageLabel => '語言';
 
   @override
+  String get languageDescription =>
+      '選擇 YABus 的介面語言。「跟隨系統」會依裝置的語言設定顯示；變更後立即套用，不需要重新開啟 App。';
+
+  @override
+  String get themeModeDescription =>
+      '選擇淺色或深色介面，也可以跟隨裝置的系統主題自動切換。想調整主色、純黑背景或背景圖片，請進入下方的「個人化」。';
+
+  @override
+  String get mapProviderDescription =>
+      '選擇 App 內地圖使用的底圖服務，影響站牌位置與公車地圖的呈現。這項設定不會改變路線、站牌或即時到站資料的來源。';
+
+  @override
+  String get wearSyncCategoryDescription =>
+      '選擇要傳送到手錶的最愛分類，或一次同步所有分類。請先在手機的最愛頁整理站牌；手錶連線後即可使用同步的內容。';
+
+  @override
+  String get normalUpdateIntervalDescription =>
+      '設定路線頁重新取得即時到站資訊的間隔，可選 5～60 秒。間隔越短，畫面更新越頻繁，也會增加網路請求與耗電；到站預估仍以資料來源提供的資訊為準。';
+
+  @override
+  String get retryIntervalDescription =>
+      '設定取得到站資訊失敗後的重試參考間隔，可選 1～15 秒。實際等待時間不會短於一般更新間隔，連續失敗時會逐步延長，也會遵守伺服器指定的等待時間；成功取得資料後恢復一般更新間隔。';
+
+  @override
+  String get appUpdateManualCheckDescription =>
+      '立即依目前選擇的更新通道查詢新版本，並顯示檢查結果。有可用更新時，可以查看更新內容，再決定是否下載與安裝。';
+
+  @override
+  String get searchHistoryLimitDescription =>
+      '保留最近開啟的路線紀錄，方便從搜尋頁快速回到之前查過的路線。最多可保留 30 筆，設為 0 會清空並停止保留搜尋紀錄；智慧推薦的學習紀錄另行管理。';
+
+  @override
+  String get clearSearchHistoryDescription =>
+      '清除搜尋頁中的最近路線清單。已收藏的最愛與智慧推薦的學習紀錄會保留，之後開啟路線時會依紀錄上限重新累積。';
+
+  @override
+  String get clearSmartHistoryDescription =>
+      '重設智慧推薦使用的路線開啟、路線選擇、最愛使用與站牌使用紀錄，以及目的地選擇紀錄。推薦會從之後的操作重新學習；已收藏的最愛不會被刪除。';
+
+  @override
+  String get clearRouteSelectionHistoryDescription =>
+      '清除路線選擇次數、最愛與站牌使用紀錄，以及目的地選擇紀錄。路線開啟次數會保留，因此智慧推薦仍可能依過去開啟路線的習慣提供建議。';
+
+  @override
+  String get termsOfServiceDescription =>
+      '查看服務使用規範、到站資料的適用範圍，以及使用 YABus 時的相關約定。';
+
+  @override
+  String get privacyPolicyDescription => '查看定位、帳戶及使用資料如何處理，以及與個人資料相關的說明。';
+
+  @override
+  String get restartOnboardingDescription =>
+      '重新開啟第一次使用 YABus 的設定流程，依序查看功能介紹、定位授權與資料庫選擇。按下後會離開設定頁，回到開始流程；既有的最愛與其他設定不會因此全部重設。';
+
+  @override
   String get languageSystem => '跟隨系統';
 
   @override
@@ -3298,7 +3432,8 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get interfaceScaleLabel => '介面縮放';
 
   @override
-  String get interfaceScaleDescription => '調整文字與介面元素的大小。';
+  String get interfaceScaleDescription =>
+      '調整 App 內文字與介面元素的大小，變更後立即套用。想讓資訊更容易閱讀可以放大；想在同一畫面看到更多內容則可以縮小，裝置本身的文字大小設定也會一起影響顯示。';
 
   @override
   String interfaceScaleValue(int percent) {
@@ -3321,13 +3456,15 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get compactModeTitle => '精簡模式';
 
   @override
-  String get compactModeDescription => '首頁與部分卡片減少說明文字顯示；桌面首頁固定維持精簡。';
+  String get compactModeDescription =>
+      '減少首頁與部分卡片的輔助說明，讓常用功能更集中，適合熟悉操作後使用。關閉後會顯示較完整的說明；桌面版首頁固定使用精簡版面。';
 
   @override
   String get showWeatherTitle => '顯示天氣';
 
   @override
-  String get showWeatherDescription => '在首頁標題旁顯示目前氣溫，點一下可開啟完整預報。';
+  String get showWeatherDescription =>
+      '在首頁標題旁顯示目前位置的氣溫與天氣，點一下可查看完整預報。需要可用的位置與網路資訊；關閉後首頁標題就不會顯示天氣。';
 
   @override
   String get mapProviderLabel => '地圖提供者';
@@ -3336,7 +3473,8 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get personalizationTitle => '個人化';
 
   @override
-  String get personalizationDescription => '配色、背景透明度';
+  String get personalizationDescription =>
+      '調整主題配色、AMOLED 純黑模式與各頁面的背景圖片，也能設定背景透明度。進入後可依自己的閱讀習慣搭配顏色與背景。';
 
   @override
   String get commonCancel => '取消';
@@ -3496,6 +3634,10 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get smartRecommendationsSubtitle => '根據你的使用習慣推薦路線';
 
   @override
+  String get smartRecommendationsEmpty =>
+      '目前沒有可顯示的推薦。多開啟幾次常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
+
+  @override
   String get smartRecommendationsDisabled =>
       '這個功能目前已關閉。開啓後，YABus 會學習你在不同時段最常點開的路線，並在首頁直接推薦。';
 
@@ -3504,7 +3646,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get smartRecommendationsNeedDatabase =>
-      '請先下載本地資料庫。下載完成後，這張卡片才會開始學習你的使用習慣並顯示附近站牌到站時間。';
+      '目前地區尚未下載本地資料庫，無法依使用紀錄產生路線推薦。請到「資料庫與下載」下載目前地區的資料；若有可用定位，仍可查詢附近站牌。';
 
   @override
   String destinationStopId(int stopId) {
@@ -3801,7 +3943,8 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get wearSyncTitle => '啓用 Wear OS 同步';
 
   @override
-  String get wearSyncDescription => '將最愛站牌同步到手錶';
+  String get wearSyncDescription =>
+      '將選定分類的最愛站牌同步到已連線的 Wear OS 手錶，方便在手錶上查詢常搭站牌。開啟後請在下方選擇同步分類；同步需要手機與手錶保持可連線狀態。';
 
   @override
   String get wearNoFavorites => '尚無最愛站牌。請先新增最愛，再進行同步。';
@@ -3837,13 +3980,15 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get alwaysShowSecondsTitle => '強制顯示秒數';
 
   @override
-  String get alwaysShowSecondsDescription => '這個通常不太準';
+  String get alwaysShowSecondsDescription =>
+      '到站預估有秒數資料時，以秒數呈現更細的倒數資訊。秒數只是預估，會受路況、車輛位置與資料更新頻率影響，不代表公車一定會在倒數結束時抵達。';
 
   @override
   String get hapticFeedbackTitle => '震動回饋';
 
   @override
-  String get hapticFeedbackDescription => '點選及操作時提供觸覺回饋';
+  String get hapticFeedbackDescription =>
+      '在支援的點選與操作中提供短暫震動，幫助確認操作已被接收。關閉後不會提供這類觸覺回饋，實際震動效果也會受裝置與系統設定影響。';
 
   @override
   String get showAdsTitle => '顯示廣告';
@@ -3879,19 +4024,22 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get adsDisableConfirm => '確定關閉';
 
   @override
-  String get smartRecommendationsDescription => '依照你常開啓的時段與路線，在首頁顯示推薦。';
+  String get smartRecommendationsDescription =>
+      '依照你開啟與選擇路線的次數、常用時段，在首頁推薦可能想搭的路線。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
 
   @override
   String get autoFavoriteTitle => '自動加入常用最愛';
 
   @override
-  String get autoFavoriteDescription => '同一站牌短期內搭乘多次後，自動加入「常用」最愛群組。';
+  String get autoFavoriteDescription =>
+      '短期內多次選擇同一站牌搭乘時，自動將它加入「常用」最愛群組，減少手動收藏的步驟。自動新增的站牌仍可在最愛頁整理或移除；關閉後會停止自動新增，已加入的最愛會保留。';
 
   @override
   String get smartNotificationTitle => '智慧推薦通知';
 
   @override
-  String get smartNotificationDescription => '在常用時段背景提醒你可能想看的路線。';
+  String get smartNotificationDescription =>
+      '在你常查詢路線的時段，於背景檢查常用路線與附近站牌，符合條件時發送到站提醒。需要足夠的使用紀錄、通知權限與背景定位；系統省電限制可能延後檢查，並非每次都會發送通知。';
 
   @override
   String get smartNotificationPermissionRequired => '需要通知權限才能啓用智慧推薦通知。';
@@ -3900,22 +4048,26 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get keepScreenAwakeTitle => '進入公車頁保持亮屏';
 
   @override
-  String get keepScreenAwakeDescription => '在路線詳細頁面維持螢幕常亮。';
+  String get keepScreenAwakeDescription =>
+      '查看路線詳細頁時，避免螢幕因閒置自動熄滅，方便候車時持續看倒數。離開路線頁後恢復一般螢幕行為；長時間保持亮屏會增加耗電。';
 
   @override
   String get backgroundTripTitle => '背景乘車提醒';
 
   @override
-  String get backgroundTripDescription => '需要通知與定位權限，才能在背景持續提醒搭車狀態。';
+  String get backgroundTripDescription =>
+      '開啟後可在乘車追蹤期間，切到其他 App 或鎖定螢幕時繼續接收搭車狀態提醒。需要通知與定位權限，背景執行也可能受系統省電設定限制；關閉會停止目前的背景追蹤。';
 
   @override
-  String get backgroundTripIosDescription => '需要通知與背景定位權限，才能在背景持續提醒搭車狀態。';
+  String get backgroundTripIosDescription =>
+      '開啟後可在乘車追蹤期間，切到其他 App 或鎖定螢幕時繼續顯示乘車狀態。需要通知與背景定位權限，更新時機由 iOS 的背景執行機制決定；關閉會結束目前的背景乘車狀態。';
 
   @override
   String get favoriteWidgetRefreshLabel => '最愛小工具背景更新';
 
   @override
-  String get favoriteWidgetRefreshHelper => 'Android 小工具最低更新間隔為 15 分鐘。';
+  String get favoriteWidgetRefreshHelper =>
+      '設定 Android 桌面最愛小工具在背景更新的頻率，最短為 15 分鐘。系統省電機制可能延後更新；選擇「關閉」會停止定時更新，不會移除小工具或已收藏的站牌。';
 
   @override
   String minutesValue(int minutes) {
@@ -3956,13 +4108,16 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get updateChannelRelease => 'Release';
 
   @override
-  String get updateChannelDeveloperDescription => '不檢查 app 更新';
+  String get updateChannelDeveloperDescription =>
+      '供自行建置或開發時使用，不檢查 App 更新。若要接收公開版本的更新資訊，請改選 Nightly 或 Release。';
 
   @override
-  String get updateChannelNightlyDescription => '比對最新成功建置的 commit';
+  String get updateChannelNightlyDescription =>
+      '比對最新成功建置的程式版本，可較早取得新功能與修正。Nightly 更新較頻繁，也可能包含仍在調整中的功能。';
 
   @override
-  String get updateChannelReleaseDescription => '比對 GitHub 最新發行版';
+  String get updateChannelReleaseDescription =>
+      '比對 GitHub 最新公開發行版，適合日常使用。僅在有新的 Release 發行時提示更新，不會追蹤每一次 Nightly 建置。';
 
   @override
   String get updateCheckOff => '關閉';
@@ -3974,13 +4129,16 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get updateCheckPopup => '跳窗';
 
   @override
-  String get updateCheckOffDescription => '只在手動檢查時顯示';
+  String get updateCheckOffDescription =>
+      'App 啟動時不自動檢查新版本。需要更新時，可使用下方的「立即檢查 App 更新」手動查詢。';
 
   @override
-  String get updateCheckNotifyDescription => '啓動後用通知提示';
+  String get updateCheckNotifyDescription =>
+      'App 啟動後自動檢查目前更新通道，有新版本時以提示通知你，再由你決定是否查看與安裝。';
 
   @override
-  String get updateCheckPopupDescription => '啓動後直接跳出更新視窗';
+  String get updateCheckPopupDescription =>
+      'App 啟動後自動檢查目前更新通道，有新版本時直接開啟更新視窗，方便查看更新內容與下載選項。';
 
   @override
   String get appUpdateChecking => '檢查中…';

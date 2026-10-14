@@ -44,6 +44,62 @@ class AppLocalizationsEn extends AppLocalizations {
   String get languageLabel => 'Language';
 
   @override
+  String get languageDescription =>
+      'Choose the language used throughout YABus. Follow system uses your device language. Changes apply immediately without restarting the app.';
+
+  @override
+  String get themeModeDescription =>
+      'Use a light or dark interface, or follow your device theme automatically. To change accent colors, AMOLED black mode or background images, open Personalization below.';
+
+  @override
+  String get mapProviderDescription =>
+      'Choose the base map service used to display stops and bus maps. This changes the map presentation, not the source of routes, stops or live arrival data.';
+
+  @override
+  String get wearSyncCategoryDescription =>
+      'Choose a favorites group to send to your watch, or sync all groups. Organize stops in Favorites on your phone first; synced content is available when the watch is connected.';
+
+  @override
+  String get normalUpdateIntervalDescription =>
+      'Set how often route pages request live arrivals, from 5 to 60 seconds. Shorter intervals update more frequently but use more network requests and battery. Arrival estimates still depend on the data source.';
+
+  @override
+  String get retryIntervalDescription =>
+      'Set a reference delay for failed arrival requests, from 1 to 15 seconds. Actual retries wait at least as long as the normal update interval, slow down after repeated failures and honor server-requested delays. Successful requests restore the normal interval.';
+
+  @override
+  String get appUpdateManualCheckDescription =>
+      'Check the selected update channel now and display the result. If an update is available, review its changes before deciding whether to download and install it.';
+
+  @override
+  String get searchHistoryLimitDescription =>
+      'Keep recently opened routes so you can return to them from Search. Store up to 30 entries; setting this to 0 clears the list and stops retaining search history. Smart recommendation learning records are managed separately.';
+
+  @override
+  String get clearSearchHistoryDescription =>
+      'Clear the recent routes list in Search. Favorites and smart recommendation learning records are kept. New route visits build the list again according to your history limit.';
+
+  @override
+  String get clearSmartHistoryDescription =>
+      'Reset route opens, route selections, favorite and stop usage, and destination choices used by smart recommendations. Suggestions will learn again from future activity. Saved favorites are kept.';
+
+  @override
+  String get clearRouteSelectionHistoryDescription =>
+      'Clear route selection counts, favorite and stop usage, and destination choices. Route open counts are kept, so recommendations may still use your previous route viewing patterns.';
+
+  @override
+  String get termsOfServiceDescription =>
+      'Read the service rules, the scope of arrival information and the terms that apply when using YABus.';
+
+  @override
+  String get privacyPolicyDescription =>
+      'Read how location, account and usage data are handled, along with information about personal data.';
+
+  @override
+  String get restartOnboardingDescription =>
+      'Run the first-time setup again to review features, location permissions and database selection. This closes Settings and returns to setup. It does not reset all your existing favorites and preferences.';
+
+  @override
   String get languageSystem => 'Follow system';
 
   @override
@@ -54,7 +110,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get interfaceScaleDescription =>
-      'Adjust the size of text and interface elements.';
+      'Adjust text and interface sizes throughout the app. Changes apply immediately. Increase the scale for easier reading or reduce it to fit more information on screen. Your device text size setting also affects the result.';
 
   @override
   String interfaceScaleValue(int percent) {
@@ -78,14 +134,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get compactModeDescription =>
-      'Show less descriptive text on the home screen and some cards; desktop always uses compact mode.';
+      'Reduce supporting descriptions on the home screen and some cards to keep common actions together. Turn it off for fuller explanations. The desktop home screen always uses a compact layout.';
 
   @override
   String get showWeatherTitle => 'Show weather';
 
   @override
   String get showWeatherDescription =>
-      'Show the current temperature beside the home title. Tap it to open the full forecast.';
+      'Show temperature and weather for your current location next to the home title. Tap it to open the full forecast. Available location and network information are required. Turn it off to hide weather from the title.';
 
   @override
   String get mapProviderLabel => 'Map provider';
@@ -94,7 +150,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get personalizationTitle => 'Personalization';
 
   @override
-  String get personalizationDescription => 'Colors and background opacity';
+  String get personalizationDescription =>
+      'Customize theme colors, AMOLED black mode, background images for individual pages and background opacity to suit your reading preferences.';
 
   @override
   String get commonCancel => 'Cancel';
@@ -270,6 +327,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Routes suggested from your usage patterns';
 
   @override
+  String get smartRecommendationsEmpty =>
+      'There are no recommendations to show yet. Open your usual routes a few times so YABus can learn when you use them. You can also grant location access in Nearby stops, then return and refresh to find nearby routes.';
+
+  @override
   String get smartRecommendationsDisabled =>
       'This feature is off. When enabled, YABus learns which routes you open at different times and suggests them on the home screen.';
 
@@ -278,7 +339,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get smartRecommendationsNeedDatabase =>
-      'Download a local database first. This card will then learn your usage patterns and show arrivals at nearby stops.';
+      'No local database is downloaded for the current region, so usage-based route suggestions are unavailable. Download it in Databases and downloads. Nearby stops can still be found when location is available.';
 
   @override
   String destinationStopId(int stopId) {
@@ -600,7 +661,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get wearSyncTitle => 'Enable Wear OS sync';
 
   @override
-  String get wearSyncDescription => 'Sync favorite stops to your watch';
+  String get wearSyncDescription =>
+      'Sync favorite stops from selected groups to connected Wear OS watches for quick access. Choose a group below after enabling sync. Your phone and watch need to be able to connect.';
 
   @override
   String get wearNoFavorites =>
@@ -644,14 +706,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get alwaysShowSecondsDescription =>
-      'They are usually not very accurate';
+      'Show a more detailed countdown when arrival data includes seconds. These are estimates affected by traffic, vehicle positions and data refresh frequency, not a guarantee that the bus arrives when the countdown ends.';
 
   @override
   String get hapticFeedbackTitle => 'Haptic feedback';
 
   @override
   String get hapticFeedbackDescription =>
-      'Provide haptic feedback for taps and actions';
+      'Provide a short vibration for supported taps and interactions to confirm input. Turn it off to disable this feedback. The effect also depends on your device and system settings.';
 
   @override
   String get showAdsTitle => 'Show ads';
@@ -688,21 +750,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get smartRecommendationsDescription =>
-      'Show suggestions on the home screen based on routes you open and when you use them.';
+      'Suggest routes on the home screen based on how often and when you open or select them. With insufficient history, nearby stops are used when location is available. Usage-based suggestions require a local database for your region. Turning this off hides the card; learning records can be cleared in History and privacy.';
 
   @override
   String get autoFavoriteTitle => 'Auto-add frequent favorites';
 
   @override
   String get autoFavoriteDescription =>
-      'Automatically add a stop to the “Frequent” group after several trips in a short period.';
+      'Automatically add a stop to the Frequent favorites group after you select it for boarding several times in a short period. You can organize or remove these stops in Favorites. Turning this off stops new automatic additions and keeps existing favorites.';
 
   @override
   String get smartNotificationTitle => 'Smart recommendation notifications';
 
   @override
   String get smartNotificationDescription =>
-      'Suggest routes in the background around times you often travel.';
+      'Check usual routes and nearby stops in the background around the times you often use them, and send arrival reminders when conditions match. Sufficient usage history, notification permission and background location are required. Battery restrictions may delay checks, and notifications are not sent every time.';
 
   @override
   String get smartNotificationPermissionRequired =>
@@ -713,25 +775,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get keepScreenAwakeDescription =>
-      'Keep the screen awake on route detail pages.';
+      'Prevent the screen from turning off due to inactivity while viewing route details, so you can watch the countdown while waiting. Normal screen behavior resumes when you leave the page. Keeping the screen on uses more battery.';
 
   @override
   String get backgroundTripTitle => 'Background trip alerts';
 
   @override
   String get backgroundTripDescription =>
-      'Notification and location permissions are required for trip alerts in the background.';
+      'Keep receiving trip status reminders during tracking when you switch apps or lock the screen. Notification and location permissions are required, and battery settings may limit background execution. Turning this off stops current background tracking.';
 
   @override
   String get backgroundTripIosDescription =>
-      'Notification and background location permissions are required for trip alerts in the background.';
+      'Keep displaying trip status during tracking when you switch apps or lock the screen. Notification and background location permissions are required; iOS controls background update timing. Turning this off ends the current background trip status.';
 
   @override
   String get favoriteWidgetRefreshLabel => 'Favorite widget background refresh';
 
   @override
   String get favoriteWidgetRefreshHelper =>
-      'Android widgets have a minimum refresh interval of 15 minutes.';
+      'Set how often Android home screen favorites widgets refresh in the background, with a minimum of 15 minutes. Battery management may delay updates. Off disables scheduled refreshes without removing widgets or saved stops.';
 
   @override
   String minutesValue(int minutes) {
@@ -797,15 +859,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get updateChannelDeveloperDescription =>
-      'Do not check for app updates';
+      'For development or self-built versions; app updates are not checked. Choose Nightly or Release to receive public update information.';
 
   @override
   String get updateChannelNightlyDescription =>
-      'Compare against the latest successful build commit';
+      'Compare against the latest successful build to get new features and fixes earlier. Nightly updates are more frequent and may include features still being refined.';
 
   @override
   String get updateChannelReleaseDescription =>
-      'Compare against the latest GitHub release';
+      'Compare against the latest public GitHub release, suitable for everyday use. Updates are offered for new Releases rather than every Nightly build.';
 
   @override
   String get updateCheckOff => 'Off';
@@ -817,14 +879,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get updateCheckPopup => 'Pop-up';
 
   @override
-  String get updateCheckOffDescription => 'Only show results for manual checks';
+  String get updateCheckOffDescription =>
+      'Do not check automatically when the app starts. Use Check for app updates below whenever you want to check manually.';
 
   @override
-  String get updateCheckNotifyDescription => 'Show a notification after launch';
+  String get updateCheckNotifyDescription =>
+      'Check the selected channel after launch and notify you when an update is available. You decide whether to review and install it.';
 
   @override
   String get updateCheckPopupDescription =>
-      'Open the update window after launch';
+      'Check the selected channel after launch and open the update dialog when a new version is available, with its changes and download options.';
 
   @override
   String get appUpdateChecking => 'Checking...';

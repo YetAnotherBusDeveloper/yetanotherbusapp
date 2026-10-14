@@ -689,6 +689,9 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
 
   Future<void> _refresh() async {
     try {
+      await widget.controller.ensureProviderDatabaseState(
+        widget.controller.settings.provider,
+      );
       await widget.controller.ensureRecommendationDataReady();
     } catch (error) {
       if (mounted) setState(() => _preparationError = error);
@@ -996,12 +999,62 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
     );
   }
 
-  // ignore: unused_element
-  Widget _buildNeedDatabaseState(BuildContext context) {
+  Widget _buildEmptyState(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final needsDatabase = !kIsWeb && !widget.controller.databaseReady;
     return _SmartRecommendationShell(
       title: l10n.smartRecommendationsTitle,
-      child: Text(l10n.smartRecommendationsNeedDatabase),
+      trailing: IconButton(
+        tooltip: l10n.commonRefresh,
+        onPressed: _refresh,
+        icon: const Icon(Icons.refresh_rounded),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(l10n.smartRecommendationsEmpty),
+          if (needsDatabase) ...[
+            const SizedBox(height: 12),
+            Text(l10n.smartRecommendationsNeedDatabase),
+          ],
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      settings: const RouteSettings(name: AppRoutes.nearby),
+                      builder: (_) => const NearbyScreen(),
+                    ),
+                  );
+                  if (mounted) await _refresh();
+                },
+                icon: const Icon(Icons.near_me_outlined),
+                label: Text(l10n.homeNearbyTitle),
+              ),
+              if (needsDatabase)
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        settings: const RouteSettings(
+                          name: AppRoutes.databaseSettings,
+                        ),
+                        builder: (_) => const DatabaseSettingsScreen(),
+                      ),
+                    );
+                    if (mounted) await _refresh();
+                  },
+                  icon: const Icon(Icons.storage_rounded),
+                  label: Text(l10n.databaseDownloadsTitle),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -1329,7 +1382,7 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
           );
         } else if (snapshot.data == null) {
           stateKey = 'empty';
-          state = const SizedBox.shrink();
+          state = _buildEmptyState(context);
         } else if (snapshot.data!.suggestions.isNotEmpty) {
           stateKey = 'suggestions';
           state = _buildSuggestionListState(
@@ -1344,7 +1397,7 @@ class _SmartRecommendationCardState extends State<_SmartRecommendationCard> {
           );
         } else {
           stateKey = 'empty';
-          state = const SizedBox.shrink();
+          state = _buildEmptyState(context);
         }
 
         return AnimatedSwitcher(
