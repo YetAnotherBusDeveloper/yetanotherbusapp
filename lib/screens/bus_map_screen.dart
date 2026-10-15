@@ -22,6 +22,7 @@ import '../widgets/ad_banner_widget.dart';
 import '../widgets/bus_map_geometry.dart';
 import '../widgets/bus_map_markers.dart';
 import '../widgets/bus_map_motion.dart';
+import '../widgets/map_compass.dart';
 import '../widgets/platform_map_provider.dart';
 import '../widgets/transit_station_name.dart';
 import 'route_detail_navigation.dart';
@@ -107,6 +108,7 @@ class _BusMapScreenState extends State<BusMapScreen>
 
   LatLngBounds? _visibleBounds;
   late double _zoom = _openingZoom;
+  late final MapBearing _mapBearing;
 
   /// Ticks the bus animation without rebuilding the rest of the screen.
   ///
@@ -131,6 +133,7 @@ class _BusMapScreenState extends State<BusMapScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _refreshProgressController = AnimationController(vsync: this);
+    _mapBearing = MapBearing(vsync: this);
   }
 
   @override
@@ -172,6 +175,7 @@ class _BusMapScreenState extends State<BusMapScreen>
     _simulationTimer?.cancel();
     _refreshProgressController.dispose();
     _animationTick.dispose();
+    _mapBearing.dispose();
     _filterController.dispose();
     _googleMapController?.dispose();
     super.dispose();
@@ -864,7 +868,19 @@ class _BusMapScreenState extends State<BusMapScreen>
             top: 12,
             left: 12,
             right: 12,
-            child: _buildStatusChips(theme, drawSet),
+            // The chips span the width, so the compass shares their row
+            // rather than landing on top of them.
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _buildStatusChips(theme, drawSet)),
+                MapCompass(
+                  bearing: _mapBearing,
+                  onPressed: _turnMapNorth,
+                  padding: const EdgeInsetsDirectional.only(start: 8),
+                ),
+              ],
+            ),
           ),
         if (!useSplitLayout)
           Positioned.fill(
@@ -1222,6 +1238,23 @@ class _BusMapScreenState extends State<BusMapScreen>
     }
   }
 
+  void _turnMapNorth() {
+    if (!useGoogleMapsProviderFor(
+      AppControllerScope.read(context).settings.mobileMapProvider,
+    )) {
+      _mapBearing.turnFlutterMapNorth(
+        _mapController,
+        duration: AppMotion.duration(context),
+      );
+      return;
+    }
+    final googleController = _googleMapController;
+    final northUp = _mapBearing.googleNorthUp;
+    if (googleController != null && northUp != null) {
+      unawaited(googleController.animateCamera(northUp));
+    }
+  }
+
   // -- map backends ---------------------------------------------------------
 
   Widget _buildMap(
@@ -1249,17 +1282,22 @@ class _BusMapScreenState extends State<BusMapScreen>
       options: MapOptions(
         initialCenter: _providerCenter(_provider),
         initialZoom: _openingZoom,
-        interactionOptions: const InteractionOptions(
-          flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-        ),
+        interactionOptions: mapInteractionOptions,
         onTap: (_, _) {
           if (_selectedBusKey != null) {
             _clearSelection();
           }
         },
-        onMapReady: _syncFlutterMapViewport,
+        onMapReady: () {
+          _mapBearing.resetForNewMap();
+          _syncFlutterMapViewport();
+        },
         onMapEvent: (event) {
+          _mapBearing.followFlutterMap(event);
+          // A twist alone ends without a MoveEnd, yet it still changes
+          // which buses are on screen.
           if (event is MapEventMoveEnd ||
+              event is MapEventRotateEnd ||
               event is MapEventFlingAnimationEnd ||
               event is MapEventDoubleTapZoomEnd ||
               event is MapEventScrollWheelZoom) {
@@ -1292,6 +1330,9 @@ class _BusMapScreenState extends State<BusMapScreen>
           ),
         if (_userLocation != null)
           MarkerLayer(
+            // Counter-rotates the markers, keeping them upright when the map is
+            // turned.
+            rotate: true,
             markers: [
               Marker(
                 point: _userLocation!,
@@ -1303,6 +1344,7 @@ class _BusMapScreenState extends State<BusMapScreen>
           ),
         if (_selectedStops.isNotEmpty)
           MarkerLayer(
+            rotate: true,
             markers: [
               for (final stop in _selectedStops)
                 if (toLatLngIfValid(stop.lat, stop.lon) case final point?)
@@ -1331,6 +1373,7 @@ class _BusMapScreenState extends State<BusMapScreen>
           ),
         if (drawSet.clusters.isNotEmpty)
           MarkerLayer(
+            rotate: true,
             markers: [
               for (final cluster in drawSet.clusters)
                 Marker(
@@ -1351,6 +1394,7 @@ class _BusMapScreenState extends State<BusMapScreen>
           valueListenable: _animationTick,
           builder: (context, _, _) => MarkerLayer(
             key: const ValueKey('bus-map-moving-marker-layer'),
+            rotate: true,
             markers: _osmBusMarkers(buses, DateTime.now()),
           ),
         ),
@@ -1453,7 +1497,7 @@ class _BusMapScreenState extends State<BusMapScreen>
 
   Widget _buildGoogleMap(ThemeData theme, _BusMapDrawSet drawSet) {
     final now = DateTime.now();
-    _ensureGoogleIcons(theme, drawSet, now);
+    _ensureGoogleIcons(theme, drawSet);
     final geometry = _selectedGeometry;
     final center = _providerCenter(_provider);
 
@@ -1465,7 +1509,8 @@ class _BusMapScreenState extends State<BusMapScreen>
       mapType: gmaps.MapType.normal,
       style: googleMapStyleForBrightness(theme.brightness),
       gestureRecognizers: buildGoogleMapGestureRecognizers(),
-      rotateGesturesEnabled: false,
+      // [MapCompass] stands in, where the status chips leave it room.
+      compassEnabled: false,
       myLocationButtonEnabled: false,
       mapToolbarEnabled: false,
       zoomControlsEnabled: false,
@@ -1481,6 +1526,7 @@ class _BusMapScreenState extends State<BusMapScreen>
       markers: _buildGoogleMarkers(theme, drawSet, now),
       onMapCreated: (controller) {
         _googleMapController = controller;
+        _mapBearing.resetForNewMap();
         unawaited(_syncGoogleViewport());
       },
       onTap: (_) {
@@ -1488,7 +1534,10 @@ class _BusMapScreenState extends State<BusMapScreen>
           _clearSelection();
         }
       },
-      onCameraMove: (position) => _zoom = position.zoom,
+      onCameraMove: (position) {
+        _zoom = position.zoom;
+        _mapBearing.followGoogleMap(position);
+      },
       onCameraIdle: () {
         if (_isMovingCameraProgrammatically) {
           return;
@@ -1611,27 +1660,27 @@ class _BusMapScreenState extends State<BusMapScreen>
     ).devicePixelRatio.clamp(1.0, 3.0).toDouble();
     for (final bus in buses) {
       final selected = bus.stateKey == _selectedBusKey;
-      final key = googleBusIconKey(
-        color: _colorFor(bus),
-        selected: selected,
-        pixelRatio: pixelRatio,
-        heading: _headingFor(bus, now),
-      );
-      final icon = _googleBusIcons[key];
+      final color = _colorFor(bus);
+      final position = toGoogleLatLng(_pointFor(bus, now));
+      final icon =
+          _googleBusIcons[googleBusIconKey(
+            color: color,
+            selected: selected,
+            pixelRatio: pixelRatio,
+          )];
       markers.add(
         gmaps.Marker(
           markerId: gmaps.MarkerId('bus:${bus.stateKey}'),
-          position: toGoogleLatLng(_pointFor(bus, now)),
+          position: position,
           consumeTapEvents: true,
           // Dimming with alpha rather than a second set of rasterised icons
           // keeps the bitmap cache to one entry per colour.
           alpha: _opacityFor(bus),
-          flat: true,
           anchor: icon == null ? const Offset(0.5, 1) : const Offset(0.5, 0.5),
           icon:
               icon ??
               gmaps.BitmapDescriptor.defaultMarkerWithHue(
-                googleMarkerHueForColor(_colorFor(bus)),
+                googleMarkerHueForColor(color),
               ),
           infoWindow: gmaps.InfoWindow(
             title: _localeNameFor(bus),
@@ -1641,15 +1690,37 @@ class _BusMapScreenState extends State<BusMapScreen>
           onTap: () => _selectBus(bus.stateKey),
         ),
       );
+      final pointer =
+          _googleBusIcons[googleBusHeadingIconKey(
+            color: color,
+            selected: selected,
+            pixelRatio: pixelRatio,
+          )];
+      // The pointer orbits the badge, so it waits for the badge's bitmap
+      // rather than circling the fallback pin.
+      if (icon != null && pointer != null) {
+        markers.add(
+          gmaps.Marker(
+            markerId: gmaps.MarkerId('bus-heading:${bus.stateKey}'),
+            position: position,
+            consumeTapEvents: true,
+            alpha: _opacityFor(bus),
+            // Flat, so the map keeps it pointing along the street however
+            // the camera turns.
+            flat: true,
+            rotation: normalizeMarkerHeading(_headingFor(bus, now)),
+            anchor: const Offset(0.5, 0.5),
+            icon: pointer,
+            zIndexInt: selected ? 3 : 2,
+            onTap: () => _selectBus(bus.stateKey),
+          ),
+        );
+      }
     }
     return markers;
   }
 
-  void _ensureGoogleIcons(
-    ThemeData theme,
-    _BusMapDrawSet drawSet,
-    DateTime now,
-  ) {
+  void _ensureGoogleIcons(ThemeData theme, _BusMapDrawSet drawSet) {
     final pixelRatio = MediaQuery.of(
       context,
     ).devicePixelRatio.clamp(1.0, 3.0).toDouble();
@@ -1675,27 +1746,35 @@ class _BusMapScreenState extends State<BusMapScreen>
     final buses = drawSet.buses;
     final requests = <GoogleBusIconRequest>[];
     for (final bus in buses) {
+      final color = _colorFor(bus);
       for (final selected in <bool>[false, bus.stateKey == _selectedBusKey]) {
-        final key = googleBusIconKey(
-          color: _colorFor(bus),
-          selected: selected,
-          pixelRatio: pixelRatio,
-          heading: _headingFor(bus, now),
-        );
-        if (_googleBusIcons.containsKey(key) ||
-            _pendingGoogleBusIconKeys.contains(key)) {
-          continue;
+        for (final headingPointer in const <bool>[false, true]) {
+          final key = headingPointer
+              ? googleBusHeadingIconKey(
+                  color: color,
+                  selected: selected,
+                  pixelRatio: pixelRatio,
+                )
+              : googleBusIconKey(
+                  color: color,
+                  selected: selected,
+                  pixelRatio: pixelRatio,
+                );
+          if (_googleBusIcons.containsKey(key) ||
+              _pendingGoogleBusIconKeys.contains(key)) {
+            continue;
+          }
+          _pendingGoogleBusIconKeys.add(key);
+          requests.add(
+            GoogleBusIconRequest(
+              key: key,
+              color: color,
+              selected: selected,
+              pixelRatio: pixelRatio,
+              headingPointer: headingPointer,
+            ),
+          );
         }
-        _pendingGoogleBusIconKeys.add(key);
-        requests.add(
-          GoogleBusIconRequest(
-            key: key,
-            color: _colorFor(bus),
-            selected: selected,
-            pixelRatio: pixelRatio,
-            heading: _headingFor(bus, now),
-          ),
-        );
       }
     }
     if (requests.isNotEmpty) {

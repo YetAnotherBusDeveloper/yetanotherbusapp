@@ -6,8 +6,10 @@ import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:latlong2/latlong.dart';
 
 import '../app/bus_app.dart';
+import '../core/app_motion.dart';
 import '../core/transit_name.dart';
 import '../l10n/app_localizations.dart';
+import 'map_compass.dart';
 import 'platform_map_provider.dart';
 import 'transit_station_name.dart';
 
@@ -63,12 +65,13 @@ class TransitStationMap extends StatefulWidget {
 }
 
 class _TransitStationMapState extends State<TransitStationMap>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const _pointZoom = 16.0;
   static const _cameraAnimationDuration = Duration(milliseconds: 320);
 
   final MapController _mapController = MapController();
   late final AnimationController _osmCameraAnimation;
+  late final MapBearing _mapBearing;
   gmaps.GoogleMapController? _googleMapController;
   bool? _lastUseGoogleMapsPointProvider;
   bool _osmMapReady = false;
@@ -90,6 +93,7 @@ class _TransitStationMapState extends State<TransitStationMap>
     _osmCameraAnimation
       ..removeListener(_animateOsmCamera)
       ..dispose();
+    _mapBearing.dispose();
     _googleMapController?.dispose();
     super.dispose();
   }
@@ -101,6 +105,7 @@ class _TransitStationMapState extends State<TransitStationMap>
       vsync: this,
       duration: _cameraAnimationDuration,
     )..addListener(_animateOsmCamera);
+    _mapBearing = MapBearing(vsync: this);
     _fitCamera();
   }
 
@@ -242,6 +247,21 @@ class _TransitStationMapState extends State<TransitStationMap>
     }
   }
 
+  void _turnMapNorth() {
+    if (!_useGoogleMapsPointProvider) {
+      _mapBearing.turnFlutterMapNorth(
+        _mapController,
+        duration: AppMotion.duration(context),
+      );
+      return;
+    }
+    final googleController = _googleMapController;
+    final northUp = _mapBearing.googleNorthUp;
+    if (googleController != null && northUp != null) {
+      googleController.animateCamera(northUp);
+    }
+  }
+
   TransitMapPoint? get _selectedPoint {
     final selectedPointId = widget.selectedPointId;
     if (selectedPointId == null) {
@@ -294,7 +314,9 @@ class _TransitStationMapState extends State<TransitStationMap>
                 mapType: gmaps.MapType.normal,
                 style: googleMapStyleForBrightness(theme.brightness),
                 gestureRecognizers: buildGoogleMapGestureRecognizers(),
-                rotateGesturesEnabled: false,
+                // [MapCompass] stands in, in the same corner as on
+                // flutter_map.
+                compassEnabled: false,
                 scrollGesturesEnabled: true,
                 zoomGesturesEnabled: true,
                 myLocationButtonEnabled: false,
@@ -303,8 +325,10 @@ class _TransitStationMapState extends State<TransitStationMap>
                 markers: _buildGoogleMarkers(theme),
                 onMapCreated: (controller) {
                   _googleMapController = controller;
+                  _mapBearing.resetForNewMap();
                   _fitCamera();
                 },
+                onCameraMove: _mapBearing.followGoogleMap,
               )
             else
               FlutterMap(
@@ -314,11 +338,11 @@ class _TransitStationMapState extends State<TransitStationMap>
                   initialZoom: 7.2,
                   onMapReady: () {
                     _osmMapReady = true;
+                    _mapBearing.resetForNewMap();
                     _fitCamera();
                   },
-                  interactionOptions: const InteractionOptions(
-                    flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                  ),
+                  onMapEvent: _mapBearing.followFlutterMap,
+                  interactionOptions: mapInteractionOptions,
                 ),
                 children: [
                   TileLayer(
@@ -327,6 +351,9 @@ class _TransitStationMapState extends State<TransitStationMap>
                     tileBuilder: mapTileBuilder(theme.brightness),
                   ),
                   MarkerLayer(
+                    // Counter-rotates the markers, keeping them upright when
+                    // the map is turned.
+                    rotate: true,
                     // Render the selected label last so nearby point dots
                     // cannot overlap its text.
                     markers: orderedPoints
@@ -352,6 +379,11 @@ class _TransitStationMapState extends State<TransitStationMap>
                   mapTileAttribution(alignment: Alignment.bottomLeft),
                 ],
               ),
+            Positioned(
+              top: 12,
+              right: 12,
+              child: MapCompass(bearing: _mapBearing, onPressed: _turnMapNorth),
+            ),
             Positioned(
               right: 12,
               bottom: 12,

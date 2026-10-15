@@ -118,6 +118,7 @@
   "refreshNearbyStops": "重整附近站牌",
   "nearbyNoStopsToDisplay": "附近暫時沒有可顯示的站牌。",
   "mapNoLocations": "目前沒有可顯示的站點位置。",
+  "mapCompassResetNorth": "地圖轉回正北",
   "locationServicesDisabled": "定位服務尚未開啓。",
   "locationPermissionDenied": "沒有取得定位權限。",
   "searchTitle": "搜尋路線或站牌",

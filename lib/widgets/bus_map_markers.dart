@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart' show MapCamera;
+
 import '../core/app_motion.dart';
 import '../l10n/app_localizations.dart';
 
@@ -11,6 +13,10 @@ import '../l10n/app_localizations.dart';
 /// Google Maps takes bitmaps rather than widgets, so every marker exists twice:
 /// as a Flutter widget for `flutter_map`, and as a rasterised PNG for the
 /// platform view. Lifted verbatim from `route_bus_map_sheet.dart`.
+
+/// Black or white, whichever reads better on a bus badge of [color].
+Color _busMarkerForeground(Color color) =>
+    color.computeLuminance() > 0.45 ? Colors.black87 : Colors.white;
 
 class BusMapBusMarker extends StatelessWidget {
   const BusMapBusMarker({
@@ -28,9 +34,7 @@ class BusMapBusMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = color.computeLuminance() > 0.45
-        ? Colors.black87
-        : Colors.white;
+    final foreground = _busMarkerForeground(color);
     final markerSize = selected ? 64.0 : 56.0;
     final circleSize = selected ? 40.0 : 34.0;
     return Tooltip(
@@ -95,16 +99,38 @@ class BusMapHeadingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final normalizedHeading = normalizeMarkerHeading(heading);
     return SizedBox.square(
       dimension: orbitDiameter,
-      child: Transform.rotate(
-        angle: normalizedHeading * math.pi / 180,
+      child: _MapAlignedRotation(
+        heading: heading,
         child: Align(
           alignment: Alignment.topCenter,
           child: Icon(Icons.navigation_rounded, color: color, size: size),
         ),
       ),
+    );
+  }
+}
+
+/// Turns [child] to [heading], counted from north on the map underneath.
+///
+/// Markers are kept upright on a rotated flutter_map, so a bare heading would
+/// point along the screen rather than the street. Only this transform reads
+/// the camera, which keeps the rebuild on every camera frame to one widget.
+class _MapAlignedRotation extends StatelessWidget {
+  const _MapAlignedRotation({required this.heading, required this.child});
+
+  final double heading;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    // flutter_map turns its content clockwise by `rotation`; outside a map
+    // there is nothing to follow.
+    final mapRotation = MapCamera.maybeOf(context)?.rotation ?? 0;
+    return Transform.rotate(
+      angle: normalizeMarkerHeading(heading + mapRotation) * math.pi / 180,
+      child: child,
     );
   }
 }
@@ -142,20 +168,28 @@ class BusMapUserLocationMarker extends StatelessWidget {
   }
 }
 
+/// One bitmap for a Google Maps bus marker.
+///
+/// Google Maps can turn a flat marker with the map but cannot keep part of a
+/// bitmap upright, so each bus is two markers sharing one anchor: an upright
+/// badge, and a flat [headingPointer] the map itself keeps pointed along the
+/// street via `Marker.rotation`.
 class GoogleBusIconRequest {
-  GoogleBusIconRequest({
+  const GoogleBusIconRequest({
     required this.key,
     required this.color,
     required this.selected,
     required this.pixelRatio,
-    required double heading,
-  }) : heading = quantizeGoogleBusHeading(heading);
+    this.headingPointer = false,
+  });
 
   final String key;
   final Color color;
   final bool selected;
   final double pixelRatio;
-  final double heading;
+
+  /// Draws only the heading pointer, aimed north, instead of the badge.
+  final bool headingPointer;
 
   double get logicalSize => selected ? 64 : 56;
 
@@ -184,20 +218,27 @@ String googleBusIconKey({
   required Color color,
   required bool selected,
   required double pixelRatio,
-  required double heading,
 }) {
   return [
     color.toARGB32().toRadixString(16),
     selected ? 'selected' : 'normal',
     pixelRatio.toStringAsFixed(2),
-    quantizeGoogleBusHeading(heading).toStringAsFixed(0),
   ].join('|');
 }
 
-double quantizeGoogleBusHeading(double heading) {
-  const step = 15.0;
-  final quantized = (normalizeMarkerHeading(heading) / step).round() * step;
-  return quantized >= 360 ? 0 : quantized;
+/// The pointer is drawn in the badge's foreground, so buses of every dark
+/// colour share one bitmap, and every light colour another.
+String googleBusHeadingIconKey({
+  required Color color,
+  required bool selected,
+  required double pixelRatio,
+}) {
+  return [
+    'heading',
+    _busMarkerForeground(color).toARGB32().toRadixString(16),
+    selected ? 'selected' : 'normal',
+    pixelRatio.toStringAsFixed(2),
+  ].join('|');
 }
 
 /// Identifies reusable stationary markers for one rendered map state.
@@ -231,9 +272,29 @@ Future<Uint8List> drawGoogleBusIcon(GoogleBusIconRequest request) async {
   final canvas = ui.Canvas(recorder)
     ..scale(request.pixelRatio, request.pixelRatio);
   final center = ui.Offset(request.logicalSize / 2, request.logicalSize / 2);
-  final foreground = request.color.computeLuminance() > 0.45
-      ? Colors.black87
-      : Colors.white;
+  final foreground = _busMarkerForeground(request.color);
+
+  if (request.headingPointer) {
+    // Same canvas as the badge, so the pointer orbits it from the shared
+    // anchor at the centre.
+    final pointerBaseY = center.dy - request.radius - 1;
+    final pointer = ui.Path()
+      ..moveTo(center.dx, pointerBaseY - 9)
+      ..lineTo(center.dx + 5, pointerBaseY)
+      ..lineTo(center.dx, pointerBaseY - 2)
+      ..lineTo(center.dx - 5, pointerBaseY)
+      ..close();
+    canvas.drawPath(
+      pointer,
+      ui.Paint()
+        ..style = ui.PaintingStyle.stroke
+        ..strokeJoin = ui.StrokeJoin.round
+        ..strokeWidth = 2.5
+        ..color = Colors.white,
+    );
+    canvas.drawPath(pointer, ui.Paint()..color = foreground);
+    return _encodeGoogleIcon(recorder, pixelSize);
+  }
 
   canvas.drawCircle(
     center.translate(0, 1.5),
@@ -252,28 +313,6 @@ Future<Uint8List> drawGoogleBusIcon(GoogleBusIconRequest request) async {
       ..color = Colors.white,
   );
 
-  final pointerBaseY = center.dy - request.radius - 1;
-  final pointer = ui.Path()
-    ..moveTo(center.dx, pointerBaseY - 9)
-    ..lineTo(center.dx + 5, pointerBaseY)
-    ..lineTo(center.dx, pointerBaseY - 2)
-    ..lineTo(center.dx - 5, pointerBaseY)
-    ..close();
-  canvas.save();
-  canvas.translate(center.dx, center.dy);
-  canvas.rotate(request.heading * math.pi / 180);
-  canvas.translate(-center.dx, -center.dy);
-  canvas.drawPath(
-    pointer,
-    ui.Paint()
-      ..style = ui.PaintingStyle.stroke
-      ..strokeJoin = ui.StrokeJoin.round
-      ..strokeWidth = 2.5
-      ..color = Colors.white,
-  );
-  canvas.drawPath(pointer, ui.Paint()..color = foreground);
-  canvas.restore();
-
   final busIconPainter = TextPainter(
     text: TextSpan(
       text: String.fromCharCode(Icons.directions_bus_rounded.codePoint),
@@ -291,6 +330,13 @@ Future<Uint8List> drawGoogleBusIcon(GoogleBusIconRequest request) async {
     center - ui.Offset(busIconPainter.width / 2, busIconPainter.height / 2),
   );
 
+  return _encodeGoogleIcon(recorder, pixelSize);
+}
+
+Future<Uint8List> _encodeGoogleIcon(
+  ui.PictureRecorder recorder,
+  int pixelSize,
+) async {
   final picture = recorder.endRecording();
   final image = await picture.toImage(pixelSize, pixelSize);
   final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
