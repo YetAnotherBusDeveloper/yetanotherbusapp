@@ -118,7 +118,7 @@ void main() {
     expect(effectiveStopEtaSeconds(stop, now: now), 55);
   });
 
-  test('effective stop eta expires stale timestamps including arrivals', () {
+  test('effective stop eta freezes stale timestamps including arrivals', () {
     final now = DateTime(2026, 6, 9, 8, 0);
     final stop = StopInfo(
       routeKey: 1,
@@ -132,8 +132,8 @@ void main() {
       t: now.subtract(const Duration(minutes: 20)).toIso8601String(),
     );
 
-    expect(effectiveStopEtaSeconds(stop, now: now), isNull);
-    expect(effectiveStopEtaSeconds(stop.copyWith(sec: 0), now: now), isNull);
+    expect(effectiveStopEtaSeconds(stop, now: now), 0);
+    expect(effectiveStopEtaSeconds(stop.copyWith(sec: 0), now: now), 0);
   });
 
   test('server-adjusted ETA uses its calculation time, not source age', () {
@@ -157,7 +157,7 @@ void main() {
     );
     expect(
       effectiveStopEtaSeconds(stop, now: now.add(const Duration(seconds: 56))),
-      isNull,
+      29,
     );
   });
 

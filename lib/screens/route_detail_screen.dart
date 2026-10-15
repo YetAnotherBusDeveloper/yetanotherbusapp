@@ -131,7 +131,6 @@ enum _RouteDetailStatus {
 class _RouteDetailScreenState extends State<RouteDetailScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver, RouteAware {
   static const double _wideLayoutBreakpoint = 1080;
-  static const Duration _maxMergedPreviousLiveAge = maxRealtimeStopAge;
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final _refreshBackoff = RefreshBackoff();
@@ -1021,7 +1020,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     RouteDetailData next,
     RouteDetailData previous,
   ) {
-    final now = DateTime.now();
     final previousStops = <int, StopInfo>{};
     for (final entry in previous.stopsByPath.entries) {
       for (final stop in entry.value) {
@@ -1042,15 +1040,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           return stop;
         }
 
-        final previousUpdatedAt = _parseStopRealtimeUpdatedAt(
-          previousStop.t,
-          now,
-        );
-        if (previousUpdatedAt == null ||
-            now.difference(previousUpdatedAt) > _maxMergedPreviousLiveAge) {
-          return stop;
-        }
-
+        // Keep the last known live data even once it has aged past the stale
+        // window, so the ETA does not blank out while realtime is unavailable.
         return stop.copyWith(
           sec: previousStop.sec,
           msg: previousStop.msg,
@@ -1069,36 +1060,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       hasLiveData: next.hasLiveData,
       familyRouteIds: next.familyRouteIds,
     );
-  }
-
-  DateTime? _parseStopRealtimeUpdatedAt(String? value, DateTime now) {
-    final text = value?.trim();
-    if (text == null || text.isEmpty) {
-      return null;
-    }
-
-    final numericValue = int.tryParse(text);
-    if (numericValue != null) {
-      if (numericValue > 1000000000000) {
-        return DateTime.fromMillisecondsSinceEpoch(
-          numericValue,
-          isUtc: true,
-        ).toLocal();
-      }
-      if (numericValue > 1000000000) {
-        return DateTime.fromMillisecondsSinceEpoch(
-          numericValue * 1000,
-          isUtc: true,
-        ).toLocal();
-      }
-    }
-
-    final parsed = DateTime.tryParse(text)?.toLocal();
-    if (parsed == null ||
-        parsed.isAfter(now.add(const Duration(seconds: 15)))) {
-      return null;
-    }
-    return parsed;
   }
 
   void _syncTabController(RouteDetailData detail) {

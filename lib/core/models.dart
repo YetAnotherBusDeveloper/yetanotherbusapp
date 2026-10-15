@@ -2375,9 +2375,6 @@ int? _effectiveEtaSeconds(
   final sourceTime =
       _parseStopRealtimeUpdatedAt(updatedAtText, now) ??
       _parseStopRealtimeUpdatedAt(referenceAtText, now);
-  if (sourceTime != null && now.difference(sourceTime) > maxRealtimeStopAge) {
-    return null;
-  }
   if (seconds == null || seconds <= 0) {
     return seconds;
   }
@@ -2393,7 +2390,13 @@ int? _effectiveEtaSeconds(
     return seconds;
   }
 
-  return math.max(0, seconds - elapsedSeconds);
+  // Keep counting down only until the realtime data is considered stale, then
+  // freeze at the last believable value rather than blanking the ETA out.
+  final effectiveElapsed = math.min(
+    elapsedSeconds,
+    maxRealtimeStopAge.inSeconds,
+  );
+  return math.max(0, seconds - effectiveElapsed);
 }
 
 int? effectiveStopEtaSeconds(StopInfo stop, {DateTime? now}) {

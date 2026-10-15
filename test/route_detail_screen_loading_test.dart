@@ -584,7 +584,7 @@ void main() {
   });
 
   _screenTest(
-    'failed realtime keeps recent values but drops values older than 90 seconds',
+    'failed realtime keeps the last known values even when older than 90 seconds',
     (tester, repository) async {
       final recent = DateTime.now().subtract(const Duration(seconds: 30));
       repository.topologyRequests.single.complete(_detail());
@@ -624,8 +624,8 @@ void main() {
       latestFamily.completer.complete(latestFamily.selected);
       await _frames(tester);
       stop = tester.widgetList<EtaBadge>(find.byType(EtaBadge)).first.stop;
-      expect(stop.sec, isNull);
-      expect(stop.t, isNull);
+      expect(stop.sec, 120);
+      expect(stop.t, stale.toIso8601String());
     },
   );
 
