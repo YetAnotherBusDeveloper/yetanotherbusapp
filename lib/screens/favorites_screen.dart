@@ -16,6 +16,7 @@ import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 import '../widgets/eta_badge.dart';
 import '../widgets/local_data_gate.dart';
+import '../widgets/route_name_badge.dart';
 import 'favorite_groups_screen.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/cat_state_card.dart';
@@ -646,12 +647,7 @@ class _FavoritesScreenState extends State<_FavoritesView>
       child: Card(
         child: ListTile(
           contentPadding: const EdgeInsets.all(14),
-          leading: CircleAvatar(
-            child: Text(
-              favorite.routeName.characters.take(2).toString(),
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
+          leading: RouteNameBadge(name: favorite.routeName),
           title: Text(
             favorite.routeName,
             style: TextStyle(

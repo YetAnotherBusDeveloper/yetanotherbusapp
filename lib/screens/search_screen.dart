@@ -17,6 +17,7 @@ import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 import '../widgets/background_image_wrapper.dart';
 import '../widgets/cat_state_card.dart';
+import '../widgets/route_name_badge.dart';
 import '../widgets/route_search_keypad.dart';
 import '../widgets/transit_station_name.dart';
 import 'route_detail_navigation.dart';
@@ -1326,20 +1327,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final routeName = item.route.transitName.displayForLocale(locale);
     final matchedStop = item.stopSearch?.matchedStop;
     return ListTile(
-      leading: CircleAvatar(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              item.route.routeName.trim().isEmpty
-                  ? '?'
-                  : item.route.routeName.characters.take(4).toString(),
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-      ),
+      leading: RouteNameBadge(name: item.route.routeName),
       title: matchedStop != null
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
