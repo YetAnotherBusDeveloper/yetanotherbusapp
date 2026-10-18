@@ -141,6 +141,240 @@ abstract class AppLocalizations {
   /// **'Version information, contributors, community and feedback'**
   String get settingsAboutDescription;
 
+  /// No description provided for @languageDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the app language immediately.'**
+  String get languageDescriptionCompact;
+
+  /// No description provided for @themeModeDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Use light, dark or system theme.'**
+  String get themeModeDescriptionCompact;
+
+  /// No description provided for @mapProviderDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Change the base map, keeping the same bus data.'**
+  String get mapProviderDescriptionCompact;
+
+  /// No description provided for @wearSyncCategoryDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose favorites groups to sync to your watch.'**
+  String get wearSyncCategoryDescriptionCompact;
+
+  /// No description provided for @normalUpdateIntervalDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrival refresh interval; shorter uses more battery.'**
+  String get normalUpdateIntervalDescriptionCompact;
+
+  /// No description provided for @retryIntervalDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry after failures; waits at least the normal interval.'**
+  String get retryIntervalDescriptionCompact;
+
+  /// No description provided for @appUpdateManualCheckDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Check the selected channel for a new version.'**
+  String get appUpdateManualCheckDescriptionCompact;
+
+  /// No description provided for @searchHistoryLimitDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep recent routes; 0 clears and disables history.'**
+  String get searchHistoryLimitDescriptionCompact;
+
+  /// No description provided for @clearSearchHistoryDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear recent routes; keep favorites and learning data.'**
+  String get clearSearchHistoryDescriptionCompact;
+
+  /// No description provided for @clearSmartHistoryDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset recommendation learning; keep favorites.'**
+  String get clearSmartHistoryDescriptionCompact;
+
+  /// No description provided for @clearRouteSelectionHistoryDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear route and stop selections; keep route open counts.'**
+  String get clearRouteSelectionHistoryDescriptionCompact;
+
+  /// No description provided for @termsOfServiceDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Read the service rules and terms.'**
+  String get termsOfServiceDescriptionCompact;
+
+  /// No description provided for @privacyPolicyDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Read how location, account and usage data are handled.'**
+  String get privacyPolicyDescriptionCompact;
+
+  /// No description provided for @restartOnboardingDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat first-time setup; keep favorites and preferences.'**
+  String get restartOnboardingDescriptionCompact;
+
+  /// No description provided for @interfaceScaleDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Adjust text and interface size.'**
+  String get interfaceScaleDescriptionCompact;
+
+  /// No description provided for @showWeatherDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Show local weather on Home; tap for the forecast.'**
+  String get showWeatherDescriptionCompact;
+
+  /// No description provided for @personalizationDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Customize colors, AMOLED black mode and backgrounds.'**
+  String get personalizationDescriptionCompact;
+
+  /// No description provided for @wearSyncDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync favorites to your connected watch.'**
+  String get wearSyncDescriptionCompact;
+
+  /// No description provided for @alwaysShowSecondsDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Show seconds when available; arrivals are estimates.'**
+  String get alwaysShowSecondsDescriptionCompact;
+
+  /// No description provided for @hapticFeedbackDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Brief vibrations for supported actions.'**
+  String get hapticFeedbackDescriptionCompact;
+
+  /// No description provided for @smartRecommendationsDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggest routes based on your habits and usual times.'**
+  String get smartRecommendationsDescriptionCompact;
+
+  /// No description provided for @autoFavoriteDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatically add frequent stops to Frequent favorites.'**
+  String get autoFavoriteDescriptionCompact;
+
+  /// No description provided for @smartNotificationDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrival alerts at usual times; needs notifications and background location.'**
+  String get smartNotificationDescriptionCompact;
+
+  /// No description provided for @keepScreenAwakeDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep the screen on while viewing a route.'**
+  String get keepScreenAwakeDescriptionCompact;
+
+  /// No description provided for @backgroundTripDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Trip alerts while locked; needs notifications and location.'**
+  String get backgroundTripDescriptionCompact;
+
+  /// No description provided for @backgroundTripIosDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Trip status while locked; needs notifications and background location.'**
+  String get backgroundTripIosDescriptionCompact;
+
+  /// No description provided for @favoriteWidgetRefreshHelperCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh at least 15 minutes apart; the system may delay it.'**
+  String get favoriteWidgetRefreshHelperCompact;
+
+  /// No description provided for @updateChannelDeveloperDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Self-built version; update checks are disabled.'**
+  String get updateChannelDeveloperDescriptionCompact;
+
+  /// No description provided for @updateChannelNightlyDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Get new features earlier; may be less stable.'**
+  String get updateChannelNightlyDescriptionCompact;
+
+  /// No description provided for @updateChannelReleaseDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Receive published release updates only.'**
+  String get updateChannelReleaseDescriptionCompact;
+
+  /// No description provided for @updateCheckOffDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip startup checks; check manually instead.'**
+  String get updateCheckOffDescriptionCompact;
+
+  /// No description provided for @updateCheckNotifyDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Check at startup and notify about updates.'**
+  String get updateCheckNotifyDescriptionCompact;
+
+  /// No description provided for @updateCheckPopupDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Check at startup and open the update dialog if available.'**
+  String get updateCheckPopupDescriptionCompact;
+
+  /// No description provided for @personalizationBackgroundImageDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Set page backgrounds; Home applies to all transit home tabs.'**
+  String get personalizationBackgroundImageDescriptionCompact;
+
+  /// No description provided for @personalizationColorSourceDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto uses background colors; System uses device colors.'**
+  String get personalizationColorSourceDescriptionCompact;
+
+  /// No description provided for @personalizationGlobalHomeDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply to all transit home tabs.'**
+  String get personalizationGlobalHomeDescriptionCompact;
+
+  /// No description provided for @adsDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Show ads to support development.'**
+  String get adsDescriptionCompact;
+
+  /// No description provided for @adsLockedDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Too many toggles; ads are locked on.'**
+  String get adsLockedDescriptionCompact;
+
+  /// No description provided for @adDensityDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Higher levels show more ads.'**
+  String get adDensityDescriptionCompact;
+
   /// No description provided for @settingsTitle.
   ///
   /// In en, this message translates to:
@@ -306,7 +540,7 @@ abstract class AppLocalizations {
   /// No description provided for @compactModeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Reduce supporting descriptions on the home screen and some cards to keep common actions together. Turn it off for fuller explanations. The desktop home screen always uses a compact layout.'**
+  /// **'Shorter descriptions and a simpler layout.'**
   String get compactModeDescription;
 
   /// No description provided for @showWeatherTitle.

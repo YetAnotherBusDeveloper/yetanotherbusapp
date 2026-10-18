@@ -254,7 +254,9 @@ class PersonalizationScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        l10n.personalizationBackgroundImageDescription,
+                        settings.enableCompactMode
+                            ? l10n.personalizationBackgroundImageDescriptionCompact
+                            : l10n.personalizationBackgroundImageDescription,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
@@ -437,7 +439,9 @@ class PersonalizationScreen extends StatelessWidget {
           builder: (context, _) {
             final settings = controller.settings;
             return AlertDialog(
-              title: Text(AppLocalizations.of(context).personalizationColorScheme),
+              title: Text(
+                AppLocalizations.of(context).personalizationColorScheme,
+              ),
               content: SizedBox(
                 width: 420,
                 child: SingleChildScrollView(
@@ -446,9 +450,13 @@ class PersonalizationScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        AppLocalizations.of(
-                          context,
-                        ).personalizationColorSourceDescription,
+                        settings.enableCompactMode
+                            ? AppLocalizations.of(
+                                context,
+                              ).personalizationColorSourceDescriptionCompact
+                            : AppLocalizations.of(
+                                context,
+                              ).personalizationColorSourceDescription,
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 12),
@@ -779,7 +787,9 @@ class _PerPageBackgroundScreen extends StatelessWidget {
                           pageKey: pageKey,
                           label: _localizedPageLabel(l10n, pageKey),
                           subtitle: pageKey == 'bus'
-                              ? l10n.personalizationGlobalHomeDescription
+                              ? settings.enableCompactMode
+                                    ? l10n.personalizationGlobalHomeDescriptionCompact
+                                    : l10n.personalizationGlobalHomeDescription
                               : null,
                           icon: _pageIcons[pageKey]!,
                           imagePath: settings.pageBackgroundImagePaths[pageKey],
@@ -945,7 +955,8 @@ class _HomeAppearancePreview extends StatelessWidget {
                           _HomePreviewFeatureCard(
                             icon: Icons.search_rounded,
                             title: l10n.homeSearchTitle,
-                            subtitle: l10n.personalizationPreviewSearchDescription,
+                            subtitle:
+                                l10n.personalizationPreviewSearchDescription,
                             cardColor: cardColor,
                             lineColor: lineColor,
                           ),
@@ -953,7 +964,8 @@ class _HomeAppearancePreview extends StatelessWidget {
                           _HomePreviewFeatureCard(
                             icon: Icons.favorite_outline_rounded,
                             title: l10n.homeFavoritesTitle,
-                            subtitle: l10n.personalizationPreviewFavoritesDescription,
+                            subtitle:
+                                l10n.personalizationPreviewFavoritesDescription,
                             cardColor: cardColor,
                             lineColor: lineColor,
                           ),
@@ -1079,10 +1091,7 @@ class _BackgroundPreviewCarousel extends StatelessWidget {
           final entry = entries[index];
           return _PreviewPageCard(
             pageKey: entry.key,
-            label: _localizedPageLabel(
-              AppLocalizations.of(context),
-              entry.key,
-            ),
+            label: _localizedPageLabel(AppLocalizations.of(context), entry.key),
             imagePath: entry.value,
             imageOpacity: opacities[entry.key] ?? 0.25,
           );

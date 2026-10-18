@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
+import '../l10n/app_localizations.dart';
 
 class AdDensitySetting extends StatelessWidget {
   const AdDensitySetting({super.key});
@@ -31,23 +32,25 @@ class AdDensitySetting extends StatelessWidget {
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('廣告濃度'),
-            subtitle: Text.rich(
-              TextSpan(
-                children: [
-                  WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Image.asset(
-                      _assets[density - 1],
-                      width: 20,
-                      height: 20,
-                      fit: BoxFit.contain,
-                      excludeFromSemantics: true,
+            subtitle: settings.enableCompactMode
+                ? Text(AppLocalizations.of(context).adDensityDescriptionCompact)
+                : Text.rich(
+                    TextSpan(
+                      children: [
+                        WidgetSpan(
+                          alignment: PlaceholderAlignment.middle,
+                          child: Image.asset(
+                            _assets[density - 1],
+                            width: 20,
+                            height: 20,
+                            fit: BoxFit.contain,
+                            excludeFromSemantics: true,
+                          ),
+                        ),
+                        TextSpan(text: ' ${_messages[density - 1]}'),
+                      ],
                     ),
                   ),
-                  TextSpan(text: ' ${_messages[density - 1]}'),
-                ],
-              ),
-            ),
           ),
           const SizedBox(height: 8),
           SegmentedButton<int>(
