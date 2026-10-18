@@ -145,8 +145,11 @@ void main() {
       expect(find.byType(ReorderableListView), findsOneWidget);
       expect(_routeNamesIn(controller, 'Routes'), ['A路線', 'B路線', 'C路線']);
 
-      final start = tester.getCenter(find.text('A路線'));
-      final delta = tester.getCenter(find.text('B路線')).dy - start.dy;
+      // The name shows on both the badge and the title, so each tile matches
+      // once per text; every match is the same tile.
+      Finder tile(String name) => find.widgetWithText(ListTile, name).first;
+      final start = tester.getCenter(tile('A路線'));
+      final delta = tester.getCenter(tile('B路線')).dy - start.dy;
 
       final gesture = await tester.startGesture(start);
       // Hold past the long-press threshold so the delayed drag recognizer wins.
