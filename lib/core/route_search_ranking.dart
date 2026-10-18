@@ -181,7 +181,7 @@ String _displayRouteName(RouteSummary route) {
   if (officialRouteName.isNotEmpty) {
     return officialRouteName;
   }
-  return route.routeId.trim();
+  return '';
 }
 
 String _normalizeRouteSearchText(String value) {
