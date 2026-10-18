@@ -357,23 +357,47 @@ abstract class AppLocalizations {
   /// **'Apply to all transit home tabs.'**
   String get personalizationGlobalHomeDescriptionCompact;
 
-  /// No description provided for @adsDescriptionCompact.
+  /// No description provided for @adsEnabledDescriptionCompact.
   ///
   /// In en, this message translates to:
-  /// **'Show ads to support development.'**
-  String get adsDescriptionCompact;
+  /// **'Ads are on. Thanks for supporting development.'**
+  String get adsEnabledDescriptionCompact;
 
-  /// No description provided for @adsLockedDescriptionCompact.
+  /// No description provided for @adsLockedMessageCompact.
   ///
   /// In en, this message translates to:
   /// **'Too many toggles; ads are locked on.'**
-  String get adsLockedDescriptionCompact;
+  String get adsLockedMessageCompact;
 
-  /// No description provided for @adDensityDescriptionCompact.
+  /// No description provided for @adDensityLevelHint.
   ///
   /// In en, this message translates to:
   /// **'Higher levels show more ads.'**
-  String get adDensityDescriptionCompact;
+  String get adDensityLevelHint;
+
+  /// No description provided for @adsDisabledStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Ads are off.'**
+  String get adsDisabledStatus;
+
+  /// No description provided for @personalizationAmoledDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a black background in dark mode.'**
+  String get personalizationAmoledDescriptionCompact;
+
+  /// No description provided for @personalizationHomeGradientDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Adjust the Home gradient opacity.'**
+  String get personalizationHomeGradientDescriptionCompact;
+
+  /// No description provided for @personalizationPerPageDescriptionCompact.
+  ///
+  /// In en, this message translates to:
+  /// **'Set a background for each page.'**
+  String get personalizationPerPageDescriptionCompact;
 
   /// No description provided for @settingsTitle.
   ///
@@ -540,7 +564,7 @@ abstract class AppLocalizations {
   /// No description provided for @compactModeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Shorter descriptions and a simpler layout.'**
+  /// **'Turn off for full descriptions. Desktop Home stays compact.'**
   String get compactModeDescription;
 
   /// No description provided for @showWeatherTitle.

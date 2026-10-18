@@ -33,7 +33,7 @@ class AdDensitySetting extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             title: const Text('廣告濃度'),
             subtitle: settings.enableCompactMode
-                ? Text(AppLocalizations.of(context).adDensityDescriptionCompact)
+                ? Text(AppLocalizations.of(context).adDensityLevelHint)
                 : Text.rich(
                     TextSpan(
                       children: [

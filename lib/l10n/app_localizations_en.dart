@@ -178,14 +178,29 @@ class AppLocalizationsEn extends AppLocalizations {
       'Apply to all transit home tabs.';
 
   @override
-  String get adsDescriptionCompact => 'Show ads to support development.';
+  String get adsEnabledDescriptionCompact =>
+      'Ads are on. Thanks for supporting development.';
 
   @override
-  String get adsLockedDescriptionCompact =>
-      'Too many toggles; ads are locked on.';
+  String get adsLockedMessageCompact => 'Too many toggles; ads are locked on.';
 
   @override
-  String get adDensityDescriptionCompact => 'Higher levels show more ads.';
+  String get adDensityLevelHint => 'Higher levels show more ads.';
+
+  @override
+  String get adsDisabledStatus => 'Ads are off.';
+
+  @override
+  String get personalizationAmoledDescriptionCompact =>
+      'Use a black background in dark mode.';
+
+  @override
+  String get personalizationHomeGradientDescriptionCompact =>
+      'Adjust the Home gradient opacity.';
+
+  @override
+  String get personalizationPerPageDescriptionCompact =>
+      'Set a background for each page.';
 
   @override
   String get settingsTitle => 'Settings';
@@ -287,7 +302,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get compactModeDescription =>
-      'Shorter descriptions and a simpler layout.';
+      'Turn off for full descriptions. Desktop Home stays compact.';
 
   @override
   String get showWeatherTitle => 'Show weather';

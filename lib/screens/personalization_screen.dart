@@ -195,7 +195,11 @@ class PersonalizationScreen extends StatelessWidget {
                         contentPadding: EdgeInsets.zero,
                         secondary: const Icon(Icons.dark_mode_outlined),
                         title: Text(l10n.personalizationAmoledTitle),
-                        subtitle: Text(l10n.personalizationAmoledDescription),
+                        subtitle: Text(
+                          settings.enableCompactMode
+                              ? l10n.personalizationAmoledDescriptionCompact
+                              : l10n.personalizationAmoledDescription,
+                        ),
                         value: isAmoled,
                         onChanged: !isDark
                             ? null
@@ -222,7 +226,9 @@ class PersonalizationScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        l10n.personalizationHomeGradientDescription,
+                        settings.enableCompactMode
+                            ? l10n.personalizationHomeGradientDescriptionCompact
+                            : l10n.personalizationHomeGradientDescription,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
@@ -334,7 +340,9 @@ class PersonalizationScreen extends StatelessWidget {
                                   l10n.personalizationPerPageSettings,
                                 ),
                                 subtitle: Text(
-                                  l10n.personalizationPerPageDescription,
+                                  settings.enableCompactMode
+                                      ? l10n.personalizationPerPageDescriptionCompact
+                                      : l10n.personalizationPerPageDescription,
                                 ),
                                 trailing: const Icon(Icons.chevron_right),
                                 onTap: () {
@@ -439,9 +447,7 @@ class PersonalizationScreen extends StatelessWidget {
           builder: (context, _) {
             final settings = controller.settings;
             return AlertDialog(
-              title: Text(
-                AppLocalizations.of(context).personalizationColorScheme,
-              ),
+              title: Text(AppLocalizations.of(context).personalizationColorScheme),
               content: SizedBox(
                 width: 420,
                 child: SingleChildScrollView(
@@ -955,8 +961,7 @@ class _HomeAppearancePreview extends StatelessWidget {
                           _HomePreviewFeatureCard(
                             icon: Icons.search_rounded,
                             title: l10n.homeSearchTitle,
-                            subtitle:
-                                l10n.personalizationPreviewSearchDescription,
+                            subtitle: l10n.personalizationPreviewSearchDescription,
                             cardColor: cardColor,
                             lineColor: lineColor,
                           ),
@@ -964,8 +969,7 @@ class _HomeAppearancePreview extends StatelessWidget {
                           _HomePreviewFeatureCard(
                             icon: Icons.favorite_outline_rounded,
                             title: l10n.homeFavoritesTitle,
-                            subtitle:
-                                l10n.personalizationPreviewFavoritesDescription,
+                            subtitle: l10n.personalizationPreviewFavoritesDescription,
                             cardColor: cardColor,
                             lineColor: lineColor,
                           ),
@@ -1091,7 +1095,10 @@ class _BackgroundPreviewCarousel extends StatelessWidget {
           final entry = entries[index];
           return _PreviewPageCard(
             pageKey: entry.key,
-            label: _localizedPageLabel(AppLocalizations.of(context), entry.key),
+            label: _localizedPageLabel(
+              AppLocalizations.of(context),
+              entry.key,
+            ),
             imagePath: entry.value,
             imageOpacity: opacities[entry.key] ?? 0.25,
           );

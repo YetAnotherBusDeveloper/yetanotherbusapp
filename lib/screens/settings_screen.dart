@@ -400,13 +400,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: l10n.databaseDownloadsTitle,
           description: [
             l10n.databaseCurrentRegion(controller.settings.provider.label),
-            if (!_compactMode)
-              l10n.databaseStartupUpdate(
-                localizedDatabaseAutoUpdateMode(
-                  l10n,
-                  controller.settings.databaseAutoUpdateMode,
-                ),
+            l10n.databaseStartupUpdate(
+              localizedDatabaseAutoUpdateMode(
+                l10n,
+                controller.settings.databaseAutoUpdateMode,
               ),
+            ),
             if (controller.hasPendingDatabaseUpdates)
               l10n.databasePendingRegions(
                 controller.pendingDatabaseUpdates.length,
@@ -929,8 +928,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: _compactMode
                     ? Text(
                         _adToggleLocked
-                            ? l10n.adsLockedDescriptionCompact
-                            : l10n.adsDescriptionCompact,
+                            ? l10n.adsLockedMessageCompact
+                            : controller.settings.enableAds
+                            ? l10n.adsEnabledDescriptionCompact
+                            : l10n.adsDisabledStatus,
                       )
                     : _adToggleLocked
                     ? Text.rich(

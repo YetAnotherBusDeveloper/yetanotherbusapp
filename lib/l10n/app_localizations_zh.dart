@@ -42,7 +42,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get wearSyncCategoryDescriptionCompact => '選擇同步至手錶的最愛分類。';
 
   @override
-  String get normalUpdateIntervalDescriptionCompact => '到站資訊刷新間隔；越短越耗電。';
+  String get normalUpdateIntervalDescriptionCompact => '到站資訊更新間隔；越短越耗電。';
 
   @override
   String get retryIntervalDescriptionCompact => '失敗後重試；實際不短於一般更新間隔。';
@@ -102,10 +102,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get keepScreenAwakeDescriptionCompact => '查看路線時保持螢幕亮起。';
 
   @override
-  String get backgroundTripDescriptionCompact => '鎖屏繼續乘車提醒，需通知與定位權限。';
+  String get backgroundTripDescriptionCompact => '鎖定螢幕後仍有乘車提醒，需通知與定位權限。';
 
   @override
-  String get backgroundTripIosDescriptionCompact => '鎖屏顯示乘車狀態，需通知與背景定位。';
+  String get backgroundTripIosDescriptionCompact => '鎖定螢幕後仍顯示乘車狀態，需通知與背景定位。';
 
   @override
   String get favoriteWidgetRefreshHelperCompact => '最短 15 分鐘更新一次；系統可能延後。';
@@ -139,13 +139,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get personalizationGlobalHomeDescriptionCompact => '套用至所有交通首頁分頁。';
 
   @override
-  String get adsDescriptionCompact => '顯示廣告以支持開發。';
+  String get adsEnabledDescriptionCompact => '已開啟廣告，感謝支持開發。';
 
   @override
-  String get adsLockedDescriptionCompact => '切換過於頻繁，已鎖定為開啟。';
+  String get adsLockedMessageCompact => '切換過於頻繁，已鎖定為開啟。';
 
   @override
-  String get adDensityDescriptionCompact => '數值越高，顯示的廣告越多。';
+  String get adDensityLevelHint => '數值越高，顯示的廣告越多。';
+
+  @override
+  String get adsDisabledStatus => '已關閉廣告。';
+
+  @override
+  String get personalizationAmoledDescriptionCompact => '深色模式使用純黑背景。';
+
+  @override
+  String get personalizationHomeGradientDescriptionCompact => '調整首頁漸層透明度。';
+
+  @override
+  String get personalizationPerPageDescriptionCompact => '分別設定各頁背景。';
 
   @override
   String get settingsTitle => '設定';
@@ -245,7 +257,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get compactModeTitle => '精簡模式';
 
   @override
-  String get compactModeDescription => '縮短說明，精簡介面。';
+  String get compactModeDescription => '關閉後顯示完整說明；桌面首頁固定精簡。';
 
   @override
   String get showWeatherTitle => '顯示天氣';
@@ -3491,7 +3503,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get wearSyncCategoryDescriptionCompact => '選擇同步至手錶的最愛分類。';
 
   @override
-  String get normalUpdateIntervalDescriptionCompact => '到站資訊刷新間隔；越短越耗電。';
+  String get normalUpdateIntervalDescriptionCompact => '到站資訊更新間隔；越短越耗電。';
 
   @override
   String get retryIntervalDescriptionCompact => '失敗後重試；實際不短於一般更新間隔。';
@@ -3551,10 +3563,10 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get keepScreenAwakeDescriptionCompact => '查看路線時保持螢幕亮起。';
 
   @override
-  String get backgroundTripDescriptionCompact => '鎖屏繼續乘車提醒，需通知與定位權限。';
+  String get backgroundTripDescriptionCompact => '鎖定螢幕後仍有乘車提醒，需通知與定位權限。';
 
   @override
-  String get backgroundTripIosDescriptionCompact => '鎖屏顯示乘車狀態，需通知與背景定位。';
+  String get backgroundTripIosDescriptionCompact => '鎖定螢幕後仍顯示乘車狀態，需通知與背景定位。';
 
   @override
   String get favoriteWidgetRefreshHelperCompact => '最短 15 分鐘更新一次；系統可能延後。';
@@ -3588,13 +3600,25 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get personalizationGlobalHomeDescriptionCompact => '套用至所有交通首頁分頁。';
 
   @override
-  String get adsDescriptionCompact => '顯示廣告以支持開發。';
+  String get adsEnabledDescriptionCompact => '已開啟廣告，感謝支持開發。';
 
   @override
-  String get adsLockedDescriptionCompact => '切換過於頻繁，已鎖定為開啟。';
+  String get adsLockedMessageCompact => '切換過於頻繁，已鎖定為開啟。';
 
   @override
-  String get adDensityDescriptionCompact => '數值越高，顯示的廣告越多。';
+  String get adDensityLevelHint => '數值越高，顯示的廣告越多。';
+
+  @override
+  String get adsDisabledStatus => '已關閉廣告。';
+
+  @override
+  String get personalizationAmoledDescriptionCompact => '深色模式使用純黑背景。';
+
+  @override
+  String get personalizationHomeGradientDescriptionCompact => '調整首頁漸層透明度。';
+
+  @override
+  String get personalizationPerPageDescriptionCompact => '分別設定各頁背景。';
 
   @override
   String get settingsTitle => '設定';
@@ -3694,7 +3718,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get compactModeTitle => '精簡模式';
 
   @override
-  String get compactModeDescription => '縮短說明，精簡介面。';
+  String get compactModeDescription => '關閉後顯示完整說明；桌面首頁固定精簡。';
 
   @override
   String get showWeatherTitle => '顯示天氣';
