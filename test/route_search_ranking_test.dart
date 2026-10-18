@@ -83,6 +83,45 @@ void main() {
       2,
     );
   });
+
+  test('name relevance outranks provider, which breaks ties within a tier', () {
+    final matches = [
+      route(1, '41慢線'),
+      route(2, '藍41', provider: 'TPE'),
+      route(3, '41', provider: 'TPE'),
+      route(4, '41區', provider: 'TPE'),
+      route(5, '41'),
+      route(6, '其他', description: '經過41'),
+    ];
+    int priority(BusProvider provider) => provider == BusProvider.txg ? 0 : 1;
+
+    final sorted = sortRouteSummariesForQuery(
+      matches,
+      query: '41',
+      providerPriority: priority,
+    );
+
+    expect(sorted.map((item) => item.routeKey), [5, 3, 1, 4, 2, 6]);
+    expect(
+      compareRouteSummarySearchPriority(
+        matches[1],
+        matches[0],
+        query: '41',
+        providerPriority: priority,
+      ),
+      greaterThan(0),
+    );
+  });
+
+  test('route ID matches exactly; names and paths match substrings', () {
+    expect(routeSummaryMatchesQuery(route(41, '其他'), '41'), isFalse);
+    expect(routeSummaryMatchesQuery(route(41, '其他'), 'TXG41'), isTrue);
+    expect(routeSummaryMatchesQuery(route(42, '藍41'), '41'), isTrue);
+    expect(
+      routeSummaryMatchesQuery(route(43, '其他', description: '經過41'), '41'),
+      isTrue,
+    );
+  });
 }
 
 RouteSummary route(

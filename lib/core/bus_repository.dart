@@ -958,7 +958,11 @@ class BusRepository {
             pathNameEn: row['path_name_en']?.toString() ?? '',
           );
         })
-        .where((summary) => summary.routeId.isNotEmpty)
+        .where(
+          (summary) =>
+              summary.routeId.isNotEmpty &&
+              routeSummaryMatchesQuery(summary, query),
+        )
         .toList();
     return sortRouteSummariesForQuery(
       _collapseRouteSummariesByRouteId(summaries),
@@ -997,7 +1001,11 @@ class BusRepository {
             pathNameEn: row['path_name_en']?.toString() ?? '',
           );
         })
-        .where((summary) => summary.routeId.isNotEmpty)
+        .where(
+          (summary) =>
+              summary.routeId.isNotEmpty &&
+              routeSummaryMatchesQuery(summary, query),
+        )
         .toList();
     return sortRouteSummariesForQuery(
       _collapseRouteSummariesByRouteId(summaries),
@@ -4187,7 +4195,7 @@ class BusRepository {
         '('
         'routes.name LIKE ? OR '
         "COALESCE(routes.name_en, '') LIKE ? OR "
-        'routes.routeid LIKE ? OR '
+        'routes.routeid = ? COLLATE NOCASE OR '
         "COALESCE(routes.path_name, '') LIKE ? OR "
         '$pathNameColumn LIKE ? OR '
         "COALESCE($pathNameEnColumn, '') LIKE ?"
@@ -4196,7 +4204,7 @@ class BusRepository {
       parameters.addAll(<Object?>[
         '%$normalizedQuery%',
         '%$normalizedQuery%',
-        '%$normalizedQuery%',
+        normalizedQuery,
         '%$normalizedQuery%',
         '%$normalizedQuery%',
         '%$normalizedQuery%',
@@ -4214,8 +4222,7 @@ class BusRepository {
             WHEN COALESCE(routes.name_en, '') LIKE ? THEN 1
             WHEN routes.name LIKE ? THEN 2
             WHEN COALESCE(routes.name_en, '') LIKE ? THEN 2
-            WHEN routes.routeid LIKE ? THEN 3
-            WHEN routes.routeid LIKE ? THEN 4
+            WHEN routes.routeid = ? COLLATE NOCASE THEN 3
             ELSE 5
           END ASC,
           routes.routeid ASC,
@@ -4230,7 +4237,6 @@ class BusRepository {
         '%$normalizedQuery%',
         '%$normalizedQuery%',
         normalizedQuery,
-        '%$normalizedQuery%',
       ]);
     }
 
@@ -4305,7 +4311,7 @@ class BusRepository {
         '('
         'routes.name LIKE ? OR '
         "COALESCE(routes.name_en, '') LIKE ? OR "
-        'routes.routeid LIKE ? OR '
+        'routes.routeid = ? COLLATE NOCASE OR '
         "COALESCE(routes.path_name, '') LIKE ? OR "
         '$pathNameColumn LIKE ? OR '
         "COALESCE($pathNameEnColumn, '') LIKE ?"
@@ -4314,7 +4320,7 @@ class BusRepository {
       parameters.addAll(<Object?>[
         '%$normalizedQuery%',
         '%$normalizedQuery%',
-        '%$normalizedQuery%',
+        normalizedQuery,
         '%$normalizedQuery%',
         '%$normalizedQuery%',
         '%$normalizedQuery%',
@@ -4332,8 +4338,7 @@ class BusRepository {
             WHEN COALESCE(routes.name_en, '') LIKE ? THEN 1
             WHEN routes.name LIKE ? THEN 2
             WHEN COALESCE(routes.name_en, '') LIKE ? THEN 2
-            WHEN routes.routeid LIKE ? THEN 3
-            WHEN routes.routeid LIKE ? THEN 4
+            WHEN routes.routeid = ? COLLATE NOCASE THEN 3
             ELSE 5
           END ASC,
           routes.routeid ASC,
@@ -4348,7 +4353,6 @@ class BusRepository {
         '%$normalizedQuery%',
         '%$normalizedQuery%',
         normalizedQuery,
-        '%$normalizedQuery%',
       ]);
     }
 

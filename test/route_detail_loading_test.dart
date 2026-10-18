@@ -429,6 +429,95 @@ void main() {
     expect(routes.single.pathNameEn, 'Inbound / Outbound');
   });
 
+  test('route search APIs exclude partial route ID-only matches', () async {
+    final repository = BusRepository(
+      client: MockClient(
+        (_) async => jsonResponse([
+          {
+            'routeid': 'TPE41001',
+            'route_name': '其他',
+            'pathid': 0,
+            'path_name': '去程',
+          },
+          {
+            'routeid': 'TPE100',
+            'route_name': '藍41',
+            'pathid': 0,
+            'path_name': '去程',
+          },
+          {
+            'routeid': 'TPE101',
+            'route_name': '41',
+            'pathid': 0,
+            'path_name': '去程',
+          },
+        ]),
+      ),
+    );
+
+    for (final search in [
+      repository.searchRoutesFromApi('41', provider: BusProvider.tpe),
+      repository.searchRoutesAcrossApi('41'),
+    ]) {
+      final matches = await search;
+      expect(matches.map((route) => route.routeName), ['41', '藍41']);
+    }
+    final exactId = await repository.searchRoutesFromApi(
+      'TPE41001',
+      provider: BusProvider.tpe,
+    );
+    expect(exactId.single.routeName, '其他');
+  });
+
+  test('local route search excludes partial route ID-only matches', () async {
+    final folder = await Directory('${directory.path}/.yabus_backend').create();
+    final metadata = await openDatabase(
+      '${folder.path}/routes_metadata_v1.sqlite',
+    );
+    await metadata.execute(
+      'CREATE TABLE routes(routeid TEXT, name TEXT, name_en TEXT, path_name TEXT)',
+    );
+    await metadata.execute(
+      'CREATE TABLE paths(routeid TEXT, pathid INTEGER, name TEXT, name_en TEXT)',
+    );
+    for (final (id, name) in [
+      ('TXG41001', '其他'),
+      ('TXG100', '藍41'),
+      ('TXG101', '41'),
+    ]) {
+      await metadata.insert('routes', {
+        'routeid': id,
+        'name': name,
+        'name_en': '',
+        'path_name': '去程',
+      });
+      await metadata.insert('paths', {
+        'routeid': id,
+        'pathid': 0,
+        'name': '去程',
+        'name_en': '',
+      });
+    }
+    await metadata.close();
+
+    final repository = BusRepository();
+    final matches = await repository.searchRoutes(
+      '41',
+      provider: BusProvider.txg,
+    );
+    expect(matches.map((route) => route.routeName), ['41', '藍41']);
+    final exactId = await repository.searchRoutes(
+      'TXG41001',
+      provider: BusProvider.txg,
+    );
+    expect(exactId.single.routeName, '其他');
+    final lowercaseId = await repository.searchRoutes(
+      'txg41001',
+      provider: BusProvider.txg,
+    );
+    expect(lowercaseId.single.routeName, '其他');
+  });
+
   test('nearby API parses stop, route and path English names', () async {
     final repository = BusRepository(
       client: MockClient(

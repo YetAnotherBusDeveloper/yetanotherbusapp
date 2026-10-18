@@ -2,6 +2,8 @@ import 'models.dart';
 
 typedef RouteSearchProviderPriority = int Function(BusProvider provider);
 
+const _unmatchedRouteSearchTier = 6;
+
 List<RouteSummary> sortRouteSummariesForQuery(
   Iterable<RouteSummary> routes, {
   required String query,
@@ -21,12 +23,20 @@ List<RouteSummary> sortRouteSummariesForQuery(
         route: providerPriority(busProviderFromString(route.sourceProvider)),
   };
   sorted.sort((left, right) {
+    final leftRank = ranks[left]!;
+    final rightRank = ranks[right]!;
+    final match = leftRank.matchTier.compareTo(rightRank.matchTier);
+    if (match != 0) return match;
     final priority = (priorities[left] ?? 0).compareTo(priorities[right] ?? 0);
-    return priority != 0
-        ? priority
-        : _compareRanks(ranks[left]!, ranks[right]!);
+    return priority != 0 ? priority : _compareRanks(leftRank, rightRank);
   });
   return sorted;
+}
+
+bool routeSummaryMatchesQuery(RouteSummary route, String query) {
+  final normalizedQuery = _normalizeRouteSearchText(query);
+  return _RouteSearchRank.fromSummary(route, normalizedQuery).matchTier <
+      _unmatchedRouteSearchTier;
 }
 
 int compareRouteSummarySearchPriority(
@@ -35,6 +45,12 @@ int compareRouteSummarySearchPriority(
   required String query,
   RouteSearchProviderPriority? providerPriority,
 }) {
+  final normalizedQuery = _normalizeRouteSearchText(query);
+  final leftRank = _RouteSearchRank.fromSummary(left, normalizedQuery);
+  final rightRank = _RouteSearchRank.fromSummary(right, normalizedQuery);
+  final match = leftRank.matchTier.compareTo(rightRank.matchTier);
+  if (match != 0) return match;
+
   if (providerPriority != null) {
     final leftPriority = providerPriority(
       busProviderFromString(left.sourceProvider),
@@ -46,10 +62,6 @@ int compareRouteSummarySearchPriority(
       return leftPriority.compareTo(rightPriority);
     }
   }
-
-  final normalizedQuery = _normalizeRouteSearchText(query);
-  final leftRank = _RouteSearchRank.fromSummary(left, normalizedQuery);
-  final rightRank = _RouteSearchRank.fromSummary(right, normalizedQuery);
 
   return _compareRanks(leftRank, rightRank);
 }
@@ -153,13 +165,10 @@ class _RouteSearchRank {
     if (routeId == query) {
       return 3;
     }
-    if (routeId.contains(query)) {
-      return 4;
-    }
     if (description.contains(query) || descriptionEn.contains(query)) {
       return 5;
     }
-    return 6;
+    return _unmatchedRouteSearchTier;
   }
 }
 
