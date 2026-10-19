@@ -15,6 +15,7 @@ import 'package:taiwanbus_flutter/screens/account_screen.dart';
 import 'package:taiwanbus_flutter/screens/adaptive_settings_presenter.dart';
 import 'package:taiwanbus_flutter/screens/database_settings_screen.dart';
 import 'package:taiwanbus_flutter/screens/settings_screen.dart';
+import 'package:taiwanbus_flutter/widgets/ad_density_setting.dart';
 
 import 'support/ad_test_controller.dart';
 
@@ -155,6 +156,164 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final locale in [const Locale('zh', 'TW'), const Locale('en')]) {
+    _settingsTest('compact descriptions switch with the setting in $locale', (
+      tester,
+    ) async {
+      final controller = await _pumpHost(tester, height: 3000, locale: locale);
+      final l10n = lookupAppLocalizations(locale);
+      await _openCategory(tester, l10n.appearanceSectionTitle);
+      expect(find.text(l10n.languageDescription), findsOneWidget);
+
+      final compact = find.widgetWithText(
+        SwitchListTile,
+        l10n.compactModeTitle,
+      );
+      await tester.tap(compact);
+      await tester.pumpAndSettle();
+      expect(find.text(l10n.languageDescriptionCompact), findsOneWidget);
+      expect(find.text(l10n.showWeatherDescriptionCompact), findsOneWidget);
+      expect(find.text(l10n.interfaceScaleDescriptionCompact), findsOneWidget);
+      expect(find.text(l10n.compactModeDescription), findsOneWidget);
+      expect(find.text(l10n.languageDescription), findsNothing);
+      expect(find.text(l10n.showWeatherDescription), findsNothing);
+
+      await tester.tap(
+        find.widgetWithText(ListTile, l10n.personalizationTitle),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text(l10n.personalizationAmoledDescriptionCompact),
+        findsOneWidget,
+      );
+      expect(
+        find.text(l10n.personalizationHomeGradientDescriptionCompact),
+        findsOneWidget,
+      );
+      expect(
+        find.text(l10n.personalizationPerPageDescriptionCompact),
+        findsOneWidget,
+      );
+      expect(
+        find.text(l10n.personalizationBackgroundImageDescriptionCompact),
+        findsOneWidget,
+      );
+      expect(find.text(l10n.personalizationAmoledDescription), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+
+      await controller.updateDatabaseAutoUpdateMode(
+        DatabaseAutoUpdateMode.cellularOnly,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining(l10n.databaseAutoUpdateCellular),
+        findsOneWidget,
+      );
+      await _openCategory(tester, l10n.usageAndUpdatesTitle);
+      expect(
+        find.text(l10n.alwaysShowSecondsDescriptionCompact),
+        findsOneWidget,
+      );
+      expect(
+        find.text(l10n.normalUpdateIntervalDescriptionCompact),
+        findsOneWidget,
+      );
+      expect(find.text(l10n.alwaysShowSecondsDescription), findsNothing);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+
+      await _openCategory(tester, l10n.appearanceSectionTitle);
+      await tester.tap(compact);
+      await tester.pumpAndSettle();
+      expect(controller.settings.enableCompactMode, isFalse);
+      expect(find.text(l10n.languageDescription), findsOneWidget);
+      expect(find.text(l10n.showWeatherDescription), findsOneWidget);
+      expect(find.text(l10n.languageDescriptionCompact), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    _settingsTest(
+      'compact ad descriptions follow enabled and locked states in $locale',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        final controller = await _pumpHost(
+          tester,
+          height: 3000,
+          locale: locale,
+        );
+        final l10n = lookupAppLocalizations(locale);
+        await controller.updateEnableCompactMode(true);
+        await tester.pumpAndSettle();
+        await _openCategory(tester, l10n.usageAndUpdatesTitle);
+        final ads = find.widgetWithText(SwitchListTile, l10n.showAdsTitle);
+        final pleas = RegExp(
+          [
+            l10n.adsPleaOne,
+            l10n.adsPleaTwo,
+            l10n.adsPleaThree,
+            l10n.adsPleaFour,
+          ].map(RegExp.escape).join('|'),
+        );
+        expect(tester.widget<SwitchListTile>(ads).value, isTrue);
+        expect(find.text(l10n.adsEnabledDescription), findsOneWidget);
+        expect(find.byType(AdDensitySetting), findsOneWidget);
+
+        await tester.tap(ads);
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text(l10n.adsDisableDescription), findsOneWidget);
+        expect(controller.settings.enableAds, isTrue);
+        await tester.tap(find.text(l10n.adsDisableConfirm));
+        await tester.pumpAndSettle();
+        expect(tester.widget<SwitchListTile>(ads).value, isFalse);
+        expect(find.textContaining(l10n.adsDisabledStatus), findsOneWidget);
+        expect(
+          find.descendant(of: ads, matching: find.textContaining(pleas)),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: ads, matching: find.byType(Image)),
+          findsOneWidget,
+        );
+        expect(find.text(l10n.adsEnabledDescription), findsNothing);
+        expect(find.byType(AdDensitySetting), findsNothing);
+
+        await tester.tap(ads);
+        await tester.pumpAndSettle();
+        expect(tester.widget<SwitchListTile>(ads).value, isTrue);
+        expect(find.text(l10n.adsEnabledDescription), findsOneWidget);
+        expect(find.textContaining(l10n.adsDisabledStatus), findsNothing);
+
+        for (var index = 0; index < 4; index++) {
+          await tester.tap(ads);
+          await tester.pumpAndSettle();
+        }
+        expect(controller.settings.enableAds, isTrue);
+        expect(tester.widget<SwitchListTile>(ads).onChanged, isNull);
+        expect(
+          find.textContaining(l10n.adsLockedMessageCompact),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: ads,
+            matching: find.textContaining(l10n.adsLockedMessage.trim()),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: ads, matching: find.byType(Image)),
+          findsOneWidget,
+        );
+        expect(find.textContaining(l10n.adsDisabledStatus), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   _settingsTest('catalog and category scroll positions are restored', (
     tester,
   ) async {
@@ -279,35 +438,41 @@ void main() {
   });
 
   for (final locale in [const Locale('zh', 'TW'), const Locale('en')]) {
-    _settingsTest(
-      'all categories fit narrow screens with large text in $locale',
-      (tester) async {
-        await _pumpHost(
-          tester,
-          width: 320,
-          height: 568,
-          scale: 1.8,
-          locale: locale,
-        );
-        final l10n = lookupAppLocalizations(locale);
-        for (final title in [
-          l10n.appearanceSectionTitle,
-          l10n.usageAndUpdatesTitle,
-          if (!AppBuildInfo.isAabBuild) l10n.appUpdatesTitle,
-          l10n.historyPrivacyTitle,
-          l10n.onboardingSettingsTitle,
-          l10n.aboutTitle,
-        ]) {
-          await _openCategory(tester, title);
-          await tester.drag(find.byType(ListView), const Offset(0, -1200));
-          await tester.pumpAndSettle();
+    for (final compactMode in [false, true]) {
+      _settingsTest(
+        'all categories fit narrow screens with large text in $locale with compact=$compactMode',
+        (tester) async {
+          final controller = await _pumpHost(
+            tester,
+            width: 320,
+            height: 568,
+            scale: 1.8,
+            locale: locale,
+          );
+          if (compactMode) {
+            await controller.updateEnableCompactMode(true);
+            await tester.pumpAndSettle();
+          }
+          final l10n = lookupAppLocalizations(locale);
+          for (final title in [
+            l10n.appearanceSectionTitle,
+            l10n.usageAndUpdatesTitle,
+            if (!AppBuildInfo.isAabBuild) l10n.appUpdatesTitle,
+            l10n.historyPrivacyTitle,
+            l10n.onboardingSettingsTitle,
+            l10n.aboutTitle,
+          ]) {
+            await _openCategory(tester, title);
+            await tester.drag(find.byType(ListView), const Offset(0, -1200));
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull);
+            await tester.tap(find.byType(BackButton));
+            await tester.pumpAndSettle();
+          }
           expect(tester.takeException(), isNull);
-          await tester.tap(find.byType(BackButton));
-          await tester.pumpAndSettle();
-        }
-        expect(tester.takeException(), isNull);
-      },
-    );
+        },
+      );
+    }
   }
 }
 

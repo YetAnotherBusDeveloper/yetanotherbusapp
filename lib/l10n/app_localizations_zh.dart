@@ -30,6 +30,130 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsAboutDescription => '版本資訊、貢獻者、社群與意見回饋';
 
   @override
+  String get languageDescriptionCompact => '切換介面語言，立即生效。';
+
+  @override
+  String get themeModeDescriptionCompact => '選擇淺色、深色或跟隨系統。';
+
+  @override
+  String get mapProviderDescriptionCompact => '切換底圖，不影響公車資料來源。';
+
+  @override
+  String get wearSyncCategoryDescriptionCompact => '選擇同步至手錶的最愛分類。';
+
+  @override
+  String get normalUpdateIntervalDescriptionCompact => '到站資訊更新間隔；越短越耗電。';
+
+  @override
+  String get retryIntervalDescriptionCompact => '失敗後重試；實際不短於一般更新間隔。';
+
+  @override
+  String get appUpdateManualCheckDescriptionCompact => '檢查目前更新通道是否有新版。';
+
+  @override
+  String get searchHistoryLimitDescriptionCompact => '保留最近路線；0 為清空並停止記錄。';
+
+  @override
+  String get clearSearchHistoryDescriptionCompact => '清除最近路線，保留最愛與學習紀錄。';
+
+  @override
+  String get clearSmartHistoryDescriptionCompact => '重設推薦學習紀錄，保留最愛。';
+
+  @override
+  String get clearRouteSelectionHistoryDescriptionCompact => '清除路線選擇紀錄，保留開啟次數。';
+
+  @override
+  String get termsOfServiceDescriptionCompact => '查看服務規則與使用條款。';
+
+  @override
+  String get privacyPolicyDescriptionCompact => '查看定位、帳號與使用資料的處理方式。';
+
+  @override
+  String get restartOnboardingDescriptionCompact => '重跑初次設定，保留最愛與偏好。';
+
+  @override
+  String get interfaceScaleDescriptionCompact => '調整文字與介面大小。';
+
+  @override
+  String get showWeatherDescriptionCompact => '首頁顯示當地天氣；點按看預報。';
+
+  @override
+  String get personalizationDescriptionCompact => '調整配色、純黑模式與背景。';
+
+  @override
+  String get wearSyncDescriptionCompact => '將最愛同步至已連線的手錶。';
+
+  @override
+  String get alwaysShowSecondsDescriptionCompact => '有秒數資料時顯示倒數，仍為預估。';
+
+  @override
+  String get hapticFeedbackDescriptionCompact => '操作時提供短暫震動。';
+
+  @override
+  String get smartRecommendationsDescriptionCompact => '依常用路線與時段推薦搭車選項。';
+
+  @override
+  String get autoFavoriteDescriptionCompact => '常搭站牌自動加入「常用」最愛。';
+
+  @override
+  String get smartNotificationDescriptionCompact => '常用時段發送到站提醒，需通知與背景定位。';
+
+  @override
+  String get keepScreenAwakeDescriptionCompact => '查看路線時保持螢幕亮起。';
+
+  @override
+  String get backgroundTripDescriptionCompact => '鎖定螢幕後仍有乘車提醒，需通知與定位權限。';
+
+  @override
+  String get backgroundTripIosDescriptionCompact => '鎖定螢幕後仍顯示乘車狀態，需通知與背景定位。';
+
+  @override
+  String get favoriteWidgetRefreshHelperCompact => '最短 15 分鐘更新一次；系統可能延後。';
+
+  @override
+  String get updateChannelDeveloperDescriptionCompact => '自行建置版本，不檢查更新。';
+
+  @override
+  String get updateChannelNightlyDescriptionCompact => '提早取得新功能，可能較不穩定。';
+
+  @override
+  String get updateChannelReleaseDescriptionCompact => '僅接收正式發行版更新。';
+
+  @override
+  String get updateCheckOffDescriptionCompact => '啟動時不檢查，可手動檢查。';
+
+  @override
+  String get updateCheckNotifyDescriptionCompact => '啟動時檢查，有新版時通知。';
+
+  @override
+  String get updateCheckPopupDescriptionCompact => '啟動時檢查，有新版時開啟更新視窗。';
+
+  @override
+  String get personalizationBackgroundImageDescriptionCompact =>
+      '設定各頁背景；首頁圖片套用至所有交通首頁。';
+
+  @override
+  String get personalizationColorSourceDescriptionCompact => '自動取背景色；系統使用裝置配色。';
+
+  @override
+  String get personalizationGlobalHomeDescriptionCompact => '套用至所有交通首頁分頁。';
+
+  @override
+  String get adsLockedMessageCompact => '切換過於頻繁，已鎖定為開啟。';
+
+  @override
+  String get adsDisabledStatus => '已關閉廣告。';
+
+  @override
+  String get personalizationAmoledDescriptionCompact => '深色模式使用純黑背景。';
+
+  @override
+  String get personalizationHomeGradientDescriptionCompact => '調整首頁漸層透明度。';
+
+  @override
+  String get personalizationPerPageDescriptionCompact => '分別設定各頁背景。';
+
+  @override
   String get settingsTitle => '設定';
 
   @override
@@ -127,8 +251,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get compactModeTitle => '精簡模式';
 
   @override
-  String get compactModeDescription =>
-      '減少首頁與部分卡片的輔助說明，讓常用功能更集中，適合熟悉操作後使用。關閉後會顯示較完整的說明；桌面版首頁固定使用精簡版面。';
+  String get compactModeDescription => '關閉後顯示完整說明；桌面首頁固定精簡。';
 
   @override
   String get showWeatherTitle => '顯示天氣';
@@ -3362,6 +3485,130 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsAboutDescription => '版本資訊、貢獻者、社群與意見回饋';
 
   @override
+  String get languageDescriptionCompact => '切換介面語言，立即生效。';
+
+  @override
+  String get themeModeDescriptionCompact => '選擇淺色、深色或跟隨系統。';
+
+  @override
+  String get mapProviderDescriptionCompact => '切換底圖，不影響公車資料來源。';
+
+  @override
+  String get wearSyncCategoryDescriptionCompact => '選擇同步至手錶的最愛分類。';
+
+  @override
+  String get normalUpdateIntervalDescriptionCompact => '到站資訊更新間隔；越短越耗電。';
+
+  @override
+  String get retryIntervalDescriptionCompact => '失敗後重試；實際不短於一般更新間隔。';
+
+  @override
+  String get appUpdateManualCheckDescriptionCompact => '檢查目前更新通道是否有新版。';
+
+  @override
+  String get searchHistoryLimitDescriptionCompact => '保留最近路線；0 為清空並停止記錄。';
+
+  @override
+  String get clearSearchHistoryDescriptionCompact => '清除最近路線，保留最愛與學習紀錄。';
+
+  @override
+  String get clearSmartHistoryDescriptionCompact => '重設推薦學習紀錄，保留最愛。';
+
+  @override
+  String get clearRouteSelectionHistoryDescriptionCompact => '清除路線選擇紀錄，保留開啟次數。';
+
+  @override
+  String get termsOfServiceDescriptionCompact => '查看服務規則與使用條款。';
+
+  @override
+  String get privacyPolicyDescriptionCompact => '查看定位、帳號與使用資料的處理方式。';
+
+  @override
+  String get restartOnboardingDescriptionCompact => '重跑初次設定，保留最愛與偏好。';
+
+  @override
+  String get interfaceScaleDescriptionCompact => '調整文字與介面大小。';
+
+  @override
+  String get showWeatherDescriptionCompact => '首頁顯示當地天氣；點按看預報。';
+
+  @override
+  String get personalizationDescriptionCompact => '調整配色、純黑模式與背景。';
+
+  @override
+  String get wearSyncDescriptionCompact => '將最愛同步至已連線的手錶。';
+
+  @override
+  String get alwaysShowSecondsDescriptionCompact => '有秒數資料時顯示倒數，仍為預估。';
+
+  @override
+  String get hapticFeedbackDescriptionCompact => '操作時提供短暫震動。';
+
+  @override
+  String get smartRecommendationsDescriptionCompact => '依常用路線與時段推薦搭車選項。';
+
+  @override
+  String get autoFavoriteDescriptionCompact => '常搭站牌自動加入「常用」最愛。';
+
+  @override
+  String get smartNotificationDescriptionCompact => '常用時段發送到站提醒，需通知與背景定位。';
+
+  @override
+  String get keepScreenAwakeDescriptionCompact => '查看路線時保持螢幕亮起。';
+
+  @override
+  String get backgroundTripDescriptionCompact => '鎖定螢幕後仍有乘車提醒，需通知與定位權限。';
+
+  @override
+  String get backgroundTripIosDescriptionCompact => '鎖定螢幕後仍顯示乘車狀態，需通知與背景定位。';
+
+  @override
+  String get favoriteWidgetRefreshHelperCompact => '最短 15 分鐘更新一次；系統可能延後。';
+
+  @override
+  String get updateChannelDeveloperDescriptionCompact => '自行建置版本，不檢查更新。';
+
+  @override
+  String get updateChannelNightlyDescriptionCompact => '提早取得新功能，可能較不穩定。';
+
+  @override
+  String get updateChannelReleaseDescriptionCompact => '僅接收正式發行版更新。';
+
+  @override
+  String get updateCheckOffDescriptionCompact => '啟動時不檢查，可手動檢查。';
+
+  @override
+  String get updateCheckNotifyDescriptionCompact => '啟動時檢查，有新版時通知。';
+
+  @override
+  String get updateCheckPopupDescriptionCompact => '啟動時檢查，有新版時開啟更新視窗。';
+
+  @override
+  String get personalizationBackgroundImageDescriptionCompact =>
+      '設定各頁背景；首頁圖片套用至所有交通首頁。';
+
+  @override
+  String get personalizationColorSourceDescriptionCompact => '自動取背景色；系統使用裝置配色。';
+
+  @override
+  String get personalizationGlobalHomeDescriptionCompact => '套用至所有交通首頁分頁。';
+
+  @override
+  String get adsLockedMessageCompact => '切換過於頻繁，已鎖定為開啟。';
+
+  @override
+  String get adsDisabledStatus => '已關閉廣告。';
+
+  @override
+  String get personalizationAmoledDescriptionCompact => '深色模式使用純黑背景。';
+
+  @override
+  String get personalizationHomeGradientDescriptionCompact => '調整首頁漸層透明度。';
+
+  @override
+  String get personalizationPerPageDescriptionCompact => '分別設定各頁背景。';
+
+  @override
   String get settingsTitle => '設定';
 
   @override
@@ -3459,8 +3706,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get compactModeTitle => '精簡模式';
 
   @override
-  String get compactModeDescription =>
-      '減少首頁與部分卡片的輔助說明，讓常用功能更集中，適合熟悉操作後使用。關閉後會顯示較完整的說明；桌面版首頁固定使用精簡版面。';
+  String get compactModeDescription => '關閉後顯示完整說明；桌面首頁固定精簡。';
 
   @override
   String get showWeatherTitle => '顯示天氣';

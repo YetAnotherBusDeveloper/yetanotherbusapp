@@ -35,6 +35,167 @@ class AppLocalizationsEn extends AppLocalizations {
       'Version information, contributors, community and feedback';
 
   @override
+  String get languageDescriptionCompact =>
+      'Change the app language immediately.';
+
+  @override
+  String get themeModeDescriptionCompact => 'Use light, dark or system theme.';
+
+  @override
+  String get mapProviderDescriptionCompact =>
+      'Change the base map, keeping the same bus data.';
+
+  @override
+  String get wearSyncCategoryDescriptionCompact =>
+      'Choose favorites groups to sync to your watch.';
+
+  @override
+  String get normalUpdateIntervalDescriptionCompact =>
+      'Arrival refresh interval; shorter uses more battery.';
+
+  @override
+  String get retryIntervalDescriptionCompact =>
+      'Retry after failures; waits at least the normal interval.';
+
+  @override
+  String get appUpdateManualCheckDescriptionCompact =>
+      'Check the selected channel for a new version.';
+
+  @override
+  String get searchHistoryLimitDescriptionCompact =>
+      'Keep recent routes; 0 clears and disables history.';
+
+  @override
+  String get clearSearchHistoryDescriptionCompact =>
+      'Clear recent routes; keep favorites and learning data.';
+
+  @override
+  String get clearSmartHistoryDescriptionCompact =>
+      'Reset recommendation learning; keep favorites.';
+
+  @override
+  String get clearRouteSelectionHistoryDescriptionCompact =>
+      'Clear route and stop selections; keep route open counts.';
+
+  @override
+  String get termsOfServiceDescriptionCompact =>
+      'Read the service rules and terms.';
+
+  @override
+  String get privacyPolicyDescriptionCompact =>
+      'Read how location, account and usage data are handled.';
+
+  @override
+  String get restartOnboardingDescriptionCompact =>
+      'Repeat first-time setup; keep favorites and preferences.';
+
+  @override
+  String get interfaceScaleDescriptionCompact =>
+      'Adjust text and interface size.';
+
+  @override
+  String get showWeatherDescriptionCompact =>
+      'Show local weather on Home; tap for the forecast.';
+
+  @override
+  String get personalizationDescriptionCompact =>
+      'Customize colors, AMOLED black mode and backgrounds.';
+
+  @override
+  String get wearSyncDescriptionCompact =>
+      'Sync favorites to your connected watch.';
+
+  @override
+  String get alwaysShowSecondsDescriptionCompact =>
+      'Show seconds when available; arrivals are estimates.';
+
+  @override
+  String get hapticFeedbackDescriptionCompact =>
+      'Brief vibrations for supported actions.';
+
+  @override
+  String get smartRecommendationsDescriptionCompact =>
+      'Suggest routes based on your habits and usual times.';
+
+  @override
+  String get autoFavoriteDescriptionCompact =>
+      'Automatically add frequent stops to Frequent favorites.';
+
+  @override
+  String get smartNotificationDescriptionCompact =>
+      'Arrival alerts at usual times; needs notifications and background location.';
+
+  @override
+  String get keepScreenAwakeDescriptionCompact =>
+      'Keep the screen on while viewing a route.';
+
+  @override
+  String get backgroundTripDescriptionCompact =>
+      'Trip alerts while locked; needs notifications and location.';
+
+  @override
+  String get backgroundTripIosDescriptionCompact =>
+      'Trip status while locked; needs notifications and background location.';
+
+  @override
+  String get favoriteWidgetRefreshHelperCompact =>
+      'Refresh at least 15 minutes apart; the system may delay it.';
+
+  @override
+  String get updateChannelDeveloperDescriptionCompact =>
+      'Self-built version; update checks are disabled.';
+
+  @override
+  String get updateChannelNightlyDescriptionCompact =>
+      'Get new features earlier; may be less stable.';
+
+  @override
+  String get updateChannelReleaseDescriptionCompact =>
+      'Receive published release updates only.';
+
+  @override
+  String get updateCheckOffDescriptionCompact =>
+      'Skip startup checks; check manually instead.';
+
+  @override
+  String get updateCheckNotifyDescriptionCompact =>
+      'Check at startup and notify about updates.';
+
+  @override
+  String get updateCheckPopupDescriptionCompact =>
+      'Check at startup and open the update dialog if available.';
+
+  @override
+  String get personalizationBackgroundImageDescriptionCompact =>
+      'Set page backgrounds; Home applies to all transit home tabs.';
+
+  @override
+  String get personalizationColorSourceDescriptionCompact =>
+      'Auto uses background colors; System uses device colors.';
+
+  @override
+  String get personalizationGlobalHomeDescriptionCompact =>
+      'Apply to all transit home tabs.';
+
+  @override
+  String get adsLockedMessageCompact => 'Too many toggles; ads are locked on.';
+
+  @override
+  String get adsDisabledStatus => 'Ads are off.';
+
+  @override
+  String get personalizationAmoledDescriptionCompact =>
+      'Use a black background in dark mode.';
+
+  @override
+  String get personalizationHomeGradientDescriptionCompact =>
+      'Adjust the Home gradient opacity.';
+
+  @override
+  String get personalizationPerPageDescriptionCompact =>
+      'Set a background for each page.';
+
+  @override
   String get settingsTitle => 'Settings';
 
   @override
@@ -134,7 +295,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get compactModeDescription =>
-      'Reduce supporting descriptions on the home screen and some cards to keep common actions together. Turn it off for fuller explanations. The desktop home screen always uses a compact layout.';
+      'Turn off for full descriptions. Desktop Home stays compact.';
 
   @override
   String get showWeatherTitle => 'Show weather';
