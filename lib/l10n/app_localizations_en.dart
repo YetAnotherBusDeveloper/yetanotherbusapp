@@ -178,14 +178,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Apply to all transit home tabs.';
 
   @override
-  String get adsEnabledDescriptionCompact =>
-      'Ads are on. Thanks for supporting development.';
-
-  @override
   String get adsLockedMessageCompact => 'Too many toggles; ads are locked on.';
-
-  @override
-  String get adDensityLevelHint => 'Higher levels show more ads.';
 
   @override
   String get adsDisabledStatus => 'Ads are off.';

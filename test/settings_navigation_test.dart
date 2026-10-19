@@ -15,6 +15,7 @@ import 'package:taiwanbus_flutter/screens/account_screen.dart';
 import 'package:taiwanbus_flutter/screens/adaptive_settings_presenter.dart';
 import 'package:taiwanbus_flutter/screens/database_settings_screen.dart';
 import 'package:taiwanbus_flutter/screens/settings_screen.dart';
+import 'package:taiwanbus_flutter/widgets/ad_density_setting.dart';
 
 import 'support/ad_test_controller.dart';
 
@@ -248,26 +249,43 @@ void main() {
         await tester.pumpAndSettle();
         await _openCategory(tester, l10n.usageAndUpdatesTitle);
         final ads = find.widgetWithText(SwitchListTile, l10n.showAdsTitle);
+        final pleas = RegExp(
+          [
+            l10n.adsPleaOne,
+            l10n.adsPleaTwo,
+            l10n.adsPleaThree,
+            l10n.adsPleaFour,
+          ].map(RegExp.escape).join('|'),
+        );
         expect(tester.widget<SwitchListTile>(ads).value, isTrue);
-        expect(find.text(l10n.adsEnabledDescriptionCompact), findsOneWidget);
-        expect(find.text(l10n.adDensityLevelHint), findsOneWidget);
+        expect(find.text(l10n.adsEnabledDescription), findsOneWidget);
+        expect(find.byType(AdDensitySetting), findsOneWidget);
 
         await tester.tap(ads);
         await tester.pumpAndSettle();
         expect(find.byType(AlertDialog), findsOneWidget);
+        expect(find.text(l10n.adsDisableDescription), findsOneWidget);
         expect(controller.settings.enableAds, isTrue);
         await tester.tap(find.text(l10n.adsDisableConfirm));
         await tester.pumpAndSettle();
         expect(tester.widget<SwitchListTile>(ads).value, isFalse);
-        expect(find.text(l10n.adsDisabledStatus), findsOneWidget);
-        expect(find.text(l10n.adsEnabledDescriptionCompact), findsNothing);
-        expect(find.text(l10n.adDensityLevelHint), findsNothing);
+        expect(find.textContaining(l10n.adsDisabledStatus), findsOneWidget);
+        expect(
+          find.descendant(of: ads, matching: find.textContaining(pleas)),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: ads, matching: find.byType(Image)),
+          findsOneWidget,
+        );
+        expect(find.text(l10n.adsEnabledDescription), findsNothing);
+        expect(find.byType(AdDensitySetting), findsNothing);
 
         await tester.tap(ads);
         await tester.pumpAndSettle();
         expect(tester.widget<SwitchListTile>(ads).value, isTrue);
-        expect(find.text(l10n.adsEnabledDescriptionCompact), findsOneWidget);
-        expect(find.text(l10n.adsDisabledStatus), findsNothing);
+        expect(find.text(l10n.adsEnabledDescription), findsOneWidget);
+        expect(find.textContaining(l10n.adsDisabledStatus), findsNothing);
 
         for (var index = 0; index < 4; index++) {
           await tester.tap(ads);
@@ -275,8 +293,22 @@ void main() {
         }
         expect(controller.settings.enableAds, isTrue);
         expect(tester.widget<SwitchListTile>(ads).onChanged, isNull);
-        expect(find.text(l10n.adsLockedMessageCompact), findsOneWidget);
-        expect(find.text(l10n.adsDisabledStatus), findsNothing);
+        expect(
+          find.textContaining(l10n.adsLockedMessageCompact),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: ads,
+            matching: find.textContaining(l10n.adsLockedMessage.trim()),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: ads, matching: find.byType(Image)),
+          findsOneWidget,
+        );
+        expect(find.textContaining(l10n.adsDisabledStatus), findsNothing);
         expect(tester.takeException(), isNull);
       },
     );

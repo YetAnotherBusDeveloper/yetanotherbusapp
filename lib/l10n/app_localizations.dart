@@ -357,23 +357,11 @@ abstract class AppLocalizations {
   /// **'Apply to all transit home tabs.'**
   String get personalizationGlobalHomeDescriptionCompact;
 
-  /// No description provided for @adsEnabledDescriptionCompact.
-  ///
-  /// In en, this message translates to:
-  /// **'Ads are on. Thanks for supporting development.'**
-  String get adsEnabledDescriptionCompact;
-
   /// No description provided for @adsLockedMessageCompact.
   ///
   /// In en, this message translates to:
   /// **'Too many toggles; ads are locked on.'**
   String get adsLockedMessageCompact;
-
-  /// No description provided for @adDensityLevelHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Higher levels show more ads.'**
-  String get adDensityLevelHint;
 
   /// No description provided for @adsDisabledStatus.
   ///

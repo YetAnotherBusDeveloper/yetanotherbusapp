@@ -109,61 +109,69 @@ void main() {
   });
 
   for (final width in [320.0, 780.0]) {
-    testWidgets('selector images and text fit at width $width', (tester) async {
-      final controller = await createAdTestController();
-      addTearDown(controller.dispose);
-      tester.view.physicalSize = Size(width, 900);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: AppControllerScope(
-            controller: controller,
-            child: MediaQuery(
-              data: MediaQueryData(textScaler: TextScaler.linear(1.8)),
-              child: const Scaffold(
-                body: SingleChildScrollView(
-                  padding: EdgeInsets.all(20),
-                  child: AdDensitySetting(),
+    for (final compactMode in [false, true]) {
+      testWidgets(
+        'selector images and text fit at width $width with compact=$compactMode',
+        (tester) async {
+          final controller = await createAdTestController();
+          addTearDown(controller.dispose);
+          if (compactMode) {
+            await controller.updateEnableCompactMode(true);
+          }
+          tester.view.physicalSize = Size(width, 900);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          await tester.pumpWidget(
+            MaterialApp(
+              home: AppControllerScope(
+                controller: controller,
+                child: MediaQuery(
+                  data: MediaQueryData(textScaler: TextScaler.linear(1.8)),
+                  child: const Scaffold(
+                    body: SingleChildScrollView(
+                      padding: EdgeInsets.all(20),
+                      child: AdDensitySetting(),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+          const assets = ['unshock', 'shock', 'cringe', 'scared'];
+          const messages = [
+            '感謝支持',
+            '哇 感謝你的支持<3',
+            '謝謝謝謝謝謝謝謝謝謝',
+            '哥們你真的很愛看廣告嗎 那很謝謝你了',
+          ];
+          for (var level = 1; level <= 4; level++) {
+            await tester.tap(find.text('$level'));
+            await tester.pumpAndSettle();
+            expect(controller.settings.adDensity, level);
+            final image = tester.widget<Image>(find.byType(Image));
+            expect(
+              (image.image as AssetImage).assetName,
+              'assets/cat_${assets[level - 1]}.jpg',
+            );
+            expect(tester.getSize(find.byType(Image)), const Size(20, 20));
+            final tile = tester.widget<ListTile>(find.byType(ListTile));
+            expect(tile.subtitle, isA<Text>());
+            expect((tile.subtitle as Text).textSpan, isA<TextSpan>());
+            expect(find.textContaining(messages[level - 1]), findsOneWidget);
+            expect(tester.takeException(), isNull);
+          }
+          await controller.updateEnableAds(false);
+          await tester.pumpAndSettle();
+          expect(
+            tester
+                .widget<SegmentedButton<int>>(find.byType(SegmentedButton<int>))
+                .onSelectionChanged,
+            isNull,
+          );
+          expect(controller.settings.adDensity, 4);
+        },
       );
-      const assets = ['unshock', 'shock', 'cringe', 'scared'];
-      const messages = [
-        '感謝支持',
-        '哇 感謝你的支持<3',
-        '謝謝謝謝謝謝謝謝謝謝',
-        '哥們你真的很愛看廣告嗎 那很謝謝你了',
-      ];
-      for (var level = 1; level <= 4; level++) {
-        await tester.tap(find.text('$level'));
-        await tester.pumpAndSettle();
-        expect(controller.settings.adDensity, level);
-        final image = tester.widget<Image>(find.byType(Image));
-        expect(
-          (image.image as AssetImage).assetName,
-          'assets/cat_${assets[level - 1]}.jpg',
-        );
-        expect(tester.getSize(find.byType(Image)), const Size(20, 20));
-        final tile = tester.widget<ListTile>(find.byType(ListTile));
-        expect(tile.subtitle, isA<Text>());
-        expect((tile.subtitle as Text).textSpan, isA<TextSpan>());
-        expect(find.textContaining(messages[level - 1]), findsOneWidget);
-        expect(tester.takeException(), isNull);
-      }
-      await controller.updateEnableAds(false);
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<SegmentedButton<int>>(find.byType(SegmentedButton<int>))
-            .onSelectionChanged,
-        isNull,
-      );
-      expect(controller.settings.adDensity, 4);
-    });
+    }
   }
 }

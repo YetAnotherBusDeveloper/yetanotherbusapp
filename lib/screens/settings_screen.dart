@@ -925,15 +925,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(l10n.showAdsTitle),
-                subtitle: _compactMode
-                    ? Text(
-                        _adToggleLocked
-                            ? l10n.adsLockedMessageCompact
-                            : controller.settings.enableAds
-                            ? l10n.adsEnabledDescriptionCompact
-                            : l10n.adsDisabledStatus,
-                      )
-                    : _adToggleLocked
+                subtitle: _adToggleLocked
                     ? Text.rich(
                         TextSpan(
                           children: [
@@ -945,6 +937,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 height: 20,
                               ),
                             ),
+                            if (_compactMode)
+                              TextSpan(
+                                text: ' ${l10n.adsLockedMessageCompact}',
+                              ),
                             TextSpan(text: l10n.adsLockedMessage),
                           ],
                         ),
@@ -965,6 +961,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 height: 20,
                               ),
                             ),
+                            if (_compactMode)
+                              TextSpan(text: ' ${l10n.adsDisabledStatus}'),
                             TextSpan(
                               text:
                                   ' ${[l10n.adsPleaOne, l10n.adsPleaTwo, l10n.adsPleaThree, l10n.adsPleaFour][Random().nextInt(4)]}',

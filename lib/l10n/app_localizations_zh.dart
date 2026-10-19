@@ -139,13 +139,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get personalizationGlobalHomeDescriptionCompact => '套用至所有交通首頁分頁。';
 
   @override
-  String get adsEnabledDescriptionCompact => '已開啟廣告，感謝支持開發。';
-
-  @override
   String get adsLockedMessageCompact => '切換過於頻繁，已鎖定為開啟。';
-
-  @override
-  String get adDensityLevelHint => '數值越高，顯示的廣告越多。';
 
   @override
   String get adsDisabledStatus => '已關閉廣告。';
@@ -3600,13 +3594,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get personalizationGlobalHomeDescriptionCompact => '套用至所有交通首頁分頁。';
 
   @override
-  String get adsEnabledDescriptionCompact => '已開啟廣告，感謝支持開發。';
-
-  @override
   String get adsLockedMessageCompact => '切換過於頻繁，已鎖定為開啟。';
-
-  @override
-  String get adDensityLevelHint => '數值越高，顯示的廣告越多。';
 
   @override
   String get adsDisabledStatus => '已關閉廣告。';
