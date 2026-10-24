@@ -38,6 +38,10 @@ class _Repository extends BusRepository {
   final primaryRequests = <Completer<RouteDetailData>>[];
   final familyRequests = <_FamilyRequest>[];
   RouteDetailData? recentDetail;
+  bool partialRealtime = false;
+
+  @override
+  bool isRouteRealtimePartial(String routeId) => partialRealtime;
 
   @override
   RouteDetailData? getRecentRouteDetail(
@@ -555,6 +559,22 @@ void main() {
     },
     recentDetail: () => _detail(eta: 120, updatedAt: DateTime.now()),
   );
+
+  _screenTest('partial ETA is refreshed promptly for the full bus snapshot', (
+    tester,
+    repository,
+  ) async {
+    repository.partialRealtime = true;
+    repository.topologyRequests.single.complete(_detail());
+    repository.primaryRequests.single.complete(_detail(eta: 120));
+    await _frames(tester, 8);
+    expect(repository.primaryRequests, hasLength(1));
+
+    for (var index = 0; index < 4; index++) {
+      await tester.pump(const Duration(seconds: 1));
+    }
+    expect(repository.primaryRequests, hasLength(2));
+  });
 
   _screenTest(
     'shows topology and loading ETA before realtime, then preserves scroll',

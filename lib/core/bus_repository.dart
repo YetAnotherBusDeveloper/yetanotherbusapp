@@ -80,6 +80,7 @@ class BusRepository {
     _routeDataGeneration++;
     _clearAllStaticRouteCaches();
     _realtimeCache.clear();
+    _partiallyLoadedRealtimeRoutes.clear();
     _realtimeInFlight.clear();
     _stationPassbyCache.clear();
     _stationPassbyInFlight.clear();
@@ -114,6 +115,7 @@ class BusRepository {
   _stopSearchApiInFlight = {};
   final Map<String, _TimedValue<LiveStopMap>> _realtimeCache =
       <String, _TimedValue<LiveStopMap>>{};
+  final Set<String> _partiallyLoadedRealtimeRoutes = {};
   final Map<String, Future<LiveStopMap>> _realtimeInFlight =
       <String, Future<LiveStopMap>>{};
   final Map<String, _TimedValue<StationPassbyData>> _stationPassbyCache =
@@ -1692,7 +1694,7 @@ class BusRepository {
         routeId: routeId,
         routeNameHint: routeNameHint,
       ),
-      _loadLiveStopResult(routeId),
+      _loadLiveStopResult(routeId, preferCached: true),
     ]);
     final topology = results[0] as RouteDetailData;
     final liveResult = results[1] as _LiveStopResult;
@@ -1740,10 +1742,13 @@ class BusRepository {
     }
   }
 
-  Future<_LiveStopResult> _loadLiveStopResult(String routeId) async {
+  Future<_LiveStopResult> _loadLiveStopResult(
+    String routeId, {
+    bool preferCached = false,
+  }) async {
     try {
       return _LiveStopResult(
-        liveMap: await _getLiveStopMap(routeId),
+        liveMap: await _getLiveStopMap(routeId, preferCached: preferCached),
         hasLiveData: true,
       );
     } catch (_) {
@@ -2799,7 +2804,13 @@ class BusRepository {
   Future<LiveStopMap> getLiveStopMap(String routeId) =>
       _getLiveStopMap(routeId);
 
-  Future<LiveStopMap> _getLiveStopMap(String routeId) async {
+  bool isRouteRealtimePartial(String routeId) =>
+      _partiallyLoadedRealtimeRoutes.contains(routeId);
+
+  Future<LiveStopMap> _getLiveStopMap(
+    String routeId, {
+    bool preferCached = false,
+  }) async {
     final generation = _routeDataGeneration;
     final cached = _readFreshCache(_realtimeCache, routeId, _realtimeCacheTtl);
     if (cached != null) {
@@ -2811,7 +2822,7 @@ class BusRepository {
       return inFlight;
     }
 
-    final future = _loadLiveStopMap(routeId);
+    final future = _loadLiveStopMap(routeId, preferCached: preferCached);
     _realtimeInFlight[routeId] = future;
     try {
       final result = await future;
@@ -2826,10 +2837,15 @@ class BusRepository {
     }
   }
 
-  Future<LiveStopMap> _loadLiveStopMap(String routeId) async {
+  Future<LiveStopMap> _loadLiveStopMap(
+    String routeId, {
+    bool preferCached = false,
+  }) async {
+    final generation = _routeDataGeneration;
     final response = await _client.get(
       Uri.parse(
-        '$_apiBaseUrl/api/v1/routes/${Uri.encodeComponent(routeId)}/realtime',
+        '$_apiBaseUrl/api/v1/routes/${Uri.encodeComponent(routeId)}/realtime'
+        '${preferCached ? '?prefer_cached=true' : ''}',
       ),
       headers: _apiJsonHeaders,
     );
@@ -2842,6 +2858,13 @@ class BusRepository {
 
     final decoded =
         await apiDecodeJsonResponseAsync(response) as Map<String, dynamic>;
+    if (generation == _routeDataGeneration) {
+      if (decoded['partial'] == true) {
+        _partiallyLoadedRealtimeRoutes.add(routeId);
+      } else {
+        _partiallyLoadedRealtimeRoutes.remove(routeId);
+      }
+    }
     final result = <String, LiveStopPayload>{};
 
     for (final rawPath in decoded['paths'] as List<dynamic>? ?? const []) {
@@ -3297,6 +3320,7 @@ class BusRepository {
   }
 
   Future<BatchLiveStopMap> _loadBatchLiveStopMaps(List<String> routeIds) async {
+    final generation = _routeDataGeneration;
     final joinedIds = routeIds.map(Uri.encodeComponent).join(',');
     final uri = Uri.parse(
       '$_apiBaseUrl/api/v1/batchroutes/$joinedIds/realtime',
@@ -3347,6 +3371,9 @@ class BusRepository {
         }
       }
       result[routeId] = liveMap;
+      if (generation == _routeDataGeneration) {
+        _partiallyLoadedRealtimeRoutes.remove(routeId);
+      }
     }
 
     return result;
@@ -3365,6 +3392,7 @@ class BusRepository {
       return;
     }
     _realtimeCache[routeId] = _TimedValue<LiveStopMap>(liveMap);
+    _partiallyLoadedRealtimeRoutes.remove(routeId);
   }
 
   Future<List<RoutePathPoint>> _loadRoutePathPoints(

@@ -544,7 +544,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _startCountdown(
         _refreshBackoff.nextSeconds(
           succeeded: fetchedDetail.hasLiveData,
-          normalSeconds: controller.settings.busUpdateTime,
+          normalSeconds:
+              controller.repository.isRouteRealtimePartial(
+                fetchedDetail.route.routeId,
+              )
+              ? math.min(controller.settings.busUpdateTime, 3)
+              : controller.settings.busUpdateTime,
           errorSeconds: controller.settings.busErrorUpdateTime,
           retryAfter: controller.repository.realtimeRetryAfter,
         ),

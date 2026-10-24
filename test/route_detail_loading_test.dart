@@ -105,6 +105,7 @@ void main() {
             return jsonResponse(stopsPayload('TXG500'));
           }
           if (request.url.path.endsWith('/TXG500/realtime')) {
+            expect(request.url.queryParameters['prefer_cached'], 'true');
             realtimeRequests += 1;
             return realtimeRequests == 1
                 ? jsonResponse(livePayload('TXG500', 120))
@@ -193,6 +194,50 @@ void main() {
       isNull,
     );
   });
+
+  test(
+    'partial cold ETA becomes a complete route snapshot on refresh',
+    () async {
+      var liveRequests = 0;
+      final repository = BusRepository(
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/TXG500/stops')) {
+            return jsonResponse(stopsPayload('TXG500'));
+          }
+          if (request.url.path.endsWith('/TXG500/realtime')) {
+            expect(request.url.queryParameters['prefer_cached'], 'true');
+            liveRequests += 1;
+            if (liveRequests == 1) {
+              return jsonResponse({
+                ...livePayload('TXG500', 120),
+                'partial': true,
+              });
+            }
+            return jsonResponse(livePayload('TXG500', 60));
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+      );
+
+      final first = await repository.getCompleteBusInfo(
+        500,
+        provider: BusProvider.txg,
+        routeIdHint: 'TXG500',
+      );
+      expect(first.stopsByPath[0]!.first.sec, 120);
+      expect(repository.isRouteRealtimePartial('TXG500'), isTrue);
+
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
+      final complete = await repository.getCompleteBusInfo(
+        500,
+        provider: BusProvider.txg,
+        routeIdHint: 'TXG500',
+      );
+      expect(complete.stopsByPath[0]!.first.sec, 60);
+      expect(repository.isRouteRealtimePartial('TXG500'), isFalse);
+      expect(liveRequests, 2);
+    },
+  );
 
   test(
     'stops and selected ETA render independently of slow family requests',
