@@ -175,8 +175,13 @@ String localizedAppUpdateResult(
   AppUpdateStatus.updateAvailable => l10n.appUpdateAvailableResult(
     result.update?.latestDisplayLabel ?? '',
   ),
-  AppUpdateStatus.upToDate => l10n.appUpdateUpToDateResult,
-  AppUpdateStatus.unavailable => l10n.appUpdateUnavailableResult,
+  AppUpdateStatus.upToDate => result.message.trim().isEmpty
+      ? l10n.appUpdateUpToDateResult
+      : result.message,
+  AppUpdateStatus.unavailable =>
+    result.message.trim().isEmpty
+        ? l10n.appUpdateUnavailableResult
+        : '${l10n.appUpdateUnavailableResult}：${result.message}',
 };
 
 String localizedList(AppLocalizations l10n, Iterable<String> values) {
