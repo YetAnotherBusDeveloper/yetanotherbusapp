@@ -95,6 +95,106 @@ void main() {
   });
 
   test(
+    'recent ETA remains available after the network cache expires',
+    () async {
+      final delayedRefresh = Completer<http.Response>();
+      var realtimeRequests = 0;
+      final repository = BusRepository(
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/TXG500/stops')) {
+            return jsonResponse(stopsPayload('TXG500'));
+          }
+          if (request.url.path.endsWith('/TXG500/realtime')) {
+            realtimeRequests += 1;
+            return realtimeRequests == 1
+                ? jsonResponse(livePayload('TXG500', 120))
+                : delayedRefresh.future;
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+      );
+
+      await repository.getCompleteBusInfo(
+        500,
+        provider: BusProvider.txg,
+        routeIdHint: 'TXG500',
+      );
+      expect(
+        repository
+            .getRecentRouteDetail(
+              500,
+              provider: BusProvider.txg,
+              routeIdHint: 'TXG500',
+            )!
+            .stopsByPath[0]!
+            .first
+            .sec,
+        120,
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
+      final refresh = repository.getCompleteBusInfo(
+        500,
+        provider: BusProvider.txg,
+        routeIdHint: 'TXG500',
+      );
+      await until(() => realtimeRequests == 2);
+      expect(
+        repository.getRecentRouteDetail(
+          500,
+          provider: BusProvider.txg,
+          routeIdHint: 'TXG500',
+        ),
+        isNotNull,
+      );
+      delayedRefresh.complete(http.Response('', 502));
+      expect((await refresh).hasLiveData, isFalse);
+      expect(
+        repository.getRecentRouteDetail(
+          500,
+          provider: BusProvider.txg,
+          routeIdHint: 'TXG500',
+        ),
+        isNotNull,
+      );
+    },
+  );
+
+  test('does not preview an ETA with an expired source timestamp', () async {
+    final payload = livePayload('TXG500', 120);
+    final path = (payload['paths'] as List).first as Map;
+    final stop = (path['stops'] as List).first as Map;
+    stop['updated_at'] = DateTime.now()
+        .subtract(const Duration(seconds: 95))
+        .toIso8601String();
+    final repository = BusRepository(
+      client: MockClient((request) async {
+        if (request.url.path.endsWith('/TXG500/stops')) {
+          return jsonResponse(stopsPayload('TXG500'));
+        }
+        if (request.url.path.endsWith('/TXG500/realtime')) {
+          return jsonResponse(payload);
+        }
+        throw StateError('Unexpected request: ${request.url}');
+      }),
+    );
+
+    await repository.getCompleteBusInfo(
+      500,
+      provider: BusProvider.txg,
+      routeIdHint: 'TXG500',
+    );
+    expect(
+      repository.getRecentRouteDetail(
+        500,
+        provider: BusProvider.txg,
+        routeIdHint: 'TXG500',
+      ),
+      isNull,
+    );
+  });
+
+  test(
     'stops and selected ETA render independently of slow family requests',
     () async {
       final stops = Completer<http.Response>();

@@ -2128,6 +2128,25 @@ class RouteDetailData {
   final List<String> familyRouteIds;
 }
 
+/// Whether a previous route detail can supply an ETA while a fresh request runs.
+/// Do not present a partial old snapshot as current when one of its ETA stops
+/// has already exceeded the realtime age limit.
+bool hasFreshRouteEta(RouteDetailData detail, {DateTime? now}) {
+  final clock = now ?? DateTime.now();
+  var hasEta = false;
+  for (final stops in detail.stopsByPath.values) {
+    for (final stop in stops) {
+      if (stop.sec == null && (stop.msg?.trim().isNotEmpty != true)) continue;
+      final updatedAt = stopRealtimeUpdatedAt(stop, now: clock);
+      if (updatedAt == null || isStopRealtimeStale(stop, now: clock)) {
+        return false;
+      }
+      hasEta = true;
+    }
+  }
+  return hasEta;
+}
+
 class StopRouteSearchResult {
   const StopRouteSearchResult({
     required this.route,

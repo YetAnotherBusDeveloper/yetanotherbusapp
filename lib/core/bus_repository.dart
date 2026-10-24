@@ -45,6 +45,7 @@ class BusRepository {
   Map<String, String> get _apiJsonHeaders =>
       ApiUserAgent.applyTo(apiJsonHeaders);
   static const _routeDetailCacheTtl = Duration(seconds: 2);
+  static const _recentRouteDetailCapacity = 8;
   static const _routeTopologyCacheTtl = Duration(minutes: 30);
   static const _routeFamilyCacheTtl = Duration(minutes: 30);
   static const _searchApiCacheTtl = Duration(seconds: 2);
@@ -61,6 +62,7 @@ class BusRepository {
   static const _taichungCancelledDepartureCacheTtl = Duration(hours: 2);
   final Map<String, _TimedValue<RouteDetailData>> _routeDetailCache =
       <String, _TimedValue<RouteDetailData>>{};
+  final Map<String, _TimedValue<RouteDetailData>> _recentRouteDetails = {};
   final Map<String, Future<RouteDetailData>> _routeDetailInFlight =
       <String, Future<RouteDetailData>>{};
   int _routeDataGeneration = 0;
@@ -86,6 +88,7 @@ class BusRepository {
     _routeAlertsCache.clear();
     _routeAlertsInFlight.clear();
     _routeDetailCache.clear();
+    _recentRouteDetails.clear();
     _routeDetailInFlight.clear();
     _routeStopsApiCache.clear();
     _routeStopsApiInFlight.clear();
@@ -1385,6 +1388,13 @@ class BusRepository {
       final detail = await future;
       if (generation == _routeDataGeneration) {
         _routeDetailCache[cacheKey] = _TimedValue<RouteDetailData>(detail);
+        if (hasFreshRouteEta(detail)) {
+          _recentRouteDetails.remove(cacheKey);
+          while (_recentRouteDetails.length >= _recentRouteDetailCapacity) {
+            _recentRouteDetails.remove(_recentRouteDetails.keys.first);
+          }
+          _recentRouteDetails[cacheKey] = _TimedValue<RouteDetailData>(detail);
+        }
       }
       return detail;
     } finally {
@@ -1392,6 +1402,37 @@ class BusRepository {
         _routeDetailInFlight.remove(cacheKey);
       }
     }
+  }
+
+  /// Last known ETA for an instant route-detail preview; callers still fetch
+  /// the latest snapshot normally. Source timestamps, not cache age alone,
+  /// determine whether it is safe to show.
+  RouteDetailData? getRecentRouteDetail(
+    int routeKey, {
+    required BusProvider provider,
+    String? routeIdHint,
+  }) {
+    final prefix = '${provider.name}:';
+    final hint = routeIdHint?.trim();
+    final Iterable<_TimedValue<RouteDetailData>?> entries =
+        hint != null && hint.isNotEmpty
+        ? [_recentRouteDetails['$prefix$hint']]
+        : _recentRouteDetails.entries
+              .where((entry) => entry.key.startsWith(prefix))
+              .map((entry) => entry.value);
+    for (final entry in entries) {
+      if (entry == null ||
+          (hint == null || hint.isEmpty) &&
+              entry.value.route.routeKey != routeKey) {
+        continue;
+      }
+      if (DateTime.now().difference(entry.createdAt) > maxRealtimeStopAge ||
+          !hasFreshRouteEta(entry.value)) {
+        continue;
+      }
+      return entry.value;
+    }
+    return null;
   }
 
   Future<RouteDetailData> getRouteTopology(

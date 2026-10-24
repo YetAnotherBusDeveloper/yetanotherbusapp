@@ -37,6 +37,14 @@ class _Repository extends BusRepository {
   final topologyRequests = <Completer<RouteDetailData>>[];
   final primaryRequests = <Completer<RouteDetailData>>[];
   final familyRequests = <_FamilyRequest>[];
+  RouteDetailData? recentDetail;
+
+  @override
+  RouteDetailData? getRecentRouteDetail(
+    int routeKey, {
+    required BusProvider provider,
+    String? routeIdHint,
+  }) => recentDetail;
 
   @override
   Future<RouteDetailData> getRouteTopology(
@@ -213,6 +221,8 @@ void _screenTest(
   Future<void> Function(WidgetTester, _Repository) body, {
   Locale locale = const Locale('zh', 'TW'),
   int initialFrameCount = 5,
+  RouteDetailData? Function()? recentDetail,
+  RouteDetailData? Function()? initialTopology,
 }) {
   testWidgets(name, (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -220,6 +230,7 @@ void _screenTest(
     GeolocatorPlatform.instance = _NoLocation();
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     final repository = _Repository();
+    repository.recentDetail = recentDetail?.call();
     final controller = await _controller(repository);
     try {
       await tester.pumpWidget(
@@ -230,12 +241,15 @@ void _screenTest(
             localizationsDelegates: AppLocalizations.localizationsDelegates,
             supportedLocales: AppLocalizations.supportedLocales,
             navigatorObservers: [appRouteObserver],
-            home: const RouteDetailScreen(
+            home: RouteDetailScreen(
               routeKey: 500,
               provider: BusProvider.tpe,
               routeIdHint: 'TPE500',
               routeNameHint: '標題提示',
               initialPathId: 1,
+              initialTopologyFuture: initialTopology == null
+                  ? null
+                  : Future<RouteDetailData?>.value(initialTopology()),
               suppressAutoDestinationSelection: true,
             ),
           ),
@@ -512,6 +526,35 @@ void main() {
     expect(stopsFade, findsOneWidget);
     expect(tester.widget<FadeTransition>(stopsFade).opacity.value, 1);
   });
+
+  _screenTest(
+    'shows a prefetched ETA while the new realtime request is pending',
+    (tester, repository) async {
+      expect(repository.primaryRequests, hasLength(1));
+      expect(find.text('2分'), findsWidgets);
+      expect(find.text('載入中'), findsNothing);
+
+      repository.primaryRequests.single.complete(_detail(eta: 60));
+      await _frames(tester, 8);
+      expect(find.text('1分'), findsWidgets);
+    },
+    initialTopology: () => _detail(eta: 120, updatedAt: DateTime.now()),
+  );
+
+  _screenTest(
+    'reopening a route shows its recent ETA before topology or realtime loads',
+    (tester, repository) async {
+      expect(repository.topologyRequests, isEmpty);
+      expect(repository.primaryRequests, hasLength(1));
+      expect(find.text('2分'), findsWidgets);
+      expect(find.text('載入中'), findsNothing);
+
+      repository.primaryRequests.single.complete(_detail());
+      await _frames(tester, 8);
+      expect(find.text('2分'), findsWidgets);
+    },
+    recentDetail: () => _detail(eta: 120, updatedAt: DateTime.now()),
+  );
 
   _screenTest(
     'shows topology and loading ETA before realtime, then preserves scroll',

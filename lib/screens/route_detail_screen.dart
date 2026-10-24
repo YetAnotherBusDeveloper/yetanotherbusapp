@@ -410,7 +410,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     final requestId = ++_refreshRequestId;
     final controller = AppControllerScope.read(context);
     final l10n = AppLocalizations.of(context);
-    final previousDetail = _detail;
+    final previousDetail =
+        _detail ??
+        controller.repository.getRecentRouteDetail(
+          widget.routeKey,
+          provider: widget.provider,
+          routeIdHint: widget.routeIdHint,
+        );
 
     if (setLoadingState) {
       setState(() {
@@ -424,6 +430,18 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _isFamilyLoading = false;
       _error = null;
       _status = _RouteDetailStatus.loadingRoute;
+    }
+
+    if (_detail == null && previousDetail != null) {
+      // Reopening a route need not hide an already observed ETA while the
+      // regular topology and realtime request refresh it in the background.
+      _syncLiveMapData(previousDetail);
+      _syncTabController(previousDetail);
+      _detail = previousDetail;
+      _isLoading = false;
+      _hasCompletedInitialRealtime = true;
+      _status = _RouteDetailStatus.loadingRealtime;
+      _scheduleInitialStopsReveal();
     }
 
     final primaryDetailFuture = controller
@@ -458,6 +476,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           setState(() {
             _detail = topology;
             _isLoading = false;
+            _hasCompletedInitialRealtime = hasFreshRouteEta(topology);
             _status = _RouteDetailStatus.loadingRealtime;
           });
           _scheduleInitialStopsReveal();
@@ -484,8 +503,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         return;
       }
 
-      final displayDetail = !fetchedDetail.hasLiveData && previousDetail != null
-          ? _mergeDetailWithPreviousLiveData(fetchedDetail, previousDetail)
+      final priorLiveDetail =
+          previousDetail ?? (_hasCompletedInitialRealtime ? _detail : null);
+      final displayDetail =
+          !fetchedDetail.hasLiveData && priorLiveDetail != null
+          ? _mergeDetailWithPreviousLiveData(fetchedDetail, priorLiveDetail)
           : fetchedDetail;
 
       _syncLiveMapData(displayDetail);
