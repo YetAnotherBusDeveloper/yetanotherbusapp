@@ -1,10 +1,16 @@
 {
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^22.23.4 || ^24.22.1 || ^26.12.1"
+  },
   "scripts": {
-    "serve:web": "wrangler dev",
+    "preinstall": "node scripts/check-node-version.mjs",
+    "preserve:web": "node scripts/check-node-version.mjs",
+    "serve:web": "flutter run -d web-server --web-hostname=127.0.0.1 --web-port=8080",
     "predeploy:web": "node scripts/stamp-web-build.mjs",
-    "deploy:web": "wrangler deploy"
+    "deploy:web": "wrangler deploy",
+    "test:node": "node --test test/node_version_test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.21.0"

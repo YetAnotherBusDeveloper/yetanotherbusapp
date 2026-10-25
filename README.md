@@ -136,6 +136,7 @@ https://github.com/YetAnotherBusDeveloper/yetanotherbusapp/releases/latest
 - Flutter 3.x+
 - Dart SDK
 - Android Studio / VS Code
+- Node.js 24.22.1（Web 工具；版本記錄於 `.node-version`）
 
 ### Clone
 
@@ -149,6 +150,15 @@ cd yetanotherbusapp
 ```bash
 flutter pub get
 ```
+
+Web 開發／部署工具先切換至 `.node-version` 指定的 Node.js，再執行 `npm ci`。
+支援的安全版本為 Node.js `22.23.4+`、`24.22.1+`、`26.12.1+`（各自的主版本），
+修補 [CVE-2026-111497 / HTTP2Shell](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases)。
+安裝、Web 開發與部署命令會拒絕舊版 Node.js；只更新 npm 套件無法修補 Node 內建的解碼器。
+App 的 `brotli` 套件為純 Dart 實作，未連結此次受影響的原生 C 解碼器。
+`npm run serve:web` 改用 Flutter Web 開發伺服器（`http://127.0.0.1:8080`）。
+Wrangler 依賴的本機 `workerd` 仍內嵌舊版 Brotli，因此暫停以 `wrangler dev`
+執行本機 Worker；Wrangler 僅用於部署，由指定的安全版 Node.js 執行。
 
 ### Run
 

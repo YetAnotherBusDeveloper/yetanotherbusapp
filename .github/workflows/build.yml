@@ -34,6 +34,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Set up patched Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+
+      - name: Test Node.js runtime requirements
+        run: npm run test:node
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -241,6 +249,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Set up patched Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
