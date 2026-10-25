@@ -17,6 +17,7 @@
  * Run after `flutter build web` and before deploying. `npm run deploy:web`
  * runs it automatically via the predeploy:web hook.
  */
+import './check-node-version.mjs';
 import { execSync } from 'node:child_process';
 import {
   existsSync,
