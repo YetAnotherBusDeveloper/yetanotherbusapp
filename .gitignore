@@ -32,6 +32,7 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .npm/
 node_modules/
+.wrangler/
 .pub-cache/
 .pub/
 /build/

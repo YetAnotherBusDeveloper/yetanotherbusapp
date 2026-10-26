@@ -76,7 +76,9 @@ YetAnotherBusApp（YABus）是一個以 Flutter 開發的跨平台公車動態�
 
 ## 線上體驗
 
-https://busapp.avianjay.sbs/
+宣傳首頁：https://busapp.avianjay.sbs/
+
+網頁版：https://busapp.avianjay.sbs/app/
 
 
 ## 下載
@@ -168,6 +170,15 @@ Web
 
 ```bash
 flutter build web
+```
+
+本機預覽宣傳首頁與網頁版路由（直接執行 `flutter run -d chrome` 仍只會開 Flutter App）：
+
+```bash
+npm ci
+npm run predeploy:web
+npm run verify:web
+npm run serve:web
 ```
 
 Windows

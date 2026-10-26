@@ -69,12 +69,22 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="yabus" />
             </intent-filter>
+            <!-- Keep the marketing home and /app/ in the browser; open only
+                 actual shared App destinations as Android App Links. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="busapp.avianjay.sbs" />
                 <data android:scheme="http" android:host="busapp.avianjay.sbs" />
+                <data android:pathPrefix="/route/" />
+                <data android:pathPrefix="/station/" />
+                <data android:path="/map" />
+                <data android:path="/search" />
+                <data android:path="/nearby" />
+                <data android:path="/favorites" />
+                <data android:path="/announcement" />
+                <data android:pathPrefix="/announcement/" />
             </intent-filter>
         </activity>
         <activity

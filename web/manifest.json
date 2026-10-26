@@ -1,7 +1,7 @@
 {
     "name": "YetAnotherBusApp",
     "short_name": "YABus",
-    "start_url": "/",
+    "start_url": "/app/",
     "display": "standalone",
     "background_color": "#ff6f1f",
     "theme_color": "#ff6f1f",
