@@ -4,6 +4,15 @@ import 'package:taiwanbus_flutter/core/app_routes.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 
 void main() {
+  test('web entry paths open the App home without changing native home', () {
+    expect(parseAppRoute('/').kind, AppRouteKind.home);
+    expect(parseAppRoute('/').location, AppRoutes.home);
+    expect(parseAppRoute('/app').kind, AppRouteKind.home);
+    expect(parseAppRoute('/app').location, AppRoutes.webHome);
+    expect(parseAppRoute('/app/').kind, AppRouteKind.home);
+    expect(parseAppRoute('/app/').location, AppRoutes.webHome);
+  });
+
   test('parseAppRoute recognizes feedback route', () {
     final intent = parseAppRoute('/feedback');
 
