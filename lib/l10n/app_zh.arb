@@ -423,7 +423,7 @@
   "@etaNotDepartedMinutes": {"placeholders": {"minutes": {"type": "int"}}},
   "etaDepartureUnconfirmedMinutes": "未確認\n逾{minutes}分",
   "@etaDepartureUnconfirmedMinutes": {"placeholders": {"minutes": {"type": "int"}}},
-  "etaScheduledDeparture": "表定\n{time}",
+  "etaScheduledDeparture": "{time}",
   "@etaScheduledDeparture": {"placeholders": {"time": {"type": "String"}}},
   "etaNextDeparture": "下班表定\n{time}",
   "@etaNextDeparture": {"placeholders": {"time": {"type": "String"}}},

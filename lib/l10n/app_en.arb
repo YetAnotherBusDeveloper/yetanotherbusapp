@@ -423,7 +423,7 @@
   "@etaNotDepartedMinutes": {"placeholders": {"minutes": {"type": "int"}}},
   "etaDepartureUnconfirmedMinutes": "Unconfirmed\n{minutes}m overdue",
   "@etaDepartureUnconfirmedMinutes": {"placeholders": {"minutes": {"type": "int"}}},
-  "etaScheduledDeparture": "Scheduled\n{time}",
+  "etaScheduledDeparture": "{time}",
   "@etaScheduledDeparture": {"placeholders": {"time": {"type": "String"}}},
   "etaNextDeparture": "Next scheduled\n{time}",
   "@etaNextDeparture": {"placeholders": {"time": {"type": "String"}}},

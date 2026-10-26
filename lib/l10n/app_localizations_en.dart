@@ -1347,7 +1347,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String etaScheduledDeparture(String time) {
-    return 'Scheduled\n$time';
+    return '$time';
   }
 
   @override

@@ -2071,11 +2071,11 @@ class DepartureInfo {
   String label(DateTime now, {AppLocalizations? l10n}) {
     if (now.isBefore(scheduledAt)) {
       final time = clockText(scheduledAt);
-      return l10n?.etaScheduledDeparture(time) ?? '表定\n$time';
+      return l10n?.etaScheduledDeparture(time) ?? time;
     }
     if (showsNext(now)) {
       final time = clockText(nextScheduledAt!);
-      return l10n?.etaNextDeparture(time) ?? '下班表定\n$time';
+      return l10n?.etaNextDeparture(time) ?? '下班\n$time';
     }
     final minutes = overdueMinutes(now);
     if (confirmedNotDeparted(now)) {

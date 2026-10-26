@@ -56,8 +56,20 @@ void main() {
     expect(presentation(refreshed, now).text, '未發車\n6分');
   });
 
-  test('before departure shows an explicitly scheduled origin time', () {
-    expect(presentation(pending, at('09:59')).text, '表定\n10:00');
+  test('before departure shows only the time in every locale', () {
+    expect(presentation(pending, at('09:59')).text, '10:00');
+    for (final locale in AppLocalizations.supportedLocales) {
+      final l10n = lookupAppLocalizations(locale);
+      expect(
+        buildEtaPresentation(
+          pending,
+          alwaysShowSeconds: true,
+          now: at('09:59'),
+          l10n: l10n,
+        ).text,
+        '10:00',
+      );
+    }
     expect(presentation(pending, at('09:59')).description, '起點表定 10:00 發車');
   });
 
@@ -78,7 +90,7 @@ void main() {
     () {
       expect(presentation(pending, at('10:09')).text, '未確認\n逾9分');
       final afterGrace = presentation(pending, at('10:10'));
-      expect(afterGrace.text, '下班表定\n10:20');
+      expect(afterGrace.text, '下班\n10:20');
       expect(afterGrace.description, contains('前班起點表定 10:00'));
       expect(afterGrace.description, contains('動態未確認'));
       expect(presentation(pending, at('10:21')).text, '未確認\n逾21分');

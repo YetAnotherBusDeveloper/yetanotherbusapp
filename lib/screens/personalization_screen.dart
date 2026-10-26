@@ -9,6 +9,7 @@ import '../app/bus_app.dart';
 import '../core/models.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/background_image_wrapper.dart';
+import '../widgets/settings_scaffold.dart';
 
 /// Preset seed colors for quick selection.
 const _presetColors = <Color>[
@@ -102,7 +103,7 @@ class PersonalizationScreen extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isAmoled = settings.useAmoledDark && isDark;
 
-    return Scaffold(
+    return SettingsScaffold(
       appBar: AppBar(title: Text(l10n.personalizationTitle)),
       body: Center(
         child: ConstrainedBox(
@@ -750,7 +751,7 @@ class _PerPageBackgroundScreen extends StatelessWidget {
         settings.useAmoledDark &&
         Theme.of(context).brightness == Brightness.dark;
 
-    return Scaffold(
+    return SettingsScaffold(
       appBar: AppBar(title: Text(l10n.personalizationPerPageBackgroundTitle)),
       body: Center(
         child: ConstrainedBox(
@@ -1778,8 +1779,8 @@ class _PageBackgroundRow extends StatelessWidget {
     final isGif = hasImage && imagePath!.toLowerCase().endsWith('.gif');
     final l10n = AppLocalizations.of(context);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
+    final content = Padding(
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1871,6 +1872,7 @@ class _PageBackgroundRow extends StatelessWidget {
         ],
       ),
     );
+    return Card(margin: const EdgeInsets.only(bottom: 14), child: content);
   }
 }
 

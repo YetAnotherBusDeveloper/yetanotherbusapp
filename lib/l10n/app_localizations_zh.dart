@@ -1233,7 +1233,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String etaScheduledDeparture(String time) {
-    return '表定\n$time';
+    return '$time';
   }
 
   @override
@@ -4600,7 +4600,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String etaScheduledDeparture(String time) {
-    return '表定\n$time';
+    return '$time';
   }
 
   @override

@@ -2208,7 +2208,7 @@ abstract class AppLocalizations {
   /// No description provided for @etaScheduledDeparture.
   ///
   /// In en, this message translates to:
-  /// **'Scheduled\n{time}'**
+  /// **'{time}'**
   String etaScheduledDeparture(String time);
 
   /// No description provided for @etaNextDeparture.

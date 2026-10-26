@@ -8,6 +8,7 @@ import '../core/models.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 import '../widgets/app_dropdown.dart';
+import '../widgets/settings_scaffold.dart';
 
 class DatabaseSettingsScreen extends StatelessWidget {
   const DatabaseSettingsScreen({super.key});
@@ -102,7 +103,7 @@ class DatabaseSettingsScreen extends StatelessWidget {
             defaultTargetPlatform == TargetPlatform.linux ||
             defaultTargetPlatform == TargetPlatform.macOS);
 
-    return Scaffold(
+    return SettingsScaffold(
       appBar: AppBar(title: Text(l10n.databaseDownloadsTitle)),
       body: Center(
         child: ConstrainedBox(

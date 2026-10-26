@@ -23,7 +23,7 @@ import '../widgets/app_update_dialog.dart';
 import 'account_screen.dart';
 import 'database_settings_screen.dart';
 import 'personalization_screen.dart';
-import '../widgets/background_image_wrapper.dart';
+import '../widgets/settings_scaffold.dart';
 
 enum _SettingsCategory {
   appearance,
@@ -490,14 +490,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = AppControllerScope.of(context);
     final l10n = AppLocalizations.of(context);
     final category = _selectedCategory;
     final isDialog = ModalRoute.of(context) is PopupRoute;
-    final hasSettingsBackgroundImage = hasBackgroundImageForPage(
-      controller.settings,
-      pageKey: 'settings',
-    );
 
     return PopScope<void>(
       // Scrim clicks and Escape dismiss the dialog. Category back is handled
@@ -508,53 +503,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _returnToCategories();
         }
       },
-      child: BackgroundImageWrapper(
-        pageKey: 'settings',
-        child: Scaffold(
-          backgroundColor: hasSettingsBackgroundImage
-              ? Colors.transparent
-              : null,
-          appBar: AppBar(
-            title: Text(
-              category == null
-                  ? l10n.settingsTitle
-                  : _categoryTitle(l10n, category),
-            ),
-            leading: category == null
-                ? null
-                : BackButton(onPressed: _returnToCategories),
+      child: SettingsScaffold(
+        appBar: AppBar(
+          title: Text(
+            category == null
+                ? l10n.settingsTitle
+                : _categoryTitle(l10n, category),
           ),
-          body: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 860),
-              child: PageStorage(
-                bucket: _pageStorageBucket,
-                child: ListView(
-                  key: PageStorageKey(category?.name ?? 'categories'),
-                  primary: false,
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                  children: [
-                    if (category == null)
-                      ..._buildCategories(context)
-                    else
-                      ListTileTheme(
-                        data: ListTileThemeData(
-                          minVerticalPadding: 12,
-                          subtitleTextStyle: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                                height: 1.6,
-                              ),
-                        ),
-                        child: _buildCategory(context, category),
+          leading: category == null
+              ? null
+              : BackButton(onPressed: _returnToCategories),
+        ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 860),
+            child: PageStorage(
+              bucket: _pageStorageBucket,
+              child: ListView(
+                key: PageStorageKey(category?.name ?? 'categories'),
+                primary: false,
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                children: [
+                  if (category == null)
+                    ..._buildCategories(context)
+                  else
+                    ListTileTheme(
+                      data: ListTileThemeData(
+                        minVerticalPadding: 12,
+                        subtitleTextStyle: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                              height: 1.6,
+                            ),
                       ),
-                    const AdBannerWidget(minimumDensity: 4, isInline: true),
-                  ],
-                ),
+                      child: _buildCategory(context, category),
+                    ),
+                  const AdBannerWidget(minimumDensity: 4, isInline: true),
+                ],
               ),
             ),
           ),
