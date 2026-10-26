@@ -2070,6 +2070,7 @@ class BusRepository {
             msg: stationStop.msg,
             t: stationStop.t,
             etaReferenceAt: stationStop.etaReferenceAt,
+            departure: stationStop.departure,
             buses: stationStop.buses,
             etas: stationStop.etas,
           );
@@ -2263,6 +2264,7 @@ class BusRepository {
         msg: livePayload?.msg,
         t: livePayload?.t,
         etaReferenceAt: livePayload?.etaReferenceAt,
+        departure: livePayload?.departure,
         buses: livePayload?.buses ?? const [],
         etas: livePayload?.etas ?? const [],
       );
@@ -2380,6 +2382,7 @@ class BusRepository {
         msg: livePayload?.msg,
         t: livePayload?.t,
         etaReferenceAt: livePayload?.etaReferenceAt,
+        departure: livePayload?.departure,
         buses: livePayload?.buses ?? const [],
         etas: livePayload?.etas ?? const [],
       );
@@ -2489,10 +2492,12 @@ class BusRepository {
               final payload =
                   liveMap[_stopCompositeKey(stop.pathId, stop.stopId)];
               return stop.copyWith(
+                replaceLiveData: true,
                 sec: payload?.sec,
                 msg: payload?.msg,
                 t: payload?.t,
                 etaReferenceAt: payload?.etaReferenceAt,
+                departure: payload?.departure,
                 buses: payload?.buses ?? const [],
                 etas: payload?.etas ?? const [],
               );
@@ -2882,6 +2887,7 @@ class BusRepository {
           msg: rawStop['message']?.toString(),
           t: rawStop['updated_at']?.toString(),
           etaReferenceAt: _etaReferenceAt(rawStop),
+          departure: DepartureInfo.fromJson(rawStop['departure']),
           buses: (rawStop['buses'] as List<dynamic>? ?? const [])
               .whereType<Map>()
               .map(_parseBusVehicle)
@@ -3060,6 +3066,7 @@ class BusRepository {
           msg: rawRoute['message']?.toString(),
           t: rawRoute['updated_at']?.toString(),
           etaReferenceAt: _etaReferenceAt(rawRoute),
+          departure: DepartureInfo.fromJson(rawRoute['departure']),
           buses: (rawRoute['buses'] as List? ?? const [])
               .whereType<Map>()
               .map(_parseBusVehicle)
@@ -3187,6 +3194,7 @@ class BusRepository {
         msg: rawRoute['message']?.toString(),
         t: rawRoute['updated_at']?.toString(),
         etaReferenceAt: _etaReferenceAt(rawRoute),
+        departure: DepartureInfo.fromJson(rawRoute['departure']),
         buses: (rawRoute['buses'] as List<dynamic>? ?? const [])
             .whereType<Map>()
             .map(_parseBusVehicle)
@@ -3362,6 +3370,7 @@ class BusRepository {
             msg: rawStop['message']?.toString(),
             t: rawStop['updated_at']?.toString(),
             etaReferenceAt: _etaReferenceAt(rawStop),
+            departure: DepartureInfo.fromJson(rawStop['departure']),
             buses: (rawStop['buses'] as List<dynamic>? ?? const [])
                 .whereType<Map>()
                 .map(_parseBusVehicle)
@@ -5467,6 +5476,7 @@ class LiveStopPayload {
     required this.msg,
     required this.t,
     this.etaReferenceAt,
+    this.departure,
     required this.buses,
     required this.etas,
   });
@@ -5475,6 +5485,7 @@ class LiveStopPayload {
   final String? msg;
   final String? t;
   final String? etaReferenceAt;
+  final DepartureInfo? departure;
   final List<BusVehicle> buses;
   final List<StopEta> etas;
 }

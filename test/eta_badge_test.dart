@@ -5,6 +5,49 @@ import 'package:taiwanbus_flutter/l10n/app_localizations.dart';
 import 'package:taiwanbus_flutter/widgets/eta_badge.dart';
 
 void main() {
+  testWidgets('departure badge fits two lines and transitions to real ETA', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final waiting = StopInfo(
+      routeKey: 500,
+      pathId: 0,
+      stopId: 1,
+      stopName: 'Origin',
+      sequence: 1,
+      lon: 120.6,
+      lat: 24.1,
+      departure: DepartureInfo(
+        scheduledAt: now.subtract(const Duration(minutes: 5)),
+        observedAt: now,
+        reportedNotDeparted: true,
+      ),
+    );
+    Widget app(StopInfo stop) => MaterialApp(
+      locale: const Locale('zh', 'TW'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Center(child: EtaBadge(stop: stop, alwaysShowSeconds: false)),
+    );
+    await tester.pumpWidget(app(waiting));
+    expect(find.text('未發車\n5分'), findsOneWidget);
+    expect(tester.getSize(find.byType(EtaBadge)), const Size(58, 58));
+    expect(
+      tester.widget<Tooltip>(find.byType(Tooltip)).message,
+      contains('已逾表定 5 分鐘'),
+    );
+    final live = waiting.copyWith(
+      replaceLiveData: true,
+      sec: 720,
+    );
+    await tester.pumpWidget(app(live));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('未發車\n5分'), findsNothing);
+    expect(find.text('12分'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   const stop = StopInfo(
     routeKey: 1,
     pathId: 0,

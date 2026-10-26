@@ -260,10 +260,12 @@ class _NearbyScreenState extends State<NearbyScreen> {
       return item.stop;
     }
     return item.stop.copyWith(
+      replaceLiveData: true,
       sec: payload.sec,
       msg: payload.msg,
       t: payload.t,
       etaReferenceAt: payload.etaReferenceAt,
+      departure: payload.departure,
       buses: payload.buses,
       etas: payload.etas,
     );

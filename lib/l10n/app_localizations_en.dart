@@ -1336,6 +1336,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get etaLoading => 'Loading';
 
   @override
+  String etaNotDepartedMinutes(int minutes) {
+    return 'Not departed\n${minutes}m late';
+  }
+
+  @override
+  String etaDepartureUnconfirmedMinutes(int minutes) {
+    return 'Unconfirmed\n${minutes}m overdue';
+  }
+
+  @override
+  String etaScheduledDeparture(String time) {
+    return 'Scheduled\n$time';
+  }
+
+  @override
+  String etaNextDeparture(String time) {
+    return 'Next scheduled\n$time';
+  }
+
+  @override
+  String etaOriginDeparture(String time) {
+    return 'Scheduled departure from origin: $time';
+  }
+
+  @override
+  String etaDeparturePendingDetails(String time, int minutes) {
+    return 'Scheduled to leave the origin at $time; $minutes minutes past departure. The source reports not departed.';
+  }
+
+  @override
+  String etaDepartureUnknownDetails(String time, int minutes) {
+    return 'Previous trip scheduled to leave the origin at $time; $minutes minutes past departure. Departure is unconfirmed.';
+  }
+
+  @override
   String get etaArriving => 'Arriving';
 
   @override

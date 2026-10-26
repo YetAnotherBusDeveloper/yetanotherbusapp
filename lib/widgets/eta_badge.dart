@@ -41,17 +41,36 @@ class _EtaBadgeState extends State<EtaBadge> {
 
   void _scheduleExpiry() {
     _expiryTimer?.cancel();
+    final now = DateTime.now();
+    final boundaries = <DateTime>[];
     final updatedAt = stopRealtimeUpdatedAt(widget.stop);
-    if (updatedAt == null) return;
-    final remaining = updatedAt
-        .add(maxRealtimeStopAge)
-        .difference(DateTime.now());
-    if (remaining.isNegative) return;
-    // One expiry notification, not a per-stop polling loop. The stale state
-    // must become visible even while the parent is waiting for network recovery.
-    _expiryTimer = Timer(remaining + const Duration(milliseconds: 1), () {
-      if (mounted) setState(() {});
-    });
+    if (updatedAt != null) boundaries.add(updatedAt.add(maxRealtimeStopAge));
+    final departure = widget.stop.departure;
+    if (departure != null && showsDepartureStatus(widget.stop, now: now)) {
+      boundaries.addAll([
+        departure.scheduledAt,
+        departure.scheduledAt.add(departure.grace),
+        if (departure.nextScheduledAt != null) departure.nextScheduledAt!,
+        if (departure.observedAt != null)
+          departure.observedAt!.add(maxRealtimeStopAge),
+        if (!now.isBefore(departure.scheduledAt) && !departure.showsNext(now))
+          departure.scheduledAt.add(
+            Duration(minutes: departure.overdueMinutes(now) + 1),
+          ),
+      ]);
+    }
+    final future = boundaries.where((time) => !time.isBefore(now)).toList()
+      ..sort();
+    if (future.isEmpty) return;
+    // Wake at a state/minute boundary, never once per second per stop.
+    _expiryTimer = Timer(
+      future.first.difference(now) + const Duration(milliseconds: 1),
+      () {
+        if (!mounted) return;
+        setState(() {});
+        _scheduleExpiry();
+      },
+    );
   }
 
   @override
@@ -77,16 +96,17 @@ class _EtaBadgeState extends State<EtaBadge> {
       secondsText: l10n.etaSeconds,
       minutesText: l10n.etaMinutes,
       minutesSecondsText: l10n.etaMinutesSeconds,
+      l10n: l10n,
     );
     final fontSize = size * 0.24;
 
     final updatedAt = stopRealtimeUpdatedAt(stop);
     return Tooltip(
-      message: updatedAt == null
-          ? ''
-          : l10n.etaLastUpdated(
-              updatedAt.toLocal().toString().split('.').first,
-            ),
+      message: [
+        if (eta.description != null) eta.description!,
+        if (updatedAt != null)
+          l10n.etaLastUpdated(updatedAt.toLocal().toString().split('.').first),
+      ].join('\n'),
       child: AnimatedContainer(
         duration: AppMotion.duration(context),
         curve: AppMotion.curve,
@@ -103,19 +123,25 @@ class _EtaBadgeState extends State<EtaBadge> {
           duration: AppMotion.duration(context),
           switchInCurve: AppMotion.curve,
           switchOutCurve: AppMotion.curve,
-          child: Text(
+          child: FittedBox(
             key: ValueKey((isLoading, isLoading ? l10n.etaLoading : eta.text)),
-            isLoading ? l10n.etaLoading : eta.text,
-            textAlign: TextAlign.center,
-            softWrap: true,
-            maxLines: 2,
-            style: TextStyle(
-              color: isLoading
-                  ? theme.colorScheme.onSurfaceVariant
-                  : eta.foregroundColor,
-              fontWeight: FontWeight.w700,
-              fontSize: fontSize,
-              height: 1.1,
+            fit: BoxFit.scaleDown,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Text(
+                isLoading ? l10n.etaLoading : eta.text,
+                textAlign: TextAlign.center,
+                softWrap: true,
+                maxLines: 2,
+                style: TextStyle(
+                  color: isLoading
+                      ? theme.colorScheme.onSurfaceVariant
+                      : eta.foregroundColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: fontSize,
+                  height: 1.1,
+                ),
+              ),
             ),
           ),
         ),

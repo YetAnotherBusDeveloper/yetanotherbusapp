@@ -188,6 +188,52 @@ class RouteTripMonitorServiceTest {
         assertEquals(0, ReflectionHelpers.getField(service, "destinationAlertStage"))
     }
 
+    @Test
+    fun mergedFlutterSnapshotReplacesThePrimaryCacheWithoutResettingTheRide() {
+        fun payload(seconds: Int, family: List<String>, vehicle: String) = sessionPayload() + mapOf(
+            "routeId" to "TXG1",
+            "familyRouteIds" to family,
+            "stops" to listOf(mapOf(
+                "stopId" to 1, "rawStopId" to "RAW-1", "stopName" to "測試站",
+                "lat" to 24.1, "lon" to 120.6,
+                "liveData" to mapOf("eta" to seconds, "buses" to listOf(mapOf("id" to vehicle))),
+            )),
+        )
+        service.onStartCommand(startIntent(payload(600, emptyList(), "MAIN-001")), 0, 1)
+        ReflectionHelpers.setField(service, "rideConfirmed", true)
+        ReflectionHelpers.setField(service, "trackedBusId", "FAMILY-001")
+        service.onStartCommand(startIntent(payload(60, listOf("TXG1", "TXG2"), "FAMILY-001")), 0, 2)
+
+        val session = ReflectionHelpers.getField<TrackingSession>(service, "session")
+        assertEquals(listOf("TXG1", "TXG2"), session.realtimeRouteIds)
+        assertEquals("RAW-1", session.stops.single().rawStopId)
+        val live = ReflectionHelpers.getField<Map<Int, LiveStopState>>(service, "cachedLiveStops").getValue(1)
+        assertEquals(60, live.seconds)
+        assertEquals(listOf("FAMILY-001"), live.vehicleIds)
+        assertTrue(ReflectionHelpers.getField(service, "rideConfirmed"))
+        assertEquals("FAMILY-001", ReflectionHelpers.getField(service, "trackedBusId"))
+    }
+
+    @Test
+    fun addingFamilyRoutesReleasesAnUnconfirmedPrimaryVehicle() {
+        val primary = sessionPayload() + mapOf("routeId" to "TXG1")
+        service.onStartCommand(startIntent(primary), 0, 1)
+        ReflectionHelpers.setField(service, "activeBoardingVehicleId", "MAIN-001")
+        ReflectionHelpers.setField(service, "boardingAlertSent", true)
+        ReflectionHelpers.setField(service, "boardingWindowOpen", true)
+
+        service.onStartCommand(
+            startIntent(primary + mapOf("familyRouteIds" to listOf("TXG1", "TXG2"))),
+            0,
+            2,
+        )
+
+        assertNull(ReflectionHelpers.getField(service, "activeBoardingVehicleId"))
+        assertFalse(ReflectionHelpers.getField(service, "boardingAlertSent"))
+        assertFalse(ReflectionHelpers.getField(service, "boardingWindowOpen"))
+        assertFalse(ReflectionHelpers.getField(service, "rideConfirmed"))
+    }
+
     private fun assertStoppedWithoutNotification() {
         assertTrue(shadow.isStoppedBySelf)
         assertTrue(shadow.isForegroundStopped)

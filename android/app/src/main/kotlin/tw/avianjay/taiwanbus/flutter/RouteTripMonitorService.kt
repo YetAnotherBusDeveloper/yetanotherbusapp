@@ -27,7 +27,6 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import java.net.HttpURLConnection
-import java.net.URLEncoder
 import java.net.URL
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -43,7 +42,9 @@ class RouteTripMonitorService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var notificationManager: NotificationManagerCompat
     private val refreshLock = Any()
+    private val realtimeClient = TripMonitorRealtimeClient(::fetchBackendJson)
 
+    @Volatile
     private var session: TrackingSession? = null
     private var appInForeground = true
     private var foregroundStarted = false
@@ -76,7 +77,7 @@ class RouteTripMonitorService : Service() {
     private var refreshInFlight = false
     private var refreshPending = false
     private var lastRefreshStartedAtMs = 0L
-    private var cachedLiveRouteId: String? = null
+    private var cachedLiveRouteIds: List<String> = emptyList()
     private var cachedLivePathId: Int? = null
     private var cachedLiveFetchedAtMs = 0L
     private var cachedLiveStops: Map<Int, LiveStopState> = emptyMap()
@@ -234,6 +235,7 @@ class RouteTripMonitorService : Service() {
                 val previousDestination = session?.destinationStopId
                 val previousBoarding = session?.boardingStopId
                 val previousRouteId = session?.routeId
+                val previousFamilyRouteIds = session?.realtimeRouteIds?.toSet()
                 if (AppRuntimeStateStore.isTripMonitorPausedFor(this, parsedSession)) {
                     session = parsedSession
                     appInForeground = parsedSession.appInForeground
@@ -242,6 +244,17 @@ class RouteTripMonitorService : Service() {
                 }
                 session = parsedSession
                 appInForeground = parsedSession.appInForeground
+                val liveStops = parsedSession.stops.mapNotNull { stop ->
+                    stop.liveData?.let { stop.stopId to it }
+                }.toMap()
+                if (liveStops.isNotEmpty()) {
+                    synchronized(refreshLock) {
+                        cachedLiveRouteIds = parsedSession.realtimeRouteIds
+                        cachedLivePathId = parsedSession.pathId
+                        cachedLiveFetchedAtMs = SystemClock.elapsedRealtime()
+                        cachedLiveStops = liveStops
+                    }
+                }
                 if (!appInForeground && lastWentBackgroundAtMs == 0L) {
                     lastWentBackgroundAtMs = System.currentTimeMillis()
                 }
@@ -251,7 +264,10 @@ class RouteTripMonitorService : Service() {
                         previousRouteId != parsedSession.routeId
                 val destinationChanged =
                     previousDestination != parsedSession.destinationStopId
-                if (tripOriginChanged) {
+                val familyChanged = previousFamilyRouteIds != parsedSession.realtimeRouteIds.toSet()
+                // A preliminary primary-route response must not lock the waiting
+                // reminder to that bus after earlier family arrivals become known.
+                if (tripOriginChanged || (familyChanged && !rideConfirmed)) {
                     boardingAlertSent = false
                     boardingCheckPromptSent = false
                     boardingCheckPromptSentAtMs = 0L
@@ -467,6 +483,7 @@ class RouteTripMonitorService : Service() {
             ioExecutor.execute {
                 try {
                     runCatching {
+                        if (session !== currentSession) return@runCatching
                         if (force) {
                             // Rich notifications (including OEM integrations) are
                             // built off the main thread, after foreground promotion.
@@ -479,6 +496,7 @@ class RouteTripMonitorService : Service() {
                             currentSession,
                             latestLocation ?: createSessionLocation(currentSession),
                         )
+                        if (session !== currentSession) return@runCatching
                         val notification = buildTrackingNotification(trackingSnapshot)
                         notificationManager.notify(TRACKING_NOTIFICATION_ID, notification)
                         maybeSendTripAlerts(currentSession, trackingSnapshot)
@@ -517,6 +535,7 @@ class RouteTripMonitorService : Service() {
         location: Location?,
     ): TrackingSnapshot {
         val liveStops = fetchLiveStopMap(session)
+        if (this.session !== session) return buildStartupSnapshot(session)
         if (location == null) {
             return TrackingSnapshot(
                 title = session.routeName,
@@ -1505,6 +1524,7 @@ class RouteTripMonitorService : Service() {
 
     private fun composeEtaText(seconds: Int?, message: String?): String {
         val trimmedMessage = message?.trim().orEmpty()
+        departureNotificationText(trimmedMessage)?.let { return it }
         if (trimmedMessage.isNotEmpty()) {
             return when {
                 trimmedMessage.contains("進站") || trimmedMessage.contains("到站") -> "進站中"
@@ -1527,6 +1547,7 @@ class RouteTripMonitorService : Service() {
 
     private fun composeShortEtaText(seconds: Int?, message: String?): String {
         val trimmedMessage = message?.trim().orEmpty()
+        departureNotificationText(trimmedMessage, compact = true)?.let { return it }
         if (trimmedMessage.isNotEmpty()) {
             return when {
                 trimmedMessage.contains("進站") || trimmedMessage.contains("到站") -> "進站"
@@ -2352,7 +2373,7 @@ class RouteTripMonitorService : Service() {
         refreshInFlight = false
         refreshPending = false
         lastRefreshStartedAtMs = 0L
-        cachedLiveRouteId = null
+        cachedLiveRouteIds = emptyList()
         cachedLivePathId = null
         cachedLiveFetchedAtMs = 0L
         cachedLiveStops = emptyMap()
@@ -2375,21 +2396,21 @@ class RouteTripMonitorService : Service() {
     }
 
     private fun fetchLiveStopMap(session: TrackingSession): Map<Int, LiveStopState> {
-        val routeId = session.routeId?.trim().orEmpty()
-        if (routeId.isEmpty()) {
+        val routeIds = session.realtimeRouteIds
+        if (routeIds.isEmpty()) {
             return emptyMap()
         }
         val now = SystemClock.elapsedRealtime()
         synchronized(refreshLock) {
             if (
                 appInForeground &&
-                cachedLiveRouteId == routeId &&
+                cachedLiveRouteIds == routeIds &&
                 cachedLivePathId == session.pathId
             ) {
                 return cachedLiveStops
             }
             if (
-                cachedLiveRouteId == routeId &&
+                cachedLiveRouteIds == routeIds &&
                 cachedLivePathId == session.pathId &&
                 cachedLiveFetchedAtMs != 0L &&
                 now - cachedLiveFetchedAtMs < LIVE_STOP_CACHE_TTL_MS
@@ -2400,27 +2421,22 @@ class RouteTripMonitorService : Service() {
         if (appInForeground) {
             return emptyMap()
         }
-        val liveStops = fetchLiveStopMapFromBackend(
-            routeId = routeId,
-            pathId = session.pathId,
-        )
+        val liveStops = realtimeClient.fetch(session)
         synchronized(refreshLock) {
-            cachedLiveRouteId = routeId
-            cachedLivePathId = session.pathId
-            cachedLiveFetchedAtMs = now
-            cachedLiveStops = liveStops
+            if (this.session === session) {
+                cachedLiveRouteIds = routeIds
+                cachedLivePathId = session.pathId
+                cachedLiveFetchedAtMs = now
+                cachedLiveStops = liveStops
+            }
         }
         return liveStops
     }
 
-    private fun fetchLiveStopMapFromBackend(
-        routeId: String,
-        pathId: Int,
-    ): Map<Int, LiveStopState> {
+    private fun fetchBackendJson(path: String): JSONObject? {
         var connection: HttpURLConnection? = null
         return try {
-            val encodedRouteId = URLEncoder.encode(routeId, Charsets.UTF_8.name())
-            connection = URL("https://bus.avianjay.sbs/api/v1/routes/$encodedRouteId/realtime")
+            connection = URL("https://bus.avianjay.sbs/api/v1/$path")
                 .openConnection() as HttpURLConnection
             connection.connectTimeout = 10_000
             connection.readTimeout = 10_000
@@ -2430,163 +2446,17 @@ class RouteTripMonitorService : Service() {
             connection.doInput = true
             connection.useCaches = false
             if (connection.responseCode !in 200..299) {
-                return emptyMap()
+                return null
             }
             val jsonText = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 reader.readText()
             }
-            parseBackendLiveStopMap(jsonText, pathId)
+            JSONObject(jsonText)
         } catch (_: Exception) {
-            emptyMap()
+            null
         } finally {
             connection?.disconnect()
         }
-    }
-
-    private fun parseBackendLiveStopMap(
-        jsonText: String,
-        pathId: Int,
-    ): Map<Int, LiveStopState> {
-        val root = JSONObject(jsonText)
-        val paths = root.optJSONArray("paths") ?: return emptyMap()
-        val result = mutableMapOf<Int, LiveStopState>()
-
-        fun appendPath(pathObject: JSONObject) {
-            val stops = pathObject.optJSONArray("stops") ?: return
-            for (stopIndex in 0 until stops.length()) {
-                val stopObject = stops.optJSONObject(stopIndex) ?: continue
-                val stopId = parseStopId(stopObject.opt("stopid"))
-                if (stopId <= 0) {
-                    continue
-                }
-                val message = stopObject.opt("message")
-                    ?.toString()
-                    ?.trim()
-                    ?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
-                val etaEntries = extractEtaEntries(stopObject.optJSONArray("etas"))
-                result[stopId] = LiveStopState(
-                    seconds = toIntOrNull(stopObject.opt("eta")),
-                    message = message,
-                    vehicleIds = extractVehicleIds(
-                        buses = stopObject.optJSONArray("buses"),
-                        etaEntries = etaEntries,
-                    ),
-                    etaEntries = etaEntries,
-                )
-            }
-        }
-
-        var matchedPath = false
-        for (index in 0 until paths.length()) {
-            val pathObject = paths.optJSONObject(index) ?: continue
-            if (toIntOrNull(pathObject.opt("pathid")) == pathId) {
-                matchedPath = true
-                appendPath(pathObject)
-            }
-        }
-
-        if (!matchedPath) {
-            for (index in 0 until paths.length()) {
-                val pathObject = paths.optJSONObject(index) ?: continue
-                appendPath(pathObject)
-            }
-        }
-
-        return result
-    }
-
-    private fun parseStopId(raw: Any?): Int {
-        if (raw is Number) {
-            return raw.toInt()
-        }
-        val text = raw?.toString()?.trim().orEmpty()
-        val parsed = text.toIntOrNull()
-        if (parsed != null) {
-            return parsed
-        }
-        var hash = 17
-        for (char in text) {
-            hash = (hash * 31 + char.code) and 0x7fffffff
-        }
-        return hash
-    }
-
-    private fun toIntOrNull(raw: Any?): Int? {
-        return when (raw) {
-            is Number -> raw.toInt()
-            else -> raw?.toString()?.trim()?.toIntOrNull()
-        }
-    }
-
-    private fun extractEtaEntries(rawEtas: JSONArray?): List<LiveEtaEntry> {
-        if (rawEtas == null) {
-            return emptyList()
-        }
-        val result = mutableListOf<LiveEtaEntry>()
-        for (index in 0 until rawEtas.length()) {
-            val etaObject = rawEtas.optJSONObject(index) ?: continue
-            val message = etaObject.opt("message")
-                ?.toString()
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
-            val vehicleId = normalizeVehicleId(
-                etaObject.opt("plate")
-                    ?.toString()
-                    ?.trim()
-                    ?.takeIf { it.isNotEmpty() }
-                    ?: etaObject.opt("vehicle_id")
-                        ?.toString()
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                    ?: etaObject.opt("id")
-                        ?.toString()
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() },
-            )
-            val entry = LiveEtaEntry(
-                seconds = toIntOrNull(etaObject.opt("eta")),
-                message = message,
-                vehicleId = vehicleId,
-            )
-            if (entry.seconds == null && entry.message == null && entry.vehicleId == null) {
-                continue
-            }
-            result += entry
-        }
-        return result
-    }
-
-    private fun extractVehicleIds(
-        buses: JSONArray?,
-        etaEntries: List<LiveEtaEntry> = emptyList(),
-    ): List<String> {
-        val result = linkedSetOf<String>()
-        if (buses != null) {
-            for (index in 0 until buses.length()) {
-                val busObject = buses.optJSONObject(index) ?: continue
-                val vehicleId = normalizeVehicleId(
-                    busObject.opt("id")
-                        ?.toString()
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                        ?: busObject.opt("vehicle_id")
-                            ?.toString()
-                            ?.trim()
-                            ?.takeIf { it.isNotEmpty() }
-                        ?: busObject.opt("plate")
-                            ?.toString()
-                            ?.trim()
-                            ?.takeIf { it.isNotEmpty() },
-                )
-                if (vehicleId != null) {
-                    result += vehicleId
-                }
-            }
-        }
-        etaEntries.mapNotNullTo(result) { entry ->
-            normalizeVehicleId(entry.vehicleId)
-        }
-        return result.toList()
     }
 
     private fun formatEtaText(liveStopState: LiveStopState?): String {
@@ -2609,6 +2479,7 @@ class RouteTripMonitorService : Service() {
     private fun formatShortEtaText(liveStopState: LiveStopState?): String {
         liveStopState ?: return "--"
         val message = liveStopState.message?.trim().orEmpty()
+        departureNotificationText(message, compact = true)?.let { return it }
         if (message.isNotEmpty()) {
             return when {
                 message.contains("進站") || message.contains("到站") -> "進站"
@@ -2631,6 +2502,7 @@ class RouteTripMonitorService : Service() {
 
     private fun normalizeEtaMessage(message: String?): String? {
         val trimmed = message?.trim().orEmpty()
+        departureNotificationText(trimmed)?.let { return it }
         if (trimmed.isEmpty()) {
             return null
         }
@@ -2866,10 +2738,13 @@ class RouteTripMonitorService : Service() {
                     val stop = stopsJson.optJSONObject(index) ?: continue
                     stops += TrackingStop(
                         stopId = stop.optInt("stopId", 0),
+                        rawStopId = stop.optString("rawStopId", "")
+                            .trim().takeIf { it.isNotEmpty() && it != "null" },
                         stopName = stop.optString("stopName", ""),
                         sequence = stop.optInt("sequence", index),
                         lat = stop.optDouble("lat", 0.0),
                         lon = stop.optDouble("lon", 0.0),
+                        liveData = stop.optJSONObject("liveData")?.let(::parseTripMonitorLiveStop),
                     )
                 }
                 if (stops.isEmpty()) {
@@ -2882,6 +2757,11 @@ class RouteTripMonitorService : Service() {
                         .trim()
                         .takeIf { it.isNotEmpty() },
                     routeName = root.optString("routeName", "YABus"),
+                    familyRouteIds = root.optJSONArray("familyRouteIds")?.let { ids ->
+                        (0 until ids.length()).mapNotNull { index ->
+                            ids.optString(index).trim().takeIf { it.isNotEmpty() && it != "null" }
+                        }.distinct()
+                    }.orEmpty(),
                     pathId = root.optInt("pathId", 0),
                     pathName = root.optString("pathName", ""),
                     appInForeground = root.optBoolean("appInForeground", true),
@@ -2987,7 +2867,12 @@ data class TrackingSession(
     val destinationStopId: Int?,
     val destinationStopName: String?,
     val stops: List<TrackingStop>,
-)
+    val familyRouteIds: List<String> = emptyList(),
+) {
+    val realtimeRouteIds: List<String>
+        get() = (listOfNotNull(routeId) + familyRouteIds).map { it.trim() }
+            .filter { it.isNotEmpty() }.distinct()
+}
 
 data class TrackingStop(
     val stopId: Int,
@@ -2995,6 +2880,8 @@ data class TrackingStop(
     val sequence: Int,
     val lat: Double,
     val lon: Double,
+    val rawStopId: String? = null,
+    val liveData: LiveStopState? = null,
 )
 
 data class LiveStopState(

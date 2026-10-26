@@ -53,7 +53,7 @@ StopInfo mergeRouteFamilyStopLiveData(
         );
   final primaryEtaStop = etaStops.isEmpty ? null : etaStops.first;
   final primaryMessageStop = allStops.firstWhere(
-    (stop) => stop.msg?.trim().isNotEmpty == true,
+    (stop) => stop.departure != null || stop.msg?.trim().isNotEmpty == true,
     orElse: () => baseStop,
   );
   final busesById = <String, BusVehicle>{};
@@ -98,6 +98,7 @@ StopInfo mergeRouteFamilyStopLiveData(
     msg: primaryEtaStop == null ? primaryMessageStop.msg : null,
     t: (primaryEtaStop ?? primaryMessageStop).t,
     etaReferenceAt: (primaryEtaStop ?? primaryMessageStop).etaReferenceAt,
+    departure: (primaryEtaStop ?? primaryMessageStop).departure,
     buses: busesById.values.toList(growable: false),
     etas: etasByKey.values.toList(growable: false),
   );

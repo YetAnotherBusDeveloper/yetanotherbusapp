@@ -1542,6 +1542,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
         final eta = buildEtaPresentation(
           stop.stop,
           alwaysShowSeconds: widget.alwaysShowSeconds,
+          l10n: AppLocalizations.of(context),
           brightness: theme.brightness,
           colorScheme: theme.colorScheme,
           arrivingText: AppLocalizations.of(context).etaArriving,
@@ -1909,6 +1910,7 @@ class _RouteBusMapSheetState extends State<RouteBusMapSheet>
         final eta = buildEtaPresentation(
           stop.stop,
           alwaysShowSeconds: widget.alwaysShowSeconds,
+          l10n: AppLocalizations.of(context),
           brightness: theme.brightness,
           colorScheme: theme.colorScheme,
           arrivingText: AppLocalizations.of(context).etaArriving,
@@ -2234,6 +2236,7 @@ class _StopInfoPopup extends StatelessWidget {
     final eta = buildEtaPresentation(
       stop,
       alwaysShowSeconds: alwaysShowSeconds,
+      l10n: l10n,
       brightness: theme.brightness,
       colorScheme: theme.colorScheme,
       arrivingText: l10n.etaArriving,

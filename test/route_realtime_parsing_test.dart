@@ -11,6 +11,79 @@ void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
   test(
+    'route and batch realtime carry structured origin departure data',
+    () async {
+      final now = DateTime.now();
+      final scheduled = now.subtract(const Duration(minutes: 5));
+      final rawStop = {
+        'stopid': 'STOP1',
+        'eta': null,
+        'message': '10:00',
+        'departure': {
+          'scheduled_at': scheduled.millisecondsSinceEpoch ~/ 1000,
+          'observed_at': now.millisecondsSinceEpoch ~/ 1000,
+          'status': 'not_departed',
+          'grace_seconds': 600,
+        },
+      };
+      final snapshot = {
+        'paths': [
+          {
+            'pathid': 0,
+            'stops': [rawStop],
+          },
+        ],
+      };
+      final client = MockClient((request) async {
+        if (request.url.path.endsWith('/stops')) {
+          return http.Response(
+            jsonEncode({
+              'name': '500',
+              'paths': [
+                {
+                  'pathid': 0,
+                  'name': 'Outbound',
+                  'stops': [
+                    {'stopid': 'STOP1', 'name': 'Origin', 'seq': 1},
+                  ],
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (request.url.path.contains('/batchroutes/')) {
+          return http.Response(
+            jsonEncode({
+              'routes': {'TXG500': snapshot},
+            }),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/realtime')) {
+          return http.Response(jsonEncode(snapshot), 200);
+        }
+        return http.Response('not found', 404);
+      });
+      final repository = BusRepository(client: client);
+      final detail = await repository.getCompleteBusInfo(
+        500,
+        provider: BusProvider.txg,
+        routeIdHint: 'TXG500',
+        routeNameHint: '500',
+      );
+      final stop = detail.stopsByPath[0]!.single;
+      expect(stop.departure?.overdueMinutes(now), 5);
+      expect(
+        buildEtaPresentation(stop, alwaysShowSeconds: false, now: now).text,
+        '未發車\n5分',
+      );
+      final batchRepository = BusRepository(client: client);
+      final batch = await batchRepository.getBatchLiveStopMaps(['TXG500']);
+      expect(batch['TXG500']!.values.single.departure?.overdueMinutes(now), 5);
+    },
+  );
+  test(
     'route detail parsing preserves backfilled eta and bus metadata',
     () async {
       final updatedAt = DateTime.now();

@@ -2005,6 +2005,101 @@ class StopEta {
   final String? updatedAt;
 }
 
+/// A provider-identified departure at the route origin, not an arrival ETA.
+class DepartureInfo {
+  const DepartureInfo({
+    required this.scheduledAt,
+    required this.reportedNotDeparted,
+    this.observedAt,
+    this.nextScheduledAt,
+    this.grace = const Duration(minutes: 5),
+    this.tripId,
+  });
+
+  static DepartureInfo? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    DateTime? time(Object? value) {
+      final seconds = int.tryParse('$value');
+      if (seconds == null || seconds <= 0 || seconds > 8640000000000) {
+        return null;
+      }
+      return DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true);
+    }
+
+    final scheduled = time(raw['scheduled_at']);
+    if (scheduled == null) return null;
+    final next = time(raw['next_scheduled_at']);
+    final graceSeconds = int.tryParse('${raw['grace_seconds']}') ?? 300;
+    return DepartureInfo(
+      scheduledAt: scheduled,
+      observedAt: time(raw['observed_at']),
+      reportedNotDeparted: raw['status'] == 'not_departed',
+      nextScheduledAt: next != null && next.isAfter(scheduled) ? next : null,
+      grace: Duration(seconds: graceSeconds.clamp(180, 900)),
+      tripId: raw['trip_id']?.toString(),
+    );
+  }
+
+  final DateTime scheduledAt;
+  final DateTime? observedAt;
+  final DateTime? nextScheduledAt;
+  final Duration grace;
+  final bool reportedNotDeparted;
+  final String? tripId;
+
+  int overdueMinutes(DateTime now) =>
+      math.max(0, now.difference(scheduledAt).inMinutes);
+
+  bool confirmedNotDeparted(DateTime now) =>
+      reportedNotDeparted &&
+      observedAt != null &&
+      now.difference(observedAt!) >= const Duration(seconds: -15) &&
+      now.difference(observedAt!) <= maxRealtimeStopAge;
+
+  bool showsNext(DateTime now) =>
+      !now.isBefore(scheduledAt.add(grace)) &&
+      nextScheduledAt != null &&
+      nextScheduledAt!.isAfter(now);
+
+  // Schedules are always Taiwan local time, even on a device abroad.
+  static String clockText(DateTime value) {
+    final taipei = value.toUtc().add(const Duration(hours: 8));
+    return '${taipei.hour.toString().padLeft(2, '0')}:'
+        '${taipei.minute.toString().padLeft(2, '0')}';
+  }
+
+  String label(DateTime now, {AppLocalizations? l10n}) {
+    if (now.isBefore(scheduledAt)) {
+      final time = clockText(scheduledAt);
+      return l10n?.etaScheduledDeparture(time) ?? '表定\n$time';
+    }
+    if (showsNext(now)) {
+      final time = clockText(nextScheduledAt!);
+      return l10n?.etaNextDeparture(time) ?? '下班表定\n$time';
+    }
+    final minutes = overdueMinutes(now);
+    if (confirmedNotDeparted(now)) {
+      if (minutes == 0) return l10n?.routeDetailEtaNotDeparted ?? '未發車';
+      return l10n?.etaNotDepartedMinutes(minutes) ?? '未發車\n$minutes分';
+    }
+    return l10n?.etaDepartureUnconfirmedMinutes(minutes) ?? '未確認\n逾$minutes分';
+  }
+
+  String description(DateTime now, {AppLocalizations? l10n}) {
+    final time = clockText(scheduledAt);
+    if (now.isBefore(scheduledAt)) {
+      return l10n?.etaOriginDeparture(time) ?? '起點表定 $time 發車';
+    }
+    final minutes = overdueMinutes(now);
+    if (confirmedNotDeparted(now) && !showsNext(now)) {
+      return l10n?.etaDeparturePendingDetails(time, minutes) ??
+          '起點表定 $time 發車；已逾表定 $minutes 分鐘，來源回報尚未發車。';
+    }
+    return l10n?.etaDepartureUnknownDetails(time, minutes) ??
+        '前班起點表定 $time 發車；已逾表定 $minutes 分鐘，動態未確認。';
+  }
+}
+
 class StopInfo {
   const StopInfo({
     required this.routeKey,
@@ -2020,6 +2115,7 @@ class StopInfo {
     this.msg,
     this.t,
     this.etaReferenceAt,
+    this.departure,
     this.buses = const [],
     this.etas = const [],
   });
@@ -2058,6 +2154,7 @@ class StopInfo {
 
   /// Time against which [sec] was calculated, distinct from source time [t].
   final String? etaReferenceAt;
+  final DepartureInfo? departure;
   final List<BusVehicle> buses;
   final List<StopEta> etas;
 
@@ -2072,6 +2169,8 @@ class StopInfo {
     String? msg,
     String? t,
     String? etaReferenceAt,
+    DepartureInfo? departure,
+    bool replaceLiveData = false,
     List<BusVehicle>? buses,
     List<StopEta>? etas,
   }) {
@@ -2085,12 +2184,15 @@ class StopInfo {
       lat: lat,
       rawStopId: rawStopId,
       stopNameEn: stopNameEn,
-      sec: sec ?? this.sec,
-      msg: msg ?? this.msg,
-      t: t ?? this.t,
-      etaReferenceAt: etaReferenceAt ?? this.etaReferenceAt,
-      buses: buses ?? this.buses,
-      etas: etas ?? this.etas,
+      sec: replaceLiveData ? sec : sec ?? this.sec,
+      msg: replaceLiveData ? msg : msg ?? this.msg,
+      t: replaceLiveData ? t : t ?? this.t,
+      etaReferenceAt: replaceLiveData
+          ? etaReferenceAt
+          : etaReferenceAt ?? this.etaReferenceAt,
+      departure: replaceLiveData ? departure : departure ?? this.departure,
+      buses: buses ?? (replaceLiveData ? const [] : this.buses),
+      etas: etas ?? (replaceLiveData ? const [] : this.etas),
     );
   }
 }
@@ -2280,11 +2382,13 @@ class EtaPresentation {
     required this.text,
     required this.backgroundColor,
     required this.foregroundColor,
+    this.description,
   });
 
   final String text;
   final Color backgroundColor;
   final Color foregroundColor;
+  final String? description;
 }
 
 String formatEtaBadgeText(String text) {
@@ -2376,6 +2480,7 @@ const maxRealtimeStopAge = Duration(seconds: 90);
 DateTime? stopRealtimeUpdatedAt(StopInfo stop, {DateTime? now}) {
   final clock = now ?? DateTime.now();
   return _parseStopRealtimeUpdatedAt(stop.t, clock) ??
+      stop.departure?.observedAt ??
       _parseStopRealtimeUpdatedAt(stop.etaReferenceAt, clock);
 }
 
@@ -2419,6 +2524,7 @@ int? _effectiveEtaSeconds(
 }
 
 int? effectiveStopEtaSeconds(StopInfo stop, {DateTime? now}) {
+  if (showsDepartureStatus(stop, now: now)) return null;
   return _effectiveEtaSeconds(
     stop.sec,
     stop.t,
@@ -2433,7 +2539,7 @@ int? effectiveStopEtaSecondsForVehicle(
   DateTime? now,
 }) {
   final eta = stopEtaForVehicle(stop, vehicleId);
-  if (eta == null) {
+  if (eta == null || !_usableVehicleEta(stop, eta, now ?? DateTime.now())) {
     return effectiveStopEtaSeconds(stop, now: now);
   }
   return _effectiveEtaSeconds(
@@ -2444,11 +2550,41 @@ int? effectiveStopEtaSecondsForVehicle(
   );
 }
 
-String? effectiveStopEtaMessageForVehicle(StopInfo stop, String? vehicleId) {
-  final etaMessage = stopEtaForVehicle(stop, vehicleId)?.msg?.trim();
+bool _usableVehicleEta(StopInfo stop, StopEta eta, DateTime now) {
+  if (stop.departure == null) return true;
+  final source = _parseStopRealtimeUpdatedAt(eta.updatedAt ?? stop.t, now);
+  return source != null && now.difference(source) <= maxRealtimeStopAge;
+}
+
+bool showsDepartureStatus(StopInfo stop, {DateTime? now}) {
+  if (stop.departure == null) return false;
+  final clock = now ?? DateTime.now();
+  // An origin observation cannot establish freshness of a different stop's ETA.
+  final source = _parseStopRealtimeUpdatedAt(stop.t, clock);
+  return stop.sec == null ||
+      source == null ||
+      clock.difference(source) > maxRealtimeStopAge;
+}
+
+String? effectiveStopEtaMessageForVehicle(
+  StopInfo stop,
+  String? vehicleId, {
+  DateTime? now,
+  AppLocalizations? l10n,
+}) {
+  final vehicleEta = stopEtaForVehicle(stop, vehicleId);
+  final usable =
+      vehicleEta != null &&
+      _usableVehicleEta(stop, vehicleEta, now ?? DateTime.now());
+  final etaMessage = usable ? vehicleEta.msg?.trim() : null;
   if (etaMessage != null && etaMessage.isNotEmpty) {
     return etaMessage;
   }
+  if (usable && vehicleEta.sec != null) return null;
+  if (showsDepartureStatus(stop, now: now)) {
+    return stop.departure!.label(now ?? DateTime.now(), l10n: l10n);
+  }
+  if (stop.departure != null && stop.sec != null) return null;
   return stop.msg;
 }
 
@@ -2461,13 +2597,25 @@ EtaPresentation buildEtaPresentation(
   String Function(int seconds)? secondsText,
   String Function(int minutes)? minutesText,
   String Function(int minutes, int seconds)? minutesSecondsText,
+  AppLocalizations? l10n,
+  DateTime? now,
 }) {
   final isDark = brightness == Brightness.dark;
   final cs = colorScheme;
-  final message = stop.msg?.trim() ?? '';
+  final message =
+      effectiveStopEtaMessageForVehicle(
+        stop,
+        null,
+        now: now,
+        l10n: l10n,
+      )?.trim() ??
+      '';
   if (message.isNotEmpty) {
     return EtaPresentation(
       text: formatEtaBadgeText(message),
+      description: showsDepartureStatus(stop, now: now)
+          ? stop.departure!.description(now ?? DateTime.now(), l10n: l10n)
+          : null,
       backgroundColor:
           cs?.primaryContainer ??
           (isDark ? const Color(0xFF16383D) : Colors.teal.shade50),
@@ -2477,7 +2625,7 @@ EtaPresentation buildEtaPresentation(
     );
   }
 
-  final seconds = effectiveStopEtaSeconds(stop);
+  final seconds = effectiveStopEtaSeconds(stop, now: now);
   if (seconds == null) {
     return EtaPresentation(
       text: '--',
@@ -2523,7 +2671,8 @@ EtaPresentation buildEtaPresentation(
 }
 
 bool hasRealtimeStopData(StopInfo stop) {
-  return stop.sec != null ||
+  return stop.departure != null ||
+      stop.sec != null ||
       (stop.msg?.trim().isNotEmpty ?? false) ||
       (stop.t?.trim().isNotEmpty ?? false) ||
       stop.buses.isNotEmpty ||

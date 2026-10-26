@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taiwanbus_flutter/core/android_trip_monitor.dart';
+import 'package:taiwanbus_flutter/core/models.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -11,6 +12,33 @@ void main() {
 
   tearDown(() {
     debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('monitor snapshot keeps physical stop identity and each vehicle ETA', () {
+    final stop = TripMonitorStop.fromStop(
+      const StopInfo(
+        routeKey: 500,
+        pathId: 0,
+        stopId: 1,
+        rawStopId: 'MAIN-STOP',
+        stopName: '共用站',
+        sequence: 1,
+        lat: 24.1,
+        lon: 120.6,
+        sec: 60,
+        etas: [
+          StopEta(sec: 300, vehicleId: 'MAIN-001'),
+          StopEta(sec: 60, vehicleId: 'FAMILY-001'),
+        ],
+      ),
+    ).toMap();
+    expect(stop['rawStopId'], 'MAIN-STOP');
+    final live = stop['liveData'] as Map;
+    expect(live['eta'], 60);
+    expect(live['etas'], [
+      {'plate': 'MAIN-001', 'eta': 300, 'message': null},
+      {'plate': 'FAMILY-001', 'eta': 60, 'message': null},
+    ]);
   });
 
   test('lifecycle calls tolerate a detached platform channel', () async {

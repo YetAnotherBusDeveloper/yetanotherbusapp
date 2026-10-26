@@ -1222,6 +1222,41 @@ class AppLocalizationsZh extends AppLocalizations {
   String get etaLoading => '載入中';
 
   @override
+  String etaNotDepartedMinutes(int minutes) {
+    return '未發車\n$minutes分';
+  }
+
+  @override
+  String etaDepartureUnconfirmedMinutes(int minutes) {
+    return '未確認\n逾$minutes分';
+  }
+
+  @override
+  String etaScheduledDeparture(String time) {
+    return '表定\n$time';
+  }
+
+  @override
+  String etaNextDeparture(String time) {
+    return '下班表定\n$time';
+  }
+
+  @override
+  String etaOriginDeparture(String time) {
+    return '起點表定 $time 發車';
+  }
+
+  @override
+  String etaDeparturePendingDetails(String time, int minutes) {
+    return '起點表定 $time 發車；已逾表定 $minutes 分鐘，來源回報尚未發車。';
+  }
+
+  @override
+  String etaDepartureUnknownDetails(String time, int minutes) {
+    return '前班起點表定 $time 發車；已逾表定 $minutes 分鐘，動態未確認。';
+  }
+
+  @override
   String get etaArriving => '進站中';
 
   @override
@@ -4552,6 +4587,41 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get etaLoading => '載入中';
+
+  @override
+  String etaNotDepartedMinutes(int minutes) {
+    return '未發車\n$minutes分';
+  }
+
+  @override
+  String etaDepartureUnconfirmedMinutes(int minutes) {
+    return '未確認\n逾$minutes分';
+  }
+
+  @override
+  String etaScheduledDeparture(String time) {
+    return '表定\n$time';
+  }
+
+  @override
+  String etaNextDeparture(String time) {
+    return '下班表定\n$time';
+  }
+
+  @override
+  String etaOriginDeparture(String time) {
+    return '起點表定 $time 發車';
+  }
+
+  @override
+  String etaDeparturePendingDetails(String time, int minutes) {
+    return '起點表定 $time 發車；已逾表定 $minutes 分鐘，來源回報尚未發車。';
+  }
+
+  @override
+  String etaDepartureUnknownDetails(String time, int minutes) {
+    return '前班起點表定 $time 發車；已逾表定 $minutes 分鐘，動態未確認。';
+  }
 
   @override
   String get etaArriving => '進站中';
