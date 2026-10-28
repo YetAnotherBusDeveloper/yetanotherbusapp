@@ -178,6 +178,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   bool _liveActivityActive = false;
   bool _showWideMapPanel = true;
   bool _isRouteVisible = true;
+  bool _isMapSheetOpen = false;
   bool _keepPendingRefreshWhileCovered = false;
   int? _liveActivityStopId;
   int? _liveActivityPathId;
@@ -397,7 +398,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         unawaited(_syncBackgroundTripMonitorPausedState());
       }
     }
-    if (!wasForeground && _isRouteVisible && _detail != null) {
+    if (!wasForeground &&
+        (_isRouteVisible || _isMapSheetOpen) &&
+        _detail != null) {
       unawaited(_refresh());
       unawaited(_ensureLocationTracking(requestPermissionIfNeeded: false));
     }
@@ -496,11 +499,30 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       if (primaryResult.error case final error?) {
         Error.throwWithStackTrace(error, primaryResult.stackTrace!);
       }
-      final fetchedDetail = primaryResult.detail!;
+      var fetchedDetail = primaryResult.detail!;
       if (!mounted ||
           requestId != _refreshRequestId ||
           !_canApplyPendingForegroundResult) {
         return;
+      }
+
+      final refreshFamilyTogether =
+          previousDetail?.familyRouteIds.any(
+            (routeId) => routeId != fetchedDetail.route.routeId,
+          ) ??
+          false;
+      if (refreshFamilyTogether) {
+        // Once variants are visible, don't replace them with the primary route
+        // while the family request is still in flight.
+        fetchedDetail = await controller.enrichRouteWithFamily(
+          fetchedDetail,
+          provider: widget.provider,
+        );
+        if (!mounted ||
+            requestId != _refreshRequestId ||
+            !_canApplyPendingForegroundResult) {
+          return;
+        }
       }
 
       final priorLiveDetail =
@@ -510,7 +532,10 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           ? _mergeDetailWithPreviousLiveData(fetchedDetail, priorLiveDetail)
           : fetchedDetail;
 
-      _syncLiveMapData(displayDetail);
+      _syncLiveMapData(
+        displayDetail,
+        replaceFamilyRouteIds: refreshFamilyTogether,
+      );
       _syncTabController(displayDetail);
       setState(() {
         _detail = displayDetail;
@@ -554,9 +579,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           retryAfter: controller.repository.realtimeRetryAfter,
         ),
       );
-      unawaited(
-        _loadRouteFamilyAfterCurrentFrame(displayDetail, requestId: requestId),
-      );
+      if (!refreshFamilyTogether) {
+        unawaited(
+          _loadRouteFamilyAfterCurrentFrame(
+            displayDetail,
+            requestId: requestId,
+          ),
+        );
+      }
       _scrollToInitialStopIfNeeded();
       _recalculateNearestStops();
       await _applyRequestedDestinationIfPossible();
@@ -623,6 +653,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       });
       _updateDesktopPresence();
       _recalculateNearestStops();
+      if (_isRouteVisible) {
+        unawaited(_configureBackgroundTripMonitorIfNeeded());
+      }
     } catch (_) {
       if (!mounted || requestId != _refreshRequestId) {
         return;
@@ -1651,7 +1684,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _appLifecycleState == AppLifecycleState.inactive;
 
   bool get _shouldSuspendForegroundRefreshes =>
-      !_appIsForeground || !_isRouteVisible;
+      !_appIsForeground || (!_isRouteVisible && !_isMapSheetOpen);
 
   bool get _canApplyPendingForegroundResult =>
       _appIsForeground && (_isRouteVisible || _keepPendingRefreshWhileCovered);
@@ -1675,6 +1708,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     if (_supplementaryDialogDepth > 0) {
       return;
     }
+    if (_isMapSheetOpen && (_countdownTimer?.isActive == true || _isLoading)) {
+      return;
+    }
     unawaited(_refresh());
     unawaited(_ensureLocationTracking(requestPermissionIfNeeded: false));
   }
@@ -1682,9 +1718,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   @override
   void didPushNext() {
     _isRouteVisible = false;
-    _pauseForegroundRefreshLoop(
-      invalidateRequest: !_keepPendingRefreshWhileCovered,
-    );
+    if (!_isMapSheetOpen) {
+      _pauseForegroundRefreshLoop(
+        invalidateRequest: !_keepPendingRefreshWhileCovered,
+      );
+    }
     if (!_keepPendingRefreshWhileCovered &&
         !_locationTrackingConfiguredForBackground) {
       _pauseForegroundLocationTracking();
@@ -1752,6 +1790,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _requestMapVehicleFocus(vehicleId);
     }
     final controller = AppControllerScope.read(context);
+    _isMapSheetOpen = true;
     _keepPendingRefreshWhileCovered = true;
     try {
       await showModalBottomSheet<void>(
@@ -1795,6 +1834,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         },
       );
     } finally {
+      _isMapSheetOpen = false;
       _keepPendingRefreshWhileCovered = false;
     }
   }
@@ -2078,6 +2118,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       providerName: widget.provider.name,
       routeKey: widget.routeKey,
       routeId: resolvedDetail.route.routeId,
+      familyRouteIds: resolvedDetail.familyRouteIds,
       routeName: resolvedDetail.route.routeName,
       pathId: resolvedPathInfo.pathId,
       pathName: resolvedPathInfo.name,
@@ -2089,17 +2130,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       destinationStopName: _destinationStopName,
       initialLatitude: _lastPosition?.latitude,
       initialLongitude: _lastPosition?.longitude,
-      stops: resolvedStops
-          .map(
-            (stop) => TripMonitorStop(
-              stopId: stop.stopId,
-              stopName: stop.stopName,
-              sequence: stop.sequence,
-              lat: stop.lat,
-              lon: stop.lon,
-            ),
-          )
-          .toList(),
+      stops: resolvedStops.map(TripMonitorStop.fromStop).toList(),
     );
   }
 
@@ -2198,7 +2229,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   Future<void> _configureBackgroundTripMonitorUnchecked({
     required bool forcePermissionCheck,
   }) async {
-    if (!mounted) {
+    if (!mounted || !_isRouteVisible) {
       return;
     }
 
@@ -2291,7 +2322,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       }
 
       await _ensureLocationTracking(requestPermissionIfNeeded: false);
-      await _syncLiveActivityForBackgroundMonitor(detail, pathInfo);
+      if (!mounted || !_isRouteVisible) return;
+      final currentDetail = _detail;
+      final currentPath = _currentPathInfo;
+      if (currentDetail != null && currentPath != null) {
+        await _syncLiveActivityForBackgroundMonitor(currentDetail, currentPath);
+      }
       return;
     }
 
@@ -2390,7 +2426,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
     await _ensureLocationTracking(requestPermissionIfNeeded: false);
 
-    final pathStops = detail.stopsByPath[pathInfo.pathId] ?? const <StopInfo>[];
+    if (!mounted || !_isRouteVisible) return;
+    final currentDetail = _detail;
+    final currentPath = _currentPathInfo;
+    if (currentDetail == null || currentPath == null) return;
+    final pathStops =
+        currentDetail.stopsByPath[currentPath.pathId] ?? const <StopInfo>[];
     if (pathStops.isEmpty) {
       return;
     }
@@ -2414,8 +2455,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
 
     final session = _buildTripMonitorSession(
-      detail: detail,
-      pathInfo: pathInfo,
+      detail: currentDetail,
+      pathInfo: currentPath,
       pathStops: pathStops,
     );
     if (session == null) {
