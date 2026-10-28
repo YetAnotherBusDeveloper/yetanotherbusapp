@@ -543,7 +543,6 @@ class _FavoritesScreenState extends State<_FavoritesView>
         msg: payload.msg,
         t: payload.t,
         etaReferenceAt: payload.etaReferenceAt,
-        departure: payload.departure,
         buses: payload.buses,
         etas: payload.etas,
       ),

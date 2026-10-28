@@ -496,31 +496,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       if (primaryResult.error case final error?) {
         Error.throwWithStackTrace(error, primaryResult.stackTrace!);
       }
-      var fetchedDetail = primaryResult.detail!;
+      final fetchedDetail = primaryResult.detail!;
       if (!mounted ||
           requestId != _refreshRequestId ||
           !_canApplyPendingForegroundResult) {
         return;
-      }
-
-      final refreshFamilyTogether =
-          previousDetail?.familyRouteIds.any(
-            (routeId) => routeId != fetchedDetail.route.routeId,
-          ) ??
-          false;
-      if (refreshFamilyTogether) {
-        // Keep the merged snapshot visible until all variants are refreshed.
-        // Publishing the primary route first would briefly remove family ETAs
-        // and vehicles on every refresh.
-        fetchedDetail = await controller.enrichRouteWithFamily(
-          fetchedDetail,
-          provider: widget.provider,
-        );
-        if (!mounted ||
-            requestId != _refreshRequestId ||
-            !_canApplyPendingForegroundResult) {
-          return;
-        }
       }
 
       final priorLiveDetail =
@@ -530,10 +510,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           ? _mergeDetailWithPreviousLiveData(fetchedDetail, priorLiveDetail)
           : fetchedDetail;
 
-      _syncLiveMapData(
-        displayDetail,
-        replaceFamilyRouteIds: refreshFamilyTogether,
-      );
+      _syncLiveMapData(displayDetail);
       _syncTabController(displayDetail);
       setState(() {
         _detail = displayDetail;
@@ -577,14 +554,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           retryAfter: controller.repository.realtimeRetryAfter,
         ),
       );
-      if (!refreshFamilyTogether) {
-        unawaited(
-          _loadRouteFamilyAfterCurrentFrame(
-            displayDetail,
-            requestId: requestId,
-          ),
-        );
-      }
+      unawaited(
+        _loadRouteFamilyAfterCurrentFrame(displayDetail, requestId: requestId),
+      );
       _scrollToInitialStopIfNeeded();
       _recalculateNearestStops();
       await _applyRequestedDestinationIfPossible();
@@ -651,9 +623,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       });
       _updateDesktopPresence();
       _recalculateNearestStops();
-      if (_isRouteVisible) {
-        unawaited(_configureBackgroundTripMonitorIfNeeded());
-      }
     } catch (_) {
       if (!mounted || requestId != _refreshRequestId) {
         return;
@@ -1105,7 +1074,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           msg: previousStop.msg,
           t: previousStop.t,
           etaReferenceAt: previousStop.etaReferenceAt,
-          departure: previousStop.departure,
           buses: previousStop.buses,
           etas: previousStop.etas,
         );
@@ -2110,7 +2078,6 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       providerName: widget.provider.name,
       routeKey: widget.routeKey,
       routeId: resolvedDetail.route.routeId,
-      familyRouteIds: resolvedDetail.familyRouteIds,
       routeName: resolvedDetail.route.routeName,
       pathId: resolvedPathInfo.pathId,
       pathName: resolvedPathInfo.name,
@@ -2122,7 +2089,17 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       destinationStopName: _destinationStopName,
       initialLatitude: _lastPosition?.latitude,
       initialLongitude: _lastPosition?.longitude,
-      stops: resolvedStops.map(TripMonitorStop.fromStop).toList(),
+      stops: resolvedStops
+          .map(
+            (stop) => TripMonitorStop(
+              stopId: stop.stopId,
+              stopName: stop.stopName,
+              sequence: stop.sequence,
+              lat: stop.lat,
+              lon: stop.lon,
+            ),
+          )
+          .toList(),
     );
   }
 
@@ -2221,7 +2198,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   Future<void> _configureBackgroundTripMonitorUnchecked({
     required bool forcePermissionCheck,
   }) async {
-    if (!mounted || !_isRouteVisible) {
+    if (!mounted) {
       return;
     }
 
@@ -2314,12 +2291,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       }
 
       await _ensureLocationTracking(requestPermissionIfNeeded: false);
-      if (!mounted || !_isRouteVisible) return;
-      final currentDetail = _detail;
-      final currentPath = _currentPathInfo;
-      if (currentDetail != null && currentPath != null) {
-        await _syncLiveActivityForBackgroundMonitor(currentDetail, currentPath);
-      }
+      await _syncLiveActivityForBackgroundMonitor(detail, pathInfo);
       return;
     }
 
@@ -2418,12 +2390,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
 
     await _ensureLocationTracking(requestPermissionIfNeeded: false);
 
-    if (!mounted || !_isRouteVisible) return;
-    final currentDetail = _detail;
-    final currentPath = _currentPathInfo;
-    if (currentDetail == null || currentPath == null) return;
-    final pathStops =
-        currentDetail.stopsByPath[currentPath.pathId] ?? const <StopInfo>[];
+    final pathStops = detail.stopsByPath[pathInfo.pathId] ?? const <StopInfo>[];
     if (pathStops.isEmpty) {
       return;
     }
@@ -2447,8 +2414,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     }
 
     final session = _buildTripMonitorSession(
-      detail: currentDetail,
-      pathInfo: currentPath,
+      detail: detail,
+      pathInfo: pathInfo,
       pathStops: pathStops,
     );
     if (session == null) {
@@ -3305,15 +3272,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   String _displayEtaText(StopInfo stop, {String? vehicleId}) {
     final l10n = AppLocalizations.of(context);
     final message =
-        effectiveStopEtaMessageForVehicle(
-          stop,
-          vehicleId,
-          l10n: l10n,
-        )?.trim() ??
-        '';
-    if (showsDepartureStatus(stop) && message.isNotEmpty) {
-      return message.replaceAll('\n', ' ');
-    }
+        effectiveStopEtaMessageForVehicle(stop, vehicleId)?.trim() ?? '';
     if (message.isNotEmpty) {
       if (message.contains('進站') || message.contains('到站')) {
         return l10n.etaArriving;
@@ -3756,11 +3715,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
             busStopsUntilBoarding: busStopsUntilBoarding,
           ),
           etaSeconds: effectiveStopEtaSeconds(boardingStop),
-          etaMessage: effectiveStopEtaMessageForVehicle(
-            boardingStop,
-            null,
-            l10n: AppLocalizations.of(context),
-          ),
+          etaMessage: boardingStop.msg,
           vehicleId: _vehicleIdForStop(boardingStop),
           progressValue: boardingProgressValue,
           progressTotal: boardingIndex + 1,
@@ -3792,11 +3747,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         modeLabel: AppLocalizations.of(context).routeDetailNearestStop,
         statusText: AppLocalizations.of(context).routeDetailDestinationNotSet,
         etaSeconds: effectiveStopEtaSeconds(nearestStop),
-        etaMessage: effectiveStopEtaMessageForVehicle(
-          nearestStop,
-          null,
-          l10n: AppLocalizations.of(context),
-        ),
+        etaMessage: nearestStop.msg,
         vehicleId: _vehicleIdForStop(nearestStop),
         progressValue: currentProgress,
         progressTotal: pathStops.length,
@@ -4792,14 +4743,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       final liveStop = livePayload == null
           ? result.matchedStop
           : result.matchedStop.copyWith(
-              replaceLiveData: true,
               sec: livePayload.sec,
               msg: livePayload.msg,
               t: livePayload.t,
               etaReferenceAt: livePayload.etaReferenceAt,
-              departure: livePayload.departure,
               buses: livePayload.buses,
-              etas: livePayload.etas,
             );
       return _RelatedStopRouteEta(result: result, liveStop: liveStop);
     }).toList();
@@ -6978,9 +6926,9 @@ String _routeAlertTimeText(BuildContext context, RouteAlert alert) {
   final values = <String>[];
   String format(DateTime value) {
     final date = MaterialLocalizations.of(context).formatMediumDate(value);
-    final time = MaterialLocalizations.of(
-      context,
-    ).formatTimeOfDay(TimeOfDay.fromDateTime(value));
+    final time = MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay.fromDateTime(value),
+    );
     return '$date $time';
   }
 
@@ -7023,10 +6971,9 @@ Widget _buildRouteAlertMetadata({
   addRow(l10n.routeAlertAffectedRoute, routeName?.trim() ?? '');
   addRow(
     l10n.routeAlertType,
-    [
-      alert.effectText,
-      alert.causeText,
-    ].where((value) => value.isNotEmpty).join(' · '),
+    [alert.effectText, alert.causeText]
+        .where((value) => value.isNotEmpty)
+        .join(' · '),
   );
   addRow(l10n.routeAlertTime, time);
   addRow(l10n.routeAlertImpact, alert.scope?.trim() ?? '');
@@ -7050,7 +6997,10 @@ Widget _buildRouteAlertMetadata({
   if (rows.isEmpty) {
     return const SizedBox.shrink();
   }
-  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: rows,
+  );
 }
 
 class _RouteInfoDialog extends StatefulWidget {

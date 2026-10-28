@@ -2193,48 +2193,6 @@ abstract class AppLocalizations {
   /// **'Loading'**
   String get etaLoading;
 
-  /// No description provided for @etaNotDepartedMinutes.
-  ///
-  /// In en, this message translates to:
-  /// **'Not departed\n{minutes}m late'**
-  String etaNotDepartedMinutes(int minutes);
-
-  /// No description provided for @etaDepartureUnconfirmedMinutes.
-  ///
-  /// In en, this message translates to:
-  /// **'Unconfirmed\n{minutes}m overdue'**
-  String etaDepartureUnconfirmedMinutes(int minutes);
-
-  /// No description provided for @etaScheduledDeparture.
-  ///
-  /// In en, this message translates to:
-  /// **'{time}'**
-  String etaScheduledDeparture(String time);
-
-  /// No description provided for @etaNextDeparture.
-  ///
-  /// In en, this message translates to:
-  /// **'Next scheduled\n{time}'**
-  String etaNextDeparture(String time);
-
-  /// No description provided for @etaOriginDeparture.
-  ///
-  /// In en, this message translates to:
-  /// **'Scheduled departure from origin: {time}'**
-  String etaOriginDeparture(String time);
-
-  /// No description provided for @etaDeparturePendingDetails.
-  ///
-  /// In en, this message translates to:
-  /// **'Scheduled to leave the origin at {time}; {minutes} minutes past departure. The source reports not departed.'**
-  String etaDeparturePendingDetails(String time, int minutes);
-
-  /// No description provided for @etaDepartureUnknownDetails.
-  ///
-  /// In en, this message translates to:
-  /// **'Previous trip scheduled to leave the origin at {time}; {minutes} minutes past departure. Departure is unconfirmed.'**
-  String etaDepartureUnknownDetails(String time, int minutes);
-
   /// No description provided for @etaArriving.
   ///
   /// In en, this message translates to:

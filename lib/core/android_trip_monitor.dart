@@ -1,8 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import 'models.dart';
-
 enum AndroidBackgroundLocationPermissionRequestStatus {
   granted,
   denied,
@@ -31,66 +29,21 @@ class TripMonitorStop {
     required this.sequence,
     required this.lat,
     required this.lon,
-    this.rawStopId,
-    this.liveData,
   });
 
-  factory TripMonitorStop.fromStop(StopInfo stop) {
-    final now = DateTime.now();
-    final hasFreshVehicles = !isStopRealtimeStale(stop, now: now);
-    return TripMonitorStop(
-      stopId: stop.stopId,
-      rawStopId: stop.rawStopId,
-      stopName: stop.stopName,
-      sequence: stop.sequence,
-      lat: stop.lat,
-      lon: stop.lon,
-      liveData: {
-        'eta': effectiveStopEtaSeconds(stop, now: now),
-        'message': effectiveStopEtaMessageForVehicle(stop, null, now: now),
-        'buses': [
-          if (hasFreshVehicles)
-            for (final bus in stop.buses) {'id': bus.id},
-        ],
-        'etas': [
-          if (hasFreshVehicles)
-            for (final eta in stop.etas)
-              if (normalizeBusVehicleId(eta.vehicleId) != null)
-                {
-                  'plate': eta.vehicleId,
-                  'eta': effectiveStopEtaSecondsForVehicle(
-                    stop,
-                    eta.vehicleId,
-                    now: now,
-                  ),
-                  'message': effectiveStopEtaMessageForVehicle(
-                    stop,
-                    eta.vehicleId,
-                    now: now,
-                  ),
-                },
-        ],
-      },
-    );
-  }
-
   final int stopId;
-  final String? rawStopId;
   final String stopName;
   final int sequence;
   final double lat;
   final double lon;
-  final Map<String, Object?>? liveData;
 
   Map<String, Object?> toMap() {
     return {
       'stopId': stopId,
-      'rawStopId': rawStopId,
       'stopName': stopName,
       'sequence': sequence,
       'lat': lat,
       'lon': lon,
-      if (liveData != null) 'liveData': liveData,
     };
   }
 }
@@ -100,7 +53,6 @@ class TripMonitorSession {
     required this.providerName,
     required this.routeKey,
     this.routeId,
-    this.familyRouteIds = const [],
     required this.routeName,
     required this.pathId,
     required this.pathName,
@@ -118,7 +70,6 @@ class TripMonitorSession {
   final String providerName;
   final int routeKey;
   final String? routeId;
-  final List<String> familyRouteIds;
   final String routeName;
   final int pathId;
   final String pathName;
@@ -137,7 +88,6 @@ class TripMonitorSession {
       'provider': providerName,
       'routeKey': routeKey,
       'routeId': routeId,
-      'familyRouteIds': familyRouteIds,
       'routeName': routeName,
       'pathId': pathId,
       'pathName': pathName,

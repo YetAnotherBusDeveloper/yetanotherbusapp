@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -107,11 +106,6 @@ class _NoLocation extends GeolocatorPlatform {
   @override
   Future<LocationPermission> checkPermission() async =>
       LocationPermission.denied;
-}
-
-class _BackgroundLocationPermission extends _NoLocation {
-  @override
-  Future<LocationPermission> checkPermission() async => LocationPermission.always;
 }
 
 RouteDetailData _detail({
@@ -624,142 +618,6 @@ void main() {
             .toList(),
         positions,
       );
-    },
-  );
-
-  _screenTest(
-    'automatic refresh keeps family ETAs and buses until the merged update is ready',
-    (tester, repository) async {
-      repository.topologyRequests.single.complete(_detail());
-      repository.primaryRequests.single.complete(_detail(eta: 300));
-      await _frames(tester, 8);
-      repository.familyRequests.single.completer.complete(
-        _detail(eta: 120, family: ['TPE500', 'TPE501'], withBus: true),
-      );
-      await _frames(tester);
-
-      final controller = AppControllerScope.read(
-        tester.element(find.byType(RouteDetailScreen)),
-      );
-      for (var i = 0; i <= controller.settings.busUpdateTime; i++) {
-        await tester.pump(const Duration(seconds: 1));
-      }
-      expect(repository.primaryRequests, hasLength(2));
-      repository.primaryRequests.last.complete(_detail(eta: 600));
-      await _frames(tester, 8);
-
-      expect(repository.familyRequests, hasLength(2));
-      expect(
-        repository.familyRequests.last.selected.stopsByPath[1]!.first.sec,
-        600,
-      );
-      var stop = tester.widgetList<EtaBadge>(find.byType(EtaBadge)).first.stop;
-      expect(stop.sec, 120);
-      expect(stop.buses.map((bus) => bus.id), ['TEST-001']);
-      expect(find.text('正在載入同路線班次'), findsNothing);
-
-      repository.familyRequests.last.completer.complete(
-        _detail(eta: 240, family: ['TPE500', 'TPE501']),
-      );
-      await _frames(tester);
-      stop = tester.widgetList<EtaBadge>(find.byType(EtaBadge)).first.stop;
-      expect(stop.sec, 240);
-      expect(stop.buses, isEmpty);
-      expect(find.text('返程站1'), findsOneWidget);
-    },
-  );
-
-  _screenTest('a newer merged refresh rejects a late family snapshot', (
-    tester,
-    repository,
-  ) async {
-    repository.topologyRequests.single.complete(_detail());
-    repository.primaryRequests.single.complete(_detail(eta: 300));
-    await _frames(tester, 8);
-    repository.familyRequests.single.completer.complete(
-      _detail(eta: 120, family: ['TPE500', 'TPE501'], withBus: true),
-    );
-    await _frames(tester);
-
-    await _resumeRoute(tester);
-    repository.primaryRequests.last.complete(_detail(eta: 600));
-    await _frames(tester, 8);
-    final outdatedFamily = repository.familyRequests.last;
-
-    await _resumeRoute(tester);
-    repository.primaryRequests.last.complete(_detail(eta: 900));
-    await _frames(tester, 8);
-    expect(repository.familyRequests, hasLength(3));
-    repository.familyRequests.last.completer.complete(
-      _detail(eta: 240, family: ['TPE500', 'TPE501']),
-    );
-    await _frames(tester);
-
-    outdatedFamily.completer.complete(
-      _detail(
-        eta: 10,
-        name: '過期結果',
-        family: ['TPE500', 'TPE501'],
-        withBus: true,
-      ),
-    );
-    await _frames(tester);
-    final stop = tester.widgetList<EtaBadge>(find.byType(EtaBadge)).first.stop;
-    expect(stop.sec, 240);
-    expect(stop.buses, isEmpty);
-    expect(find.text('過期結果'), findsNothing);
-  });
-
-  _screenTest(
-    'family updates immediately reach the background trip monitor',
-    (tester, repository) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      GeolocatorPlatform.instance = _BackgroundLocationPermission();
-      const channel = MethodChannel('tw.avianjay.taiwanbus.flutter/trip_monitor');
-      final sessions = <Map<Object?, Object?>>[];
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
-        call,
-      ) async {
-        if (call.method == 'startOrUpdateTripMonitor') {
-          sessions.add((call.arguments as Map)['session'] as Map);
-        }
-        if (call.method == 'isTripMonitorPaused') return false;
-        return null;
-      });
-      addTearDown(() {
-        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
-      });
-      final controller = AppControllerScope.read(
-        tester.element(find.byType(RouteDetailScreen)),
-      );
-      await controller.updateEnableRouteBackgroundMonitor(true);
-      repository.topologyRequests.single.complete(_detail());
-      repository.primaryRequests.single.complete(_detail(eta: 300));
-      await _frames(tester, 8);
-      expect(sessions, isNotEmpty);
-
-      repository.familyRequests.single.completer.complete(
-        _detail(eta: 120, family: ['TPE500', 'TPE501'], withBus: true),
-      );
-      await _frames(tester);
-      expect(repository.primaryRequests, hasLength(1));
-      expect(sessions.last['familyRouteIds'], ['TPE500', 'TPE501']);
-      var live = ((sessions.last['stops'] as List).first as Map)['liveData'] as Map;
-      expect(live['eta'], 120);
-      expect(live['buses'], [
-        {'id': 'TEST-001'},
-      ]);
-
-      await _resumeRoute(tester);
-      repository.primaryRequests.last.complete(_detail(eta: 600));
-      await _frames(tester, 8);
-      repository.familyRequests.last.completer.complete(
-        _detail(eta: 60, family: ['TPE500', 'TPE501']),
-      );
-      await _frames(tester);
-      live = ((sessions.last['stops'] as List).first as Map)['liveData'] as Map;
-      expect(live['eta'], 60);
-      expect(live['buses'], isEmpty);
     },
   );
 
