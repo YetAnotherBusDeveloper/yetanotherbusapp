@@ -1,13 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../app/bus_app.dart';
 import '../widgets/app_content_transition.dart';
 import '../core/metro_direction.dart';
+import '../core/nearest_metro_station.dart';
 import '../core/request_sequence.dart';
 import '../core/transit_repository.dart';
 import '../core/transit_name.dart';
+import '../core/user_location.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 import '../widgets/background_image_wrapper.dart';
@@ -23,23 +26,29 @@ class MetroScreen extends StatefulWidget {
     required this.isActive,
     this.showAdBanner = true,
     this.adMinimumDensity = 1,
+    this.repository,
+    this.positionResolver,
     super.key,
   });
 
   final bool isActive;
   final bool showAdBanner;
   final int adMinimumDensity;
+  final TransitRepository? repository;
+  final Future<Position> Function()? positionResolver;
 
   @override
   State<MetroScreen> createState() => _MetroScreenState();
 }
 
 class _MetroScreenState extends State<MetroScreen> {
-  final TransitRepository _repo = TransitRepository.shared;
+  late final TransitRepository _repo =
+      widget.repository ?? TransitRepository.shared;
 
   bool _loading = true;
   bool _loadingSystem = false;
   bool _loadingEta = false;
+  bool _locating = false;
   String? _pageError;
   String? _lineError;
   _MetroPanel _panel = _MetroPanel.live;
@@ -61,6 +70,7 @@ class _MetroScreenState extends State<MetroScreen> {
   final _systemsRequest = RequestSequence();
   final _systemDataRequest = RequestSequence();
   final _etaRequest = RequestSequence();
+  final _locationRequest = RequestSequence();
 
   @override
   void initState() {
@@ -81,6 +91,7 @@ class _MetroScreenState extends State<MetroScreen> {
       return;
     }
     if (!widget.isActive) {
+      _cancelNearestLookup();
       _refreshTimer?.cancel();
       _refreshTimer = null;
       return;
@@ -93,6 +104,7 @@ class _MetroScreenState extends State<MetroScreen> {
   }
 
   Future<void> _loadSystems({bool refresh = false}) async {
+    _cancelNearestLookup();
     final request = _systemsRequest.next();
     if (refresh) {
       _repo.invalidateCache('metro_');
@@ -137,6 +149,7 @@ class _MetroScreenState extends State<MetroScreen> {
     required MetroSystem system,
     bool refresh = false,
   }) async {
+    _cancelNearestLookup();
     final request = _systemDataRequest.next();
     _etaRequest.next();
     if (refresh) {
@@ -203,6 +216,124 @@ class _MetroScreenState extends State<MetroScreen> {
     } finally {
       if (mounted && _systemDataRequest.isCurrent(request)) {
         setState(() => _loadingSystem = false);
+      }
+    }
+  }
+
+  void _cancelNearestLookup() {
+    _locationRequest.next();
+    if (_locating) {
+      setState(() => _locating = false);
+    }
+  }
+
+  void _showLocationMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _locateNearestStation() async {
+    if (_locating || _loading || _loadingSystem || _systems.isEmpty) {
+      return;
+    }
+    final request = _locationRequest.next();
+    setState(() => _locating = true);
+    try {
+      final position = await (widget.positionResolver ?? resolveUserPosition)();
+      if (!mounted || !_locationRequest.isCurrent(request)) {
+        return;
+      }
+      // Search every system: the current tab may still show a different city.
+      // Keep usable systems when one provider is temporarily unavailable.
+      final results = await Future.wait(
+        _systems.map((system) async {
+          try {
+            return await loadMetroSystemData(_repo, system);
+          } catch (_) {
+            return null;
+          }
+        }),
+      );
+      if (!mounted || !_locationRequest.isCurrent(request)) {
+        return;
+      }
+      final l10n = AppLocalizations.of(context);
+      final available = results.whereType<MetroSystemData>().toList();
+      final partial = available.length != results.length;
+      if (available.isEmpty) {
+        _showLocationMessage(l10n.metroStationLookupFailed);
+        return;
+      }
+      final nearest = nearestMetroStation(
+        available,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        preferredSystem: _selectedSystem?.system,
+        preferredLineId: _selectedLine?.lineId,
+      );
+      if (nearest == null) {
+        _showLocationMessage(
+          partial ? l10n.metroStationLookupFailed : l10n.railPickerNoNearby,
+        );
+        return;
+      }
+
+      _systemDataRequest.next();
+      _etaRequest.next();
+      _refreshTimer?.cancel();
+      setState(() {
+        _selectedSystem = nearest.data.system;
+        _lines = nearest.data.lines;
+        _stations = nearest.data.stations;
+        _stationOfLine = nearest.data.stationOfLine;
+        _selectedLine = nearest.line;
+        _selectedStationId = nearest.station.stationId;
+        _selectedDirection = null;
+        _etaEntries = const [];
+        _etaSource = 'unknown';
+        _etaMessage = null;
+        _frequency = null;
+        _pageError = null;
+        _lineError = null;
+        _panel = _MetroPanel.map;
+      });
+      final distance = nearest.distanceMeters < 1000
+          ? l10n.distanceMetersValue(nearest.distanceMeters.round())
+          : l10n.distanceKilometersValue(
+              (nearest.distanceMeters / 1000).toStringAsFixed(1),
+            );
+      final name = TransitName(
+        zh: nearest.station.name,
+        en: nearest.station.nameEn,
+        stableId: nearest.station.stationId,
+      ).forLocale(l10n.localeName);
+      final message = l10n.railPickerNearest(name, distance);
+      _showLocationMessage(
+        partial ? '$message\n${l10n.metroNearbyPartial}' : message,
+      );
+      unawaited(_loadLineEta());
+    } on LocationFailure catch (error) {
+      if (!mounted || !_locationRequest.isCurrent(request)) {
+        return;
+      }
+      final l10n = AppLocalizations.of(context);
+      _showLocationMessage(
+        error.serviceDisabled
+            ? l10n.locationServicesDisabled
+            : error.permissionDenied || error.deniedForever
+            ? l10n.locationPermissionDenied
+            : l10n.railLocationUnavailable,
+      );
+    } catch (_) {
+      if (mounted && _locationRequest.isCurrent(request)) {
+        _showLocationMessage(
+          AppLocalizations.of(context).railLocationUnavailable,
+        );
+      }
+    } finally {
+      if (mounted && _locationRequest.isCurrent(request)) {
+        setState(() => _locating = false);
       }
     }
   }
@@ -572,8 +703,10 @@ class _MetroScreenState extends State<MetroScreen> {
                               ],
                               _MetroPanelButtons(
                                 current: _panel,
-                                onChanged: (panel) =>
-                                    setState(() => _panel = panel),
+                                onChanged: (panel) {
+                                  _cancelNearestLookup();
+                                  setState(() => _panel = panel);
+                                },
                               ),
                               const SizedBox(height: 16),
                               AppContentTransition(
@@ -621,6 +754,23 @@ class _MetroScreenState extends State<MetroScreen> {
                   : '${_selectedSystem!.city} · ${_selectedSystem!.name}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 14),
+            FilledButton.tonalIcon(
+              key: const ValueKey('metro_locate_nearest'),
+              onPressed:
+                  _loading || _loadingSystem || _locating || _systems.isEmpty
+                  ? null
+                  : _locateNearestStation,
+              icon: _locating
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.my_location_rounded),
+              label: Text(
+                _locating ? l10n.metroLocating : l10n.metroLocateNearest,
               ),
             ),
             const SizedBox(height: 14),
@@ -706,7 +856,10 @@ class _MetroScreenState extends State<MetroScreen> {
                         selected: selected,
                         onTap: _loadingSystem
                             ? null
-                            : () => _loadLineEta(line: line),
+                            : () {
+                                _cancelNearestLookup();
+                                unawaited(_loadLineEta(line: line));
+                              },
                       );
                     })
                     .toList(growable: false),
@@ -798,7 +951,10 @@ class _MetroScreenState extends State<MetroScreen> {
           MetroDirectionSelector(
             directions: directions,
             selectedDirection: direction.direction,
-            onChanged: (value) => setState(() => _selectedDirection = value),
+            onChanged: (value) {
+              _cancelNearestLookup();
+              setState(() => _selectedDirection = value);
+            },
           ),
           const SizedBox(height: 20),
         ],
@@ -811,6 +967,7 @@ class _MetroScreenState extends State<MetroScreen> {
             headway: _currentHeadway,
             etaSource: _etaSource,
             onStationTap: (stationId) {
+              _cancelNearestLookup();
               setState(() {
                 _selectedStationId = stationId;
                 _panel = _MetroPanel.map;
@@ -878,8 +1035,10 @@ class _MetroScreenState extends State<MetroScreen> {
                       ),
                     ),
                     FilledButton.tonalIcon(
-                      onPressed: () =>
-                          setState(() => _panel = _MetroPanel.live),
+                      onPressed: () {
+                        _cancelNearestLookup();
+                        setState(() => _panel = _MetroPanel.live);
+                      },
                       icon: const Icon(Icons.access_time_filled_rounded),
                       label: Text(l10n.metroViewEta),
                     ),
@@ -897,6 +1056,7 @@ class _MetroScreenState extends State<MetroScreen> {
                   points: points,
                   selectedPointId: _selectedStationId,
                   onPointSelected: (point) {
+                    _cancelNearestLookup();
                     setState(() => _selectedStationId = point.id);
                   },
                   height: 360,
