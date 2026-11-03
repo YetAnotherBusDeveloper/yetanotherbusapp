@@ -3309,6 +3309,20 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get metroLocateNearest => 'Find nearest station';
+
+  @override
+  String get metroLocating => 'Finding nearest station…';
+
+  @override
+  String get metroNearbyPartial =>
+      'Some metro systems could not be checked. Showing the nearest station from the available data.';
+
+  @override
+  String get metroStationLookupFailed =>
+      'Could not load metro stations. Please try again.';
+
+  @override
   String get railOperatingNotices => 'Service notices';
 
   @override
