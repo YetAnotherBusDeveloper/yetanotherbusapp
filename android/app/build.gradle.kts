@@ -108,3 +108,12 @@ dependencies {
 flutter {
     source = "../.."
 }
+
+// AGP 9 packages assets for host tests. Flutter 3.44 wires resource consumers,
+// but not this new packaging task, to its asset producer.
+tasks.configureEach {
+    val variant = Regex("package(.+)UnitTestForUnitTest").matchEntire(name)?.groupValues?.get(1)
+    if (variant != null) {
+        dependsOn("copyFlutterAssets$variant")
+    }
+}
