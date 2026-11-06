@@ -79,6 +79,8 @@ class _BannerSlotState extends State<_BannerSlot> {
       if (!mounted || !AdService.instance.isAvailable) return;
       final size = widget.isInline
           ? AdSize.getInlineAdaptiveBannerAdSize(widget.width, 100)
+          // Preserve the compact anchored banner height during the SDK upgrade.
+          // ignore: deprecated_member_use
           : await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(
               widget.width,
             );

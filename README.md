@@ -57,6 +57,12 @@ YetAnotherBusApp（YABus）是一個以 Flutter 開發的跨平台公車動態�
 - 快速查看常用公車
 - 個人化首頁
 
+### Android AI 助理整合
+
+- 透過 AppFunctions 提供本機收藏與分類查詢，以及開啟收藏路線、站點的操作。
+- 使用手機現有收藏，包含尚未同步的變更；Android 16+ 與助理支援程度依平台開放狀態而定。
+- 建置、工具清單與裝置驗證方式見 [APPFUNCTIONS.md](APPFUNCTIONS.md)。
+
 ### 地圖顯示
 
 - 顯示公車即時位置
@@ -135,7 +141,7 @@ https://github.com/YetAnotherBusDeveloper/yetanotherbusapp/releases/latest
 
 ### Requirements
 
-- Flutter 3.x+
+- Flutter 3.44.0+（Android AppFunctions 的 AGP 9.1 建置需求）
 - Dart SDK
 - Android Studio / VS Code
 - Node.js 24.22.1（Web 工具；版本記錄於 `.node-version`）
