@@ -108,6 +108,23 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/favorite_group_widget_info" />
         </receiver>
+        <property
+            android:name="android.app.appfunctions.app_metadata"
+            android:resource="@xml/yabus_app_metadata" />
+        <service
+            android:name=".YabusAppFunctionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_APP_FUNCTION_SERVICE">
+            <property
+                android:name="android.app.appfunctions.schema"
+                android:value="app_functions_schema.xsd" />
+            <property
+                android:name="android.app.appfunctions.v2"
+                android:value="yabus_app_functions.xml" />
+            <intent-filter>
+                <action android:name="android.app.appfunctions.AppFunctionService" />
+            </intent-filter>
+        </service>
         <service
             android:name=".RouteTripMonitorService"
             android:exported="false"

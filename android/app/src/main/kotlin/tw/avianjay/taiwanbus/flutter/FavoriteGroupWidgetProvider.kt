@@ -426,7 +426,7 @@ object FavoriteGroupWidgetSupport {
         )
     }
 
-    private fun loadFavoriteGroups(context: Context): Map<String, List<FavoriteWidgetItem>> {
+    internal fun loadFavoriteGroups(context: Context): Map<String, List<FavoriteWidgetItem>> {
         val preferences = context.getSharedPreferences(
             FLUTTER_PREFERENCES_NAME,
             Context.MODE_PRIVATE,

@@ -5,6 +5,7 @@ plugins {
     id("com.google.gms.google-services")
     id("kotlin-android")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.devtools.ksp")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -28,7 +29,7 @@ val appGitSha = (System.getenv("APP_GIT_SHA") ?: "unknown")
 
 android {
     namespace = "tw.avianjay.taiwanbus.flutter"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     buildFeatures {
@@ -92,6 +93,8 @@ android {
 }
 
 dependencies {
+    implementation("androidx.appfunctions:appfunctions:1.0.0-rc01")
+    ksp("androidx.appfunctions:appfunctions-compiler:1.0.0-rc01")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
