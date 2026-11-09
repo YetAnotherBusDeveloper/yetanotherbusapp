@@ -4342,6 +4342,138 @@ abstract class AppLocalizations {
   /// **'The details can be at most {max} characters.'**
   String feedbackContentTooLong(int max);
 
+  /// No description provided for @feedbackMoreInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'More information (optional)'**
+  String get feedbackMoreInfo;
+
+  /// No description provided for @feedbackMoreInfoHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Additional context can help us understand the issue. You can also submit without it.'**
+  String get feedbackMoreInfoHint;
+
+  /// No description provided for @feedbackCategoryLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Category (optional)'**
+  String get feedbackCategoryLabel;
+
+  /// No description provided for @feedbackCategoryNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Not specified'**
+  String get feedbackCategoryNone;
+
+  /// No description provided for @feedbackCategoryBug.
+  ///
+  /// In en, this message translates to:
+  /// **'Bug report'**
+  String get feedbackCategoryBug;
+
+  /// No description provided for @feedbackCategoryData.
+  ///
+  /// In en, this message translates to:
+  /// **'Transit data issue'**
+  String get feedbackCategoryData;
+
+  /// No description provided for @feedbackCategoryFeature.
+  ///
+  /// In en, this message translates to:
+  /// **'Feature suggestion'**
+  String get feedbackCategoryFeature;
+
+  /// No description provided for @feedbackCategoryOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get feedbackCategoryOther;
+
+  /// No description provided for @feedbackRouteContextLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Related route / stop (optional)'**
+  String get feedbackRouteContextLabel;
+
+  /// No description provided for @feedbackRouteContextHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: Taipei route 307, toward Banqiao, Taipei Main Station'**
+  String get feedbackRouteContextHint;
+
+  /// No description provided for @feedbackContactLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact details (optional)'**
+  String get feedbackContactLabel;
+
+  /// No description provided for @feedbackContactHint.
+  ///
+  /// In en, this message translates to:
+  /// **'For example: email or Discord username for follow-up questions'**
+  String get feedbackContactHint;
+
+  /// No description provided for @feedbackOptionalTooLong.
+  ///
+  /// In en, this message translates to:
+  /// **'Use no more than {max} characters'**
+  String feedbackOptionalTooLong(int max);
+
+  /// No description provided for @feedbackIncludeDiagnostics.
+  ///
+  /// In en, this message translates to:
+  /// **'Include app and display information'**
+  String get feedbackIncludeDiagnostics;
+
+  /// No description provided for @feedbackDiagnosticsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'When enabled, the version, platform, language and display settings shown below will be included to help troubleshoot the issue.'**
+  String get feedbackDiagnosticsHint;
+
+  /// No description provided for @feedbackDiagnosticVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'App version'**
+  String get feedbackDiagnosticVersion;
+
+  /// No description provided for @feedbackDiagnosticCommit.
+  ///
+  /// In en, this message translates to:
+  /// **'Code revision'**
+  String get feedbackDiagnosticCommit;
+
+  /// No description provided for @feedbackDiagnosticPlatform.
+  ///
+  /// In en, this message translates to:
+  /// **'Platform'**
+  String get feedbackDiagnosticPlatform;
+
+  /// No description provided for @feedbackDiagnosticLocale.
+  ///
+  /// In en, this message translates to:
+  /// **'Language'**
+  String get feedbackDiagnosticLocale;
+
+  /// No description provided for @feedbackDiagnosticScreen.
+  ///
+  /// In en, this message translates to:
+  /// **'Screen size (logical pixels)'**
+  String get feedbackDiagnosticScreen;
+
+  /// No description provided for @feedbackDiagnosticTextScale.
+  ///
+  /// In en, this message translates to:
+  /// **'Text scale (at 14pt)'**
+  String get feedbackDiagnosticTextScale;
+
+  /// No description provided for @feedbackDiagnosticTheme.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme'**
+  String get feedbackDiagnosticTheme;
+
   /// No description provided for @feedbackSubmitting.
   ///
   /// In en, this message translates to:
