@@ -2458,6 +2458,74 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get feedbackMoreInfo => '更多資訊（選填）';
+
+  @override
+  String get feedbackMoreInfoHint => '補充資訊可協助我們了解問題，也可以直接送出。';
+
+  @override
+  String get feedbackCategoryLabel => '回饋類型（選填）';
+
+  @override
+  String get feedbackCategoryNone => '不指定';
+
+  @override
+  String get feedbackCategoryBug => '問題回報';
+
+  @override
+  String get feedbackCategoryData => '交通資料錯誤';
+
+  @override
+  String get feedbackCategoryFeature => '功能建議';
+
+  @override
+  String get feedbackCategoryOther => '其他';
+
+  @override
+  String get feedbackRouteContextLabel => '相關路線／站牌（選填）';
+
+  @override
+  String get feedbackRouteContextHint => '例如：臺北市 307，往板橋，臺北車站';
+
+  @override
+  String get feedbackContactLabel => '聯絡方式（選填）';
+
+  @override
+  String get feedbackContactHint => '例如：Email 或 Discord 帳號，方便我們追問細節';
+
+  @override
+  String feedbackOptionalTooLong(int max) {
+    return '此欄位最多 $max 個字';
+  }
+
+  @override
+  String get feedbackIncludeDiagnostics => '附上 App 與顯示資訊';
+
+  @override
+  String get feedbackDiagnosticsHint => '選擇後會附上以下版本、平台、語言與顯示設定，協助排查問題。';
+
+  @override
+  String get feedbackDiagnosticVersion => 'App 版本';
+
+  @override
+  String get feedbackDiagnosticCommit => '程式版本';
+
+  @override
+  String get feedbackDiagnosticPlatform => '平台';
+
+  @override
+  String get feedbackDiagnosticLocale => '語言';
+
+  @override
+  String get feedbackDiagnosticScreen => '畫面尺寸（邏輯像素）';
+
+  @override
+  String get feedbackDiagnosticTextScale => '文字縮放（以 14pt 為基準）';
+
+  @override
+  String get feedbackDiagnosticTheme => '顯示主題';
+
+  @override
   String get feedbackSubmitting => '送出中…';
 
   @override
@@ -5788,6 +5856,74 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String feedbackContentTooLong(int max) {
     return '內文最多 $max 個字';
   }
+
+  @override
+  String get feedbackMoreInfo => '更多資訊（選填）';
+
+  @override
+  String get feedbackMoreInfoHint => '補充資訊可協助我們了解問題，也可以直接送出。';
+
+  @override
+  String get feedbackCategoryLabel => '回饋類型（選填）';
+
+  @override
+  String get feedbackCategoryNone => '不指定';
+
+  @override
+  String get feedbackCategoryBug => '問題回報';
+
+  @override
+  String get feedbackCategoryData => '交通資料錯誤';
+
+  @override
+  String get feedbackCategoryFeature => '功能建議';
+
+  @override
+  String get feedbackCategoryOther => '其他';
+
+  @override
+  String get feedbackRouteContextLabel => '相關路線／站牌（選填）';
+
+  @override
+  String get feedbackRouteContextHint => '例如：臺北市 307，往板橋，臺北車站';
+
+  @override
+  String get feedbackContactLabel => '聯絡方式（選填）';
+
+  @override
+  String get feedbackContactHint => '例如：Email 或 Discord 帳號，方便我們追問細節';
+
+  @override
+  String feedbackOptionalTooLong(int max) {
+    return '此欄位最多 $max 個字';
+  }
+
+  @override
+  String get feedbackIncludeDiagnostics => '附上 App 與顯示資訊';
+
+  @override
+  String get feedbackDiagnosticsHint => '選擇後會附上以下版本、平台、語言與顯示設定，協助排查問題。';
+
+  @override
+  String get feedbackDiagnosticVersion => 'App 版本';
+
+  @override
+  String get feedbackDiagnosticCommit => '程式版本';
+
+  @override
+  String get feedbackDiagnosticPlatform => '平台';
+
+  @override
+  String get feedbackDiagnosticLocale => '語言';
+
+  @override
+  String get feedbackDiagnosticScreen => '畫面尺寸（邏輯像素）';
+
+  @override
+  String get feedbackDiagnosticTextScale => '文字縮放（以 14pt 為基準）';
+
+  @override
+  String get feedbackDiagnosticTheme => '顯示主題';
 
   @override
   String get feedbackSubmitting => '送出中…';
