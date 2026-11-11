@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -27,6 +28,7 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import java.net.HttpURLConnection
+import java.net.URLEncoder
 import java.net.URL
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -49,26 +51,18 @@ class RouteTripMonitorService : Service() {
     private var appInForeground = true
     private var foregroundStarted = false
     private var latestLocation: Location? = null
-    private var lastMovementLocation: Location? = null
-    private var lastMovementNearestIndex: Int? = null
-    private var lastMovementRecordedAtMs = 0L
-    private var lastTransitLikeAtMs = 0L
+
+    /**
+     * Owns the "is the user on the bus" question. It is fed the user's own fixes
+     * and the live vehicle positions, and never looks at whether the app is in
+     * the foreground — a trip does not stop being a trip when the user opens
+     * the app.
+     */
+    private var detector: TripRideDetector? = null
+    private var latestRide = RideSnapshot()
+    private var detectorLock = Any()
     private var boardingAlertSent = false
-    private var boardingCheckPromptSent = false
-    private var boardingCheckPromptSentAtMs = 0L
-    private var boardingWindowOpen = false
-    private var boardingWindowOpenedAtMs = 0L
-    private var boardingCheckSnoozeUntilMs = 0L
-    private var rideConfirmed = false
-    private var rideConfirmationSamples = 0
-    private var lastNearestStopIndex: Int? = null
-    private var lastBusStopIndex: Int? = null
-    private var activeBoardingVehicleId: String? = null
-    private var activeBoardingVehicleStopIndex: Int? = null
-    private var activeBoardingVehicleLastSeenAtMs = 0L
-    private var activeBoardingVehiclePassedAtMs = 0L
-    private var trackedBusId: String? = null
-    private var trackedBusLastSeenAtMs = 0L
+    private var boardingCheckNotificationId = 0L
     private var destinationSetupPromptSent = false
     private var arrivalDetectedAtMs = 0L
     private var destinationAlertStage = 0
@@ -81,26 +75,49 @@ class RouteTripMonitorService : Service() {
     private var cachedLivePathId: Int? = null
     private var cachedLiveFetchedAtMs = 0L
     private var cachedLiveStops: Map<Int, LiveStopState> = emptyMap()
+    private var cachedBusesRouteId: String? = null
+    private var cachedBusesFetchedAtMs = 0L
+    private var cachedBusReports: List<RideBusReport> = emptyList()
+    private var liveFetchBackoffUntilMs = 0L
+    private var wakeLock: PowerManager.WakeLock? = null
 
     private val pollingRunnable = object : Runnable {
         override fun run() {
             if (!foregroundStarted) {
                 return
             }
-            if (!appInForeground) {
-                refreshNotification()
-            }
+            // Refresh in the foreground too: the notification, the ETA text and
+            // the boarding question all depend on this loop, and skipping it
+            // while the app is open was why boarding went unnoticed.
+            refreshNotification()
             mainHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
-            latestLocation = locationResult.lastLocation
-            if (!appInForeground) {
-                refreshNotification()
-            }
+            val location = locationResult.lastLocation ?: return
+            latestLocation = location
+            onUserLocation(location)
+            refreshNotification()
         }
+    }
+
+    private fun onUserLocation(location: Location): Unit = synchronized(detectorLock) {
+        val currentDetector = detector ?: return
+        currentDetector.onUserLocation(
+            RideGeoPoint(
+                latitude = location.latitude,
+                longitude = location.longitude,
+                // Fixes can be minutes old when the provider hands back a
+                // cached position; ageing them here keeps the whole detector on
+                // the wall clock the rest of the service uses.
+                timestampMs = System.currentTimeMillis() -
+                    (SystemClock.elapsedRealtime() - location.time).coerceAtLeast(0L),
+                accuracyMeters = if (location.hasAccuracy()) location.accuracy else 0f,
+                speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() && it > 0f },
+            ),
+        )
     }
 
     override fun onCreate() {
@@ -157,11 +174,7 @@ class RouteTripMonitorService : Service() {
                     return START_NOT_STICKY
                 }
                 refreshNotification(force = true)
-                if (appInForeground) {
-                    stopPolling()
-                } else {
-                    startPolling()
-                }
+                startPolling()
                 return START_STICKY
             }
 
@@ -180,17 +193,13 @@ class RouteTripMonitorService : Service() {
                     stopTracking()
                     return START_NOT_STICKY
                 }
-                rideConfirmed = true
-                rideConfirmationSamples = REQUIRED_RIDE_CONFIRMATION_SAMPLES
-                boardingWindowOpen = true
-                boardingCheckPromptSent = true
-                boardingCheckPromptSentAtMs = System.currentTimeMillis()
-                normalizeVehicleId(activeBoardingVehicleId)?.let { vehicleId ->
-                    trackedBusId = vehicleId
-                    trackedBusLastSeenAtMs = System.currentTimeMillis()
+                val now = System.currentTimeMillis()
+                synchronized(detectorLock) {
+                    detector?.confirmBoardedByUser(now)
+                    latestRide = detector?.snapshot(now) ?: RideSnapshot()
                 }
-                activeBoardingVehiclePassedAtMs = 0L
-                notificationManager.cancel(ALERT_NOTIFICATION_ID)
+                boardingAlertSent = true
+                cancelBoardingCheckPrompt()
                 refreshNotification(force = true)
                 return START_STICKY
             }
@@ -200,26 +209,16 @@ class RouteTripMonitorService : Service() {
                     stopTracking()
                     return START_NOT_STICKY
                 }
+                synchronized(detectorLock) {
+                    detector?.declineBoarding()
+                    latestRide = detector?.snapshot(System.currentTimeMillis()) ?: RideSnapshot()
+                }
                 boardingAlertSent = false
-                rideConfirmed = false
-                rideConfirmationSamples = 0
-                boardingCheckPromptSent = false
-                boardingCheckPromptSentAtMs = 0L
-                boardingWindowOpen = false
-                boardingWindowOpenedAtMs = 0L
-                trackedBusId = null
-                trackedBusLastSeenAtMs = 0L
-                activeBoardingVehicleId = null
-                activeBoardingVehicleStopIndex = null
-                activeBoardingVehicleLastSeenAtMs = 0L
-                activeBoardingVehiclePassedAtMs = 0L
-                lastMovementLocation = null
-                lastMovementNearestIndex = null
-                lastMovementRecordedAtMs = 0L
-                lastTransitLikeAtMs = 0L
-                boardingCheckSnoozeUntilMs =
-                    System.currentTimeMillis() + BOARDING_CHECK_SNOOZE_MS
-                notificationManager.cancel(ALERT_NOTIFICATION_ID)
+                destinationSetupPromptSent = false
+                arrivalDetectedAtMs = 0L
+                destinationAlertStage = 0
+                overshootAlertSent = false
+                cancelBoardingCheckPrompt()
                 refreshNotification(force = true)
                 return START_STICKY
             }
@@ -235,7 +234,10 @@ class RouteTripMonitorService : Service() {
                 val previousDestination = session?.destinationStopId
                 val previousBoarding = session?.boardingStopId
                 val previousRouteId = session?.routeId
+                val previousRouteKey = session?.routeKey
                 val previousFamily = session?.realtimeRouteIds?.toSet()
+                val hadSession = session != null
+                val hadDetector = session != null && detectorExists()
                 if (AppRuntimeStateStore.isTripMonitorPausedFor(this, parsedSession)) {
                     session = parsedSession
                     appInForeground = parsedSession.appInForeground
@@ -261,60 +263,67 @@ class RouteTripMonitorService : Service() {
                 AppRuntimeStateStore.setAppInForeground(this, appInForeground)
                 val tripOriginChanged =
                     previousBoarding != parsedSession.boardingStopId ||
-                        previousRouteId != parsedSession.routeId
+                        previousRouteId != parsedSession.routeId ||
+                        // Some providers leave routeId blank, so the route key
+                        // is what actually tells two routes apart.
+                        previousRouteKey != parsedSession.routeKey
                 val destinationChanged =
                     previousDestination != parsedSession.destinationStopId
                 val familyChanged = previousFamily != parsedSession.realtimeRouteIds.toSet()
                 // A preliminary primary-route response must not keep a waiting
-                // reminder locked to that bus once the family arrives.
-                if (tripOriginChanged || (familyChanged && !rideConfirmed)) {
+                // reminder locked to that bus once the family arrives, and the
+                // detector must exist before anything can consult it. A ride the
+                // user already confirmed is never rebuilt out from under them.
+                val rideAlreadyConfirmed = currentRideSnapshot().hasBoarded
+                if (
+                    tripOriginChanged ||
+                    (familyChanged && !rideAlreadyConfirmed) ||
+                    !hadDetector
+                ) {
                     boardingAlertSent = false
-                    boardingCheckPromptSent = false
-                    boardingCheckPromptSentAtMs = 0L
-                    boardingWindowOpen = false
-                    boardingWindowOpenedAtMs = 0L
-                    boardingCheckSnoozeUntilMs = 0L
-                    rideConfirmed = false
-                    rideConfirmationSamples = 0
-                    lastNearestStopIndex = null
-                    lastBusStopIndex = null
-                    activeBoardingVehicleId = null
-                    activeBoardingVehicleStopIndex = null
-                    activeBoardingVehicleLastSeenAtMs = 0L
-                    activeBoardingVehiclePassedAtMs = 0L
-                    lastMovementLocation = null
-                    lastMovementNearestIndex = null
-                    lastMovementRecordedAtMs = 0L
-                    lastTransitLikeAtMs = 0L
-                    trackedBusId = null
-                    trackedBusLastSeenAtMs = 0L
                     destinationSetupPromptSent = false
                     arrivalDetectedAtMs = 0L
                     destinationAlertStage = 0
                     overshootAlertSent = false
-                } else if (destinationChanged) {
+                    cancelBoardingCheckPrompt()
+                    synchronized(detectorLock) {
+                        detector = createDetector(parsedSession)
+                        latestRide = RideSnapshot()
+                    }
+                    refreshRideSnapshot(System.currentTimeMillis())
+                    // Only the very first update seeds the detector from the
+                    // session's stale position; a later re-seed would replay an
+                    // old fix as if it were current.
+                    if (!hadSession) {
+                        latestLocation = createSessionLocation(parsedSession) ?: latestLocation
+                        latestLocation?.let(::onUserLocation)
+                    }
+                } else {
                     // Choosing a destination after boarding must not unlock the
                     // current vehicle and fall back to the next bus at the
                     // boarding stop. Only the destination alert lifecycle is new.
-                    destinationSetupPromptSent = false
-                    arrivalDetectedAtMs = 0L
-                    destinationAlertStage = 0
-                    overshootAlertSent = false
+                    if (destinationChanged) {
+                        destinationSetupPromptSent = false
+                        arrivalDetectedAtMs = 0L
+                        destinationAlertStage = 0
+                        overshootAlertSent = false
+                    }
+                    synchronized(detectorLock) {
+                        detector?.updateDestination(parsedSession.destinationStopId)
+                    }
                 }
-                latestLocation = createSessionLocation(parsedSession) ?: latestLocation
 
                 createAlertNotificationChannel()
                 requestLocationUpdates()
+                acquireWakeLock()
                 refreshNotification(force = true)
-                if (appInForeground) {
-                    stopPolling()
-                } else {
-                    startPolling()
-                }
+                startPolling()
             }
         }
         return START_STICKY
     }
+
+    private fun detectorExists(): Boolean = synchronized(detectorLock) { detector != null }
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
@@ -323,8 +332,41 @@ class RouteTripMonitorService : Service() {
                 fusedLocationClient.removeLocationUpdates(locationCallback)
             }
         }
+        releaseWakeLock()
         ioExecutor.shutdownNow()
         super.onDestroy()
+    }
+
+    /**
+     * A partial wake lock for as long as a trip is being tracked.
+     *
+     * With the screen off and the phone still, the CPU suspends between wakeups
+     * and the 15-second refresh loop stalls — the app cannot then tell "still
+     * waiting at the stop" from "already on the bus". Holding this keeps the
+     * loop and the detector's timers running for the length of the trip.
+     *
+     * This covers the idle/screen-off case. Deep Doze ignores wake locks
+     * outright, so a phone that has been motionless for half an hour is still
+     * at the mercy of the platform and the OEM; the lock is a mitigation, not
+     * a guarantee.
+     */
+    private fun acquireWakeLock() {
+        val manager = getSystemService(PowerManager::class.java) ?: return
+        if (wakeLock?.isHeld == true) {
+            return
+        }
+        val lock = runCatching {
+            manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
+        }.getOrNull() ?: return
+        lock.setReferenceCounted(false)
+        runCatching { lock.acquire(WAKE_LOCK_TIMEOUT_MS) }
+        wakeLock = lock
+    }
+
+    private fun releaseWakeLock() {
+        val lock = wakeLock ?: return
+        wakeLock = null
+        runCatching { if (lock.isHeld) lock.release() }
     }
 
     private fun buildStartupSnapshot(session: TrackingSession): TrackingSnapshot {
@@ -372,6 +414,15 @@ class RouteTripMonitorService : Service() {
         }
     }
 
+    private fun createDetector(session: TrackingSession): TripRideDetector {
+        return TripRideDetector(
+            stops = session.stops,
+            pathId = session.pathId,
+            boardingStopId = session.boardingStopId,
+            destinationStopId = session.destinationStopId,
+        )
+    }
+
     private fun ensureForegroundStarted(): Boolean {
         if (foregroundStarted) {
             return true
@@ -417,7 +468,13 @@ class RouteTripMonitorService : Service() {
     }
 
     private fun requestLocationUpdates() {
-        if (session?.backgroundLocationAlwaysGranted != true) {
+        // Detection needs the user's own track, so updates are requested
+        // whenever any location permission is held. Requiring the "allow all
+        // the time" grant here is what used to leave the whole boarding state
+        // machine inert: a location-type foreground service started while the
+        // app was visible keeps while-in-use access after it goes to the
+        // background, so the stricter grant is not needed to keep tracking.
+        if (!hasLocationPermission()) {
             return
         }
         if (!::fusedLocationClient.isInitialized) {
@@ -426,8 +483,12 @@ class RouteTripMonitorService : Service() {
         val request = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
             LOCATION_UPDATE_INTERVAL_MS,
-        ).setMinUpdateDistanceMeters(20f)
-            .setMinUpdateIntervalMillis(LOCATION_MIN_UPDATE_INTERVAL_MS)
+        ).setMinUpdateIntervalMillis(LOCATION_MIN_UPDATE_INTERVAL_MS)
+            // No distance filter: a phone waiting at the stop must keep
+            // reporting, both so the app can tell the user is still there and
+            // so a fix is ready the moment they board.
+            .setMinUpdateDistanceMeters(0f)
+            .setWaitForAccurateLocation(false)
             .build()
 
         runCatching {
@@ -441,12 +502,22 @@ class RouteTripMonitorService : Service() {
             fusedLocationClient.lastLocation.addOnSuccessListener { location ->
                 if (location != null) {
                     latestLocation = location
-                    if (!appInForeground) {
-                        refreshNotification()
-                    }
+                    onUserLocation(location)
+                    refreshNotification()
                 }
             }
         }
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
     private fun startPolling() {
@@ -492,6 +563,13 @@ class RouteTripMonitorService : Service() {
                                 buildTrackingNotification(buildStartupSnapshot(currentSession)),
                             )
                         }
+                        // Fetched before the snapshot: everything the detector
+                        // learns arrives through here.
+                        updateLiveData(currentSession)
+                        // Advanced on every refresh, not just when the bus feed
+                        // came back, because the question timing and the user's
+                        // own progress move independently of it.
+                        refreshRideSnapshot(System.currentTimeMillis())
                         val trackingSnapshot = buildSnapshot(
                             currentSession,
                             latestLocation ?: createSessionLocation(currentSession),
@@ -530,306 +608,272 @@ class RouteTripMonitorService : Service() {
         }
     }
 
+    /**
+     * Pulls whatever the detector needs from the backend: the boarding stop's
+     * ETA, and the live positions of every vehicle on the route.
+     *
+     * Both feeds share one rate-limit bucket with the rest of the app, so they
+     * are throttled by age rather than fetched on every refresh, and a rejection
+     * from the server backs everything off instead of hammering it.
+     */
+    private fun updateLiveData(session: TrackingSession) {
+        val routeIds = session.realtimeRouteIds
+        if (routeIds.isEmpty()) {
+            return
+        }
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (nowElapsed < liveFetchBackoffUntilMs) {
+            return
+        }
+
+        val wantsStops = cachedLiveRouteIds != routeIds ||
+            cachedLivePathId != session.pathId ||
+            nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
+        if (wantsStops) {
+            val liveStops = fetchLiveStopMapFromBackend(session)
+            // familyRealtime folds a failed request into an empty map, and a
+            // route with stops to look up that answers with nothing is a
+            // failure rather than an empty feed — so back off rather than
+            // spend the shared rate limit on retries.
+            if (liveStops.isEmpty()) {
+                liveFetchBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
+                return
+            }
+            synchronized(refreshLock) {
+                cachedLiveRouteIds = routeIds
+                cachedLivePathId = session.pathId
+                cachedLiveFetchedAtMs = nowElapsed
+                cachedLiveStops = liveStops
+            }
+            feedBoardingEta(session, liveStops)
+        }
+
+        val primaryRouteId = session.routeId?.trim().orEmpty()
+        if (primaryRouteId.isEmpty()) {
+            return
+        }
+        val wantsBuses = cachedBusesRouteId != primaryRouteId ||
+            nowElapsed - cachedBusesFetchedAtMs >= LIVE_BUS_REFRESH_INTERVAL_MS
+        if (wantsBuses) {
+            val reports = fetchBusReportsFromBackend(primaryRouteId) ?: return
+            synchronized(refreshLock) {
+                cachedBusesRouteId = primaryRouteId
+                cachedBusesFetchedAtMs = nowElapsed
+                cachedBusReports = reports
+            }
+            synchronized(detectorLock) {
+                detector?.onBusReports(reports)
+            }
+        }
+    }
+
+    private fun feedBoardingEta(
+        session: TrackingSession,
+        liveStops: Map<Int, LiveStopState>,
+    ) {
+        val boardingStopId = session.boardingStopId ?: return
+        val liveStop = liveStops[boardingStopId] ?: return
+        val etaEntry = liveStop.etaEntries.firstOrNull()
+        val arriving = liveStop.seconds?.let { it <= 0 } == true ||
+            liveStop.vehicleIds.isNotEmpty() ||
+            liveStop.message?.contains("進站") == true ||
+            liveStop.message?.contains("到站") == true
+        val now = System.currentTimeMillis()
+        synchronized(detectorLock) {
+            detector?.onBoardingStopEta(
+                etaSeconds = liveStop.seconds ?: etaEntry?.seconds,
+                arriving = arriving,
+                nowMs = now,
+            )
+        }
+    }
+
+    private fun refreshRideSnapshot(nowMs: Long) {
+        synchronized(detectorLock) {
+            latestRide = detector?.snapshot(nowMs) ?: RideSnapshot()
+        }
+    }
+
+    private fun currentRideSnapshot(): RideSnapshot = synchronized(detectorLock) { latestRide }
+
+    /**
+     * Builds the notification from the detector's view of the trip plus the
+     * live stop feed. The detector owns every "where is the user in the trip"
+     * decision; this only renders it.
+     */
     private fun buildSnapshot(
         session: TrackingSession,
         location: Location?,
     ): TrackingSnapshot {
         val liveStops = fetchLiveStopMap(session)
         if (this.session !== session) return buildStartupSnapshot(session)
-        if (location == null) {
-            return TrackingSnapshot(
-                title = session.routeName,
-                content = "等待目前位置...",
-                subText = session.pathName.ifBlank { "背景乘車提醒進行中" },
-                progressMax = null,
-                progressValue = null,
-                shortCriticalText = "定位中",
-            )
-        }
-
-        val nearestIndex = findNearestStopIndex(session.stops, location)
-        if (nearestIndex == -1) {
-            return TrackingSnapshot(
-                title = session.routeName,
-                content = "暫時無法判斷最近站牌",
-                subText = session.pathName.ifBlank { "背景乘車提醒進行中" },
-                progressMax = null,
-                progressValue = null,
-                shortCriticalText = "更新中",
-            )
-        }
-
-        val nearestStop = session.stops[nearestIndex]
-        val nearestStopDistanceMeters = distanceMeters(
-            location.latitude,
-            location.longitude,
-            nearestStop.lat,
-            nearestStop.lon,
-        )
-        val nearestLiveStop = liveStops[nearestStop.stopId]
+        // A missing fix is not an early exit: the detector can still raise the
+        // boarding question without any location at all, and the notification
+        // is built from what it knows rather than from a nearest-stop guess.
+        val ride = currentRideSnapshot()
+        val nearestIndex = location?.let { findNearestStopIndex(session.stops, it) } ?: -1
+        val nearestStop = session.stops.getOrNull(nearestIndex)
+        val nearestLiveStop = nearestStop?.let { liveStops[it.stopId] }
         val nearestEtaText = displayEtaText(nearestLiveStop)
-        val busIndex = findClosestBusIndex(session.stops, liveStops, nearestIndex)
-        val destinationIndex = session.destinationStopId?.let { destinationStopId ->
-            session.stops.indexOfFirst { stop -> stop.stopId == destinationStopId }
-                .takeIf { it >= 0 }
+        val nearestStopDistanceMeters = if (location != null && nearestStop != null) {
+            distanceMeters(location.latitude, location.longitude, nearestStop.lat, nearestStop.lon)
+        } else {
+            null
         }
+        val destinationIndex = session.destinationStopId
+            ?.let { id -> session.stops.indexOfFirst { it.stopId == id } }
+            ?.takeIf { it >= 0 }
+            ?: -1
+        val destinationStop = session.stops.getOrNull(destinationIndex)
+        val boardingIndex = ride.boardingStopIndex.takeIf { it >= 0 }
+            ?: session.boardingStopId
+                ?.let { id -> session.stops.indexOfFirst { it.stopId == id } }
+                ?.takeIf { it >= 0 }
+            ?: -1
+        val boardingStop = session.stops.getOrNull(boardingIndex)
 
-        if (destinationIndex == null && session.boardingStopId != null) {
-            val boardingIndex = session.stops.indexOfFirst { stop ->
-                stop.stopId == session.boardingStopId
-            }.takeIf { it >= 0 } ?: nearestIndex
-            val boardingStop = session.stops[boardingIndex]
-            val boardingLiveStop = liveStops[boardingStop.stopId]
-            val boardingVehicleCandidate = resolveBoardingVehicleCandidate(
-                stops = session.stops,
-                liveStops = liveStops,
-                location = location,
-                nearestIndex = nearestIndex,
-                boardingIndex = boardingIndex,
-            )
-            val boardingVehicleId = boardingVehicleCandidate?.vehicleId ?: activeBoardingVehicleId
-            val boardingEtaText = displayEtaText(boardingLiveStop, boardingVehicleId)
-            val boardingEtaSeconds = resolveEtaSeconds(boardingLiveStop, boardingVehicleId)
-            val boardingDistanceMeters = distanceMeters(
-                location.latitude,
-                location.longitude,
-                boardingStop.lat,
-                boardingStop.lon,
-            )
-            val fallbackBoardingBusIndex = findClosestBusIndexForBoarding(
-                stops = session.stops,
-                liveStops = liveStops,
-                boardingIndex = boardingIndex,
-            )
-            val boardingBusIndex =
-                boardingVehicleCandidate?.stopIndex ?: activeBoardingVehicleStopIndex ?: fallbackBoardingBusIndex
-            val busStopsUntilBoarding = boardingBusIndex?.let {
-                (boardingIndex - it).coerceAtLeast(0)
-            }
-            val rideState = if (session.backgroundLocationAlwaysGranted) {
-                updateRideState(
-                    location = location,
-                    nearestIndex = nearestIndex,
-                    boardingIndex = boardingIndex,
-                    boardingBusIndex = boardingBusIndex,
-                    boardingVehicleId = boardingVehicleId,
-                    boardingEtaText = boardingEtaText,
-                    boardingEtaSeconds = boardingEtaSeconds,
-                    boardingDistanceMeters = boardingDistanceMeters,
-                )
-            } else {
-                resolveNoLocationRideState(
-                    busStopsUntilBoarding = busStopsUntilBoarding,
-                    boardingEtaText = boardingEtaText,
-                    boardingEtaSeconds = boardingEtaSeconds,
-                )
-            }
-            val userBusLiveStop = busIndex?.let { liveStops[session.stops[it].stopId] }
-            trackedBusId = if (rideState.hasBoarded) {
-                selectTrackedBusId(
+        val boardingLiveStop = boardingStop?.let { liveStops[it.stopId] }
+        // Prefer the vehicle the detector is following; fall back to whatever
+        // the stop-level feed says so the countdown still works where the ETA
+        // entries carry no plate (雙北).
+        val boardingVehicleId = ride.nextBusVehicleId
+        val boardingEtaText = displayEtaText(boardingLiveStop, boardingVehicleId)
+        val boardingEtaSeconds = resolveEtaSeconds(boardingLiveStop, boardingVehicleId)
+        val boardingEtaShort = displayShortEtaText(boardingLiveStop, boardingVehicleId)
+        val busStopsUntilBoarding = ride.busStopsUntilBoarding
+        val busStopsAway = nearestIndex.takeIf { it >= 0 }?.let { index ->
+            ride.trackedVehicleId?.let { tracked ->
+                findTrackedBusIndex(
                     stops = session.stops,
                     liveStops = liveStops,
-                    currentTrackedBusId = trackedBusId ?: normalizeVehicleId(boardingVehicleId),
-                    fallbackLiveStops = listOf(
-                        userBusLiveStop,
-                        nearestLiveStop,
-                        boardingLiveStop,
-                    ),
+                    preferredVehicleId = tracked,
                 )
-            } else {
-                trackedBusLastSeenAtMs = 0L
-                null
-            }
-            val busStopsAway = busIndex?.let { (nearestIndex - it).coerceAtLeast(0) }
-            val boardingPointCount = boardingIndex + 1
-            val boardingProgressPoint = if (rideState.hasBoarded) {
-                val trackedPos = boardingBusIndex ?: nearestIndex
-                (trackedPos + 1).coerceIn(1, boardingPointCount)
-            } else {
-                boardingBusIndex?.plus(1)?.coerceAtMost(boardingPointCount) ?: 0
-            }
-            return TrackingSnapshot(
-                title = session.routeName,
-                content = "${nearestStop.stopName} 約 $nearestEtaText",
-                subText = buildNearestStatusText(
-                    session = session,
-                    nearestStop = nearestStop,
-                    nearestEtaText = nearestEtaText,
-                    busStopsAway = busStopsAway,
-                ),
-                progressMax = toProgressMax(boardingPointCount),
-                progressValue = toProgressValue(boardingProgressPoint, boardingPointCount),
-                shortCriticalText = buildShortCriticalText(
-                    busStopsAway,
-                    displayShortEtaText(nearestLiveStop),
-                ),
-                hasBoarded = rideState.hasBoarded,
-                boardingName = boardingStop.stopName,
-                boardingEtaText = boardingEtaText,
-                boardingEtaSeconds = boardingEtaSeconds,
-                boardingStopsAway = busStopsUntilBoarding,
-                boardingDistanceMeters = boardingDistanceMeters,
-                boardingVehicleId = boardingVehicleId,
-                boardingVehiclePassedStop = rideState.boardingVehiclePassedStop,
-                boardingPromptEligible = rideState.boardingPromptEligible,
-                nearestStopDistanceMeters = nearestStopDistanceMeters,
-            )
+            }?.let { (index - it).coerceAtLeast(0) }
         }
 
-        if (destinationIndex == null) {
-            trackedBusId = null
-            trackedBusLastSeenAtMs = 0L
-            val busStopsAway = busIndex?.let { (nearestIndex - it).coerceAtLeast(0) }
+        if (boardingStop == null && destinationStop == null) {
+            // Neither end of the trip is known: just report the nearest stop.
             return TrackingSnapshot(
                 title = session.routeName,
-                content = "${nearestStop.stopName} · $nearestEtaText",
-                subText = buildNearestStatusText(
-                    session = session,
-                    nearestStop = nearestStop,
-                    nearestEtaText = nearestEtaText,
-                    busStopsAway = busStopsAway,
-                ),
+                content = if (nearestStop != null) {
+                    "${nearestStop.stopName} · $nearestEtaText"
+                } else {
+                    session.pathName.ifBlank { "乘車提醒進行中" }
+                },
+                subText = if (nearestStop != null) {
+                    buildNearestStatusText(session, nearestStop, nearestEtaText, busStopsAway)
+                } else {
+                    session.pathName.ifBlank { "背景乘車提醒進行中" }
+                },
                 progressMax = null,
                 progressValue = null,
                 shortCriticalText = buildShortCriticalText(
                     busStopsAway,
                     displayShortEtaText(nearestLiveStop),
                 ),
-            )
-        }
-
-        val destinationStop = session.stops[destinationIndex]
-        val boardingIndex = resolveBoardingIndex(session, nearestIndex, destinationIndex)
-        val boardingStop = session.stops[boardingIndex]
-        val boardingLiveStop = liveStops[boardingStop.stopId]
-        val boardingVehicleCandidate = resolveBoardingVehicleCandidate(
-            stops = session.stops,
-            liveStops = liveStops,
-            location = location,
-            nearestIndex = nearestIndex,
-            boardingIndex = boardingIndex,
-        )
-        val boardingVehicleId = boardingVehicleCandidate?.vehicleId ?: activeBoardingVehicleId
-        val boardingEtaText = displayEtaText(boardingLiveStop, boardingVehicleId)
-        val boardingEtaShort = displayShortEtaText(boardingLiveStop, boardingVehicleId)
-        val boardingEtaSeconds = resolveEtaSeconds(boardingLiveStop, boardingVehicleId)
-        val boardingDistanceMeters = distanceMeters(
-            location.latitude,
-            location.longitude,
-            boardingStop.lat,
-            boardingStop.lon,
-        )
-        val fallbackBoardingBusIndex = findClosestBusIndexForBoarding(
-            stops = session.stops,
-            liveStops = liveStops,
-            boardingIndex = boardingIndex,
-        )
-        val boardingBusIndex =
-            boardingVehicleCandidate?.stopIndex ?: activeBoardingVehicleStopIndex ?: fallbackBoardingBusIndex
-        val busStopsUntilBoarding = boardingBusIndex?.let {
-            (boardingIndex - it).coerceAtLeast(0)
-        }
-        val rideState = if (session.backgroundLocationAlwaysGranted) {
-            updateRideState(
-                location = location,
-                nearestIndex = nearestIndex,
-                boardingIndex = boardingIndex,
-                boardingBusIndex = boardingBusIndex,
-                boardingVehicleId = boardingVehicleId,
-                boardingEtaText = boardingEtaText,
-                boardingEtaSeconds = boardingEtaSeconds,
-                boardingDistanceMeters = boardingDistanceMeters,
-            )
-        } else {
-            resolveNoLocationRideState(
-                busStopsUntilBoarding = busStopsUntilBoarding,
-                boardingEtaText = boardingEtaText,
-                boardingEtaSeconds = boardingEtaSeconds,
-            )
-        }
-
-        if (!rideState.hasBoarded) {
-            trackedBusId = null
-            trackedBusLastSeenAtMs = 0L
-            val boardingPointCount = boardingIndex + 1
-            val boardingProgressPoint =
-                boardingBusIndex?.plus(1)?.coerceAtMost(boardingPointCount) ?: 0
-            return TrackingSnapshot(
-                title = "${session.routeName} · ${boardingStop.stopName}",
-                content = "公車到 ${boardingStop.stopName} 約 $boardingEtaText",
-                subText = buildWaitingBoardingText(
-                    session = session,
-                    boardingStop = boardingStop,
-                    destinationStop = destinationStop,
-                    busStopsUntilBoarding = busStopsUntilBoarding,
-                ),
-                progressMax = toProgressMax(boardingPointCount),
-                progressValue = toProgressValue(boardingProgressPoint, boardingPointCount),
-                shortCriticalText = buildShortCriticalText(
-                    busStopsUntilBoarding,
-                    boardingEtaShort,
-                ),
-                boardingName = boardingStop.stopName,
-                boardingEtaText = boardingEtaText,
-                boardingEtaSeconds = boardingEtaSeconds,
-                boardingStopsAway = busStopsUntilBoarding,
-                boardingDistanceMeters = boardingDistanceMeters,
-                hasBoarded = false,
-                boardingVehicleId = boardingVehicleId,
-                boardingVehiclePassedStop = rideState.boardingVehiclePassedStop,
-                boardingPromptEligible = rideState.boardingPromptEligible,
-                destinationName = destinationStop.stopName,
                 nearestStopDistanceMeters = nearestStopDistanceMeters,
             )
         }
 
-        val destinationLive = liveStops[destinationStop.stopId]
-        val userBusLiveStop = busIndex?.let { liveStops[session.stops[it].stopId] }
-        trackedBusId = selectTrackedBusId(
-            stops = session.stops,
-            liveStops = liveStops,
-            currentTrackedBusId = trackedBusId ?: normalizeVehicleId(boardingVehicleId),
-            fallbackLiveStops = listOf(
-                userBusLiveStop,
-                nearestLiveStop,
-                boardingLiveStop,
-                destinationLive,
-            ),
-        )
-        val trackedBusIndex =
-            findTrackedBusIndex(
-                stops = session.stops,
-                liveStops = liveStops,
-                preferredVehicleId = trackedBusId,
+        if (destinationStop == null || !ride.hasBoarded) {
+            val waitingStop = boardingStop ?: nearestStop
+            if (waitingStop == null) {
+                return TrackingSnapshot(
+                    title = session.routeName,
+                    content = "等待目前位置...",
+                    subText = session.pathName.ifBlank { "背景乘車提醒進行中" },
+                    progressMax = null,
+                    progressValue = null,
+                    shortCriticalText = "定位中",
+                )
+            }
+            val boardingPointCount = boardingIndex.takeIf { it >= 0 }?.plus(1) ?: 1
+            val busPoint = ride.nextBusVehicleId
+                ?.let { tracked ->
+                    findTrackedBusIndex(
+                        stops = session.stops,
+                        liveStops = liveStops,
+                        preferredVehicleId = tracked,
+                    )
+                }
+                ?.plus(1)
+                ?.coerceAtMost(boardingPointCount)
+                ?: 0
+            return TrackingSnapshot(
+                title = if (destinationStop == null) {
+                    session.routeName
+                } else {
+                    "${session.routeName} · ${waitingStop.stopName}"
+                },
+                content = if (destinationStop == null) {
+                    "${waitingStop.stopName} 約 ${displayEtaText(liveStops[waitingStop.stopId])}"
+                } else {
+                    "公車到 ${waitingStop.stopName} 約 $boardingEtaText"
+                },
+                subText = if (destinationStop == null) {
+                    buildNearestStatusText(
+                        session = session,
+                        nearestStop = waitingStop,
+                        nearestEtaText = displayEtaText(liveStops[waitingStop.stopId]),
+                        busStopsAway = busStopsUntilBoarding,
+                    )
+                } else {
+                    buildWaitingBoardingText(
+                        session = session,
+                        boardingStop = waitingStop,
+                        destinationStop = destinationStop,
+                        busStopsUntilBoarding = busStopsUntilBoarding,
+                    )
+                },
+                progressMax = toProgressMax(boardingPointCount),
+                progressValue = toProgressValue(busPoint, boardingPointCount),
+                shortCriticalText = buildShortCriticalText(
+                    busStopsUntilBoarding,
+                    if (destinationStop == null) {
+                        displayShortEtaText(liveStops[waitingStop.stopId])
+                    } else {
+                        boardingEtaShort
+                    },
+                ),
+                hasBoarded = false,
+                boardingName = waitingStop.stopName,
+                boardingEtaText = boardingEtaText,
+                boardingEtaSeconds = boardingEtaSeconds,
+                boardingStopsAway = busStopsUntilBoarding,
+                boardingDistanceMeters = ride.boardingStopDistanceMeters,
+                boardingVehicleId = boardingVehicleId,
+                boardingVehiclePassedStop = false,
+                boardingPromptEligible = ride.boardingPromptDue,
+                destinationName = destinationStop?.stopName,
+                nearestStopDistanceMeters = nearestStopDistanceMeters,
             )
-        // Once on board the user travels with the bus, so their own position is
-        // a better stand-in than some other vehicle when the tracked one drops
-        // out of the feed.
-        val travelIndex = trackedBusIndex ?: nearestIndex
-        val rawRemainingStops = destinationIndex - travelIndex
-        val remainingStops = rawRemainingStops.coerceAtLeast(0)
-        val allowAnyDestinationVehicle = trackedBusId == null
+        }
+
+        // On board: progress comes from the user's own position, falling back to
+        // the vehicle they are riding when the phone stops reporting.
+        val travelIndex = ride.progressStopIndex.takeIf { it >= 0 }
+            ?: ride.nearestStopIndexOnBoard(liveStops, session.stops)
+            ?: nearestIndex
+        val journeyStartIndex = boardingIndex.coerceAtLeast(0).coerceAtMost(destinationIndex)
+        val journeyPointCount = (destinationIndex - journeyStartIndex + 1).coerceAtLeast(1)
+        val currentProgressPoint = if (travelIndex >= 0) {
+            (travelIndex.coerceAtLeast(journeyStartIndex) - journeyStartIndex) + 1
+        } else {
+            1
+        }.coerceIn(1, journeyPointCount)
+        val destinationLive = liveStops[destinationStop.stopId]
         val destinationEtaText = displayEtaText(
             destinationLive,
-            trackedBusId,
-            fallbackToAnyVehicle = allowAnyDestinationVehicle,
+            ride.trackedVehicleId,
+            fallbackToAnyVehicle = ride.trackedVehicleId == null,
         )
         val destinationEtaShort = displayShortEtaText(
             destinationLive,
-            trackedBusId,
-            fallbackToAnyVehicle = allowAnyDestinationVehicle,
+            ride.trackedVehicleId,
+            fallbackToAnyVehicle = ride.trackedVehicleId == null,
         )
-        val destinationDistanceMeters = distanceMeters(
-            location.latitude,
-            location.longitude,
-            destinationStop.lat,
-            destinationStop.lon,
-        )
-        val journeyStartIndex = boardingIndex.coerceAtMost(destinationIndex)
-        val journeyPointCount = (destinationIndex - journeyStartIndex + 1).coerceAtLeast(1)
-        val currentProgressPoint =
-            ((travelIndex.coerceAtLeast(journeyStartIndex) - journeyStartIndex) + 1)
-                .coerceIn(1, journeyPointCount)
+        val remainingStops = ride.remainingStops ?: (destinationIndex - journeyStartIndex)
+            .coerceAtLeast(0)
 
         return TrackingSnapshot(
             title = "${session.routeName} · ${destinationStop.stopName}",
@@ -837,130 +881,37 @@ class RouteTripMonitorService : Service() {
                 remainingStops == 0 -> "已接近 ${destinationStop.stopName}"
                 else -> "距離 ${destinationStop.stopName} 還有 $remainingStops 站 · $destinationEtaText"
             },
-            subText = buildOnboardTripSubText(nearestStop.stopName),
+            subText = buildOnboardTripSubText(
+                nearestStop?.stopName ?: destinationStop.stopName,
+            ),
             progressMax = toProgressMax(journeyPointCount),
             progressValue = toProgressValue(currentProgressPoint, journeyPointCount),
-            shortCriticalText = buildShortCriticalText(
-                remainingStops,
-                destinationEtaShort,
-            ),
+            shortCriticalText = buildShortCriticalText(remainingStops, destinationEtaShort),
             hasBoarded = true,
             destinationName = destinationStop.stopName,
             remainingStops = remainingStops,
-            destinationDistanceMeters = destinationDistanceMeters,
-            boardingName = boardingStop.stopName,
-            boardingVehicleId = trackedBusId ?: boardingVehicleId,
-            passedDestinationByStops = (-rawRemainingStops).takeIf { it > 0 },
+            destinationDistanceMeters = ride.destinationDistanceMeters,
+            boardingName = boardingStop?.stopName,
+            boardingVehicleId = ride.trackedVehicleId ?: boardingVehicleId,
+            passedDestinationByStops = ride.passedDestinationByStops,
             nearestStopDistanceMeters = nearestStopDistanceMeters,
         )
     }
 
-    private fun buildSnapshotLegacy(
-        session: TrackingSession,
-        location: Location?,
-    ): TrackingSnapshot {
-        val liveStops = fetchLiveStopMap(session)
-        if (location == null) {
-            return TrackingSnapshot(
-                title = session.routeName,
-                content = "等待目前位置...",
-                subText = session.pathName.ifBlank { "背景乘車提醒進行中" },
-                progressMax = null,
-                progressValue = null,
-                shortCriticalText = "定位中",
-            )
-        }
-
-        val nearestIndex = session.stops
-            .indices
-            .minByOrNull { index ->
-                val stop = session.stops[index]
-                distanceMeters(
-                    location.latitude,
-                    location.longitude,
-                    stop.lat,
-                    stop.lon,
-                )
-            } ?: -1
-        if (nearestIndex == -1) {
-            return TrackingSnapshot(
-                title = session.routeName,
-                content = "暫時無法判斷最近站牌",
-                subText = session.pathName.ifBlank { "背景乘車提醒進行中" },
-                progressMax = null,
-                progressValue = null,
-                shortCriticalText = "更新中",
-            )
-        }
-
-        val nearestStop = session.stops[nearestIndex]
-        val nearestLiveStop = liveStops[nearestStop.stopId]
-        val busIndex = findClosestBusIndex(session.stops, liveStops, nearestIndex)
-        val busStopsAway = busIndex?.let { (nearestIndex - it).coerceAtLeast(0) }
-        val nearestEtaText = formatEtaText(nearestLiveStop)
-        val nearestEtaShort = formatShortEtaText(nearestLiveStop)
-        val nearestSubText = buildNearestSubText(
-            session = session,
-            nearestStop = nearestStop,
-            busStopsAway = busStopsAway,
-            nearestEtaText = nearestEtaText,
+    /**
+     * Last resort for on-board progress when the user's own fixes are gone: the
+     * stop the tracked vehicle has reached, found through the live feed.
+     */
+    private fun RideSnapshot.nearestStopIndexOnBoard(
+        liveStops: Map<Int, LiveStopState>,
+        stops: List<TrackingStop>,
+    ): Int? {
+        val vehicleId = trackedVehicleId ?: return null
+        return findTrackedBusIndex(
+            stops = stops,
+            liveStops = liveStops,
+            preferredVehicleId = vehicleId,
         )
-
-        val destinationIndex = session.destinationStopId?.let { destinationStopId ->
-            session.stops.indexOfFirst { stop -> stop.stopId == destinationStopId }
-                .takeIf { it >= 0 }
-        }
-        if (destinationIndex == null) {
-            return TrackingSnapshot(
-                title = session.routeName,
-                content = "${nearestStop.stopName} · $nearestEtaText",
-                subText = nearestSubText,
-                progressMax = null,
-                progressValue = null,
-                shortCriticalText = buildShortCriticalText(busStopsAway, nearestEtaShort),
-            )
-        }
-
-        val destinationStop = session.stops[destinationIndex]
-        val destinationLive = liveStops[destinationStop.stopId]
-        val remainingStops = (destinationIndex - nearestIndex).coerceAtLeast(0)
-        val destinationEtaText = formatEtaText(destinationLive)
-        val destinationEtaShort = formatShortEtaText(destinationLive)
-        val destinationDistanceMeters = distanceMeters(
-            location.latitude,
-            location.longitude,
-            destinationStop.lat,
-            destinationStop.lon,
-        )
-        val pointCount = destinationIndex + 1
-        val currentProgressPoint = (busIndex ?: nearestIndex).plus(1).coerceAtMost(pointCount)
-
-        return TrackingSnapshot(
-            title = "${session.routeName} · ${destinationStop.stopName}",
-            content = when {
-                remainingStops == 0 -> "已接近 ${destinationStop.stopName}"
-                else -> "${destinationStop.stopName} 還有 $remainingStops 站 · $destinationEtaText"
-            },
-            subText = "最近站牌 ${nearestStop.stopName} · $nearestEtaText",
-            progressMax = toProgressMax(pointCount),
-            progressValue = toProgressValue(currentProgressPoint, pointCount),
-            destinationName = destinationStop.stopName,
-            remainingStops = remainingStops,
-            destinationDistanceMeters = destinationDistanceMeters,
-            shortCriticalText = buildShortCriticalText(remainingStops, destinationEtaShort),
-        )
-    }
-
-    private fun resolveBoardingIndex(
-        session: TrackingSession,
-        nearestIndex: Int,
-        destinationIndex: Int,
-    ): Int {
-        val explicitBoardingIndex = session.boardingStopId?.let { boardingStopId ->
-            session.stops.indexOfFirst { stop -> stop.stopId == boardingStopId }
-                .takeIf { it >= 0 }
-        }
-        return (explicitBoardingIndex ?: nearestIndex).coerceAtMost(destinationIndex)
     }
 
     private fun findNearestStopIndex(
@@ -976,380 +927,6 @@ class RouteTripMonitorService : Service() {
                 stop.lon,
             )
         } ?: -1
-    }
-
-    private fun findClosestStopIndices(
-        stops: List<TrackingStop>,
-        location: Location,
-        count: Int,
-    ): List<Int> {
-        if (count <= 0) {
-            return emptyList()
-        }
-        return stops.indices
-            .sortedBy { index ->
-                val stop = stops[index]
-                distanceMeters(
-                    location.latitude,
-                    location.longitude,
-                    stop.lat,
-                    stop.lon,
-                )
-            }
-            .take(count)
-    }
-
-    private fun resolveBoardingVehicleCandidate(
-        stops: List<TrackingStop>,
-        liveStops: Map<Int, LiveStopState>,
-        location: Location,
-        nearestIndex: Int,
-        boardingIndex: Int,
-    ): VehicleCandidate? {
-        val now = System.currentTimeMillis()
-        val nearbyVehicleIds = linkedSetOf<String>()
-        findClosestStopIndices(stops, location, USER_NEARBY_STOP_COUNT).forEach { index ->
-            nearbyVehicleIds += extractNormalizedVehicleIds(liveStops[stops[index].stopId])
-        }
-        val normalizedActiveVehicleId = normalizeVehicleId(activeBoardingVehicleId)
-        val activeVehicleStillFresh = normalizedActiveVehicleId != null &&
-            activeBoardingVehicleLastSeenAtMs != 0L &&
-            now - activeBoardingVehicleLastSeenAtMs < ACTIVE_BOARDING_VEHICLE_STALE_MS
-        if (activeVehicleStillFresh) {
-            nearbyVehicleIds += normalizedActiveVehicleId!!
-        }
-
-        val candidates = nearbyVehicleIds.mapNotNull { vehicleId ->
-            buildVehicleCandidate(
-                stops = stops,
-                liveStops = liveStops,
-                location = location,
-                vehicleId = vehicleId,
-            )
-        }
-        val activeCandidate = candidates.firstOrNull { it.vehicleId == normalizedActiveVehicleId }
-        if (activeCandidate != null) {
-            activeBoardingVehicleStopIndex = activeCandidate.stopIndex
-            activeBoardingVehicleLastSeenAtMs = now
-            return activeCandidate
-        }
-
-        // The locked vehicle dropped out of the live feed (bus GPS hiccups are
-        // routine). Hold the lock during the grace window instead of jumping
-        // to the next bus, so the original bus re-locks when it reappears.
-        if (activeVehicleStillFresh) {
-            return null
-        }
-        if (normalizedActiveVehicleId != null) {
-            activeBoardingVehicleId = null
-            activeBoardingVehicleStopIndex = null
-            activeBoardingVehicleLastSeenAtMs = 0L
-            activeBoardingVehiclePassedAtMs = 0L
-        }
-
-        val selectedCandidate = candidates.minWithOrNull(
-            compareBy<VehicleCandidate> { if (it.stopIndex > boardingIndex) 1 else 0 }
-                .thenBy {
-                    if (it.stopIndex <= boardingIndex) {
-                        boardingIndex - it.stopIndex
-                    } else {
-                        it.stopIndex - boardingIndex
-                    }
-                }
-                .thenBy { abs(it.stopIndex - nearestIndex) }
-                .thenBy { it.distanceMeters }
-                .thenBy { it.etaSeconds ?: Int.MAX_VALUE },
-        ) ?: return null
-
-        val nextVehicleId = selectedCandidate.vehicleId
-        if (normalizedActiveVehicleId != null && normalizedActiveVehicleId != nextVehicleId && !rideConfirmed) {
-            boardingAlertSent = false
-            boardingCheckPromptSent = false
-            boardingCheckPromptSentAtMs = 0L
-            boardingWindowOpen = false
-            activeBoardingVehiclePassedAtMs = 0L
-            rideConfirmationSamples = 0
-            notificationManager.cancel(ALERT_NOTIFICATION_ID)
-        }
-        activeBoardingVehicleId = nextVehicleId
-        activeBoardingVehicleStopIndex = selectedCandidate.stopIndex
-        activeBoardingVehicleLastSeenAtMs = now
-        return selectedCandidate
-    }
-
-    private fun buildVehicleCandidate(
-        stops: List<TrackingStop>,
-        liveStops: Map<Int, LiveStopState>,
-        location: Location,
-        vehicleId: String,
-    ): VehicleCandidate? {
-        val normalizedVehicleId = normalizeVehicleId(vehicleId) ?: return null
-        val stopIndex = findTrackedBusIndex(
-            stops = stops,
-            liveStops = liveStops,
-            preferredVehicleId = normalizedVehicleId,
-        ) ?: return null
-        val stop = stops[stopIndex]
-        val stopState = liveStops[stop.stopId]
-        return VehicleCandidate(
-            vehicleId = normalizedVehicleId,
-            stopIndex = stopIndex,
-            distanceMeters = distanceMeters(
-                location.latitude,
-                location.longitude,
-                stop.lat,
-                stop.lon,
-            ),
-            etaSeconds = resolveEtaSeconds(stopState, normalizedVehicleId),
-        )
-    }
-
-    private fun extractNormalizedVehicleIds(stopState: LiveStopState?): Set<String> {
-        val result = linkedSetOf<String>()
-        stopState?.etaEntries?.forEach { etaEntry ->
-            normalizeVehicleId(etaEntry.vehicleId)?.let(result::add)
-        }
-        stopState?.vehicleIds?.forEach { vehicleId ->
-            normalizeVehicleId(vehicleId)?.let(result::add)
-        }
-        return result
-    }
-
-    private fun updateRideState(
-        location: Location,
-        nearestIndex: Int,
-        boardingIndex: Int,
-        boardingBusIndex: Int?,
-        boardingVehicleId: String?,
-        boardingEtaText: String,
-        boardingEtaSeconds: Int?,
-        boardingDistanceMeters: Double,
-    ): RideStateUpdate {
-        val userNearBoardingStop =
-            boardingDistanceMeters <= BOARDING_STOP_RADIUS_METERS || nearestIndex == boardingIndex
-        val busNearBoardingStop =
-            (
-                boardingBusIndex != null &&
-                    boardingBusIndex <= boardingIndex &&
-                    boardingIndex - boardingBusIndex <= 1 &&
-                    isLikelyBoardingArrival(
-                        etaSeconds = boardingEtaSeconds,
-                        etaText = boardingEtaText,
-                    )
-                ) ||
-                isImmediateEtaText(boardingEtaText)
-        if (userNearBoardingStop && busNearBoardingStop) {
-            if (!boardingWindowOpen) {
-                boardingWindowOpenedAtMs = System.currentTimeMillis()
-            }
-            boardingWindowOpen = true
-        } else if (boardingWindowOpen && boardingWindowOpenedAtMs != 0L) {
-            val windowAge = System.currentTimeMillis() - boardingWindowOpenedAtMs
-            if (windowAge >= BOARDING_WINDOW_MAX_DURATION_MS) {
-                boardingWindowOpen = false
-                boardingWindowOpenedAtMs = 0L
-            }
-        }
-
-        val movement = updateUserMovement(location, nearestIndex)
-        val previousNearest = lastNearestStopIndex
-        val previousBusIndex = lastBusStopIndex
-        if (movement.sampleAdvanced) {
-            lastNearestStopIndex = nearestIndex
-        }
-        lastBusStopIndex = boardingBusIndex
-        val movedForward = previousNearest != null && nearestIndex > previousNearest
-        val busMovedForward =
-            previousBusIndex != null &&
-                boardingBusIndex != null &&
-                boardingBusIndex > previousBusIndex
-        val busNearUser = boardingBusIndex != null && abs(nearestIndex - boardingBusIndex) <= 1
-        val vehiclePassedBoarding =
-            normalizeVehicleId(boardingVehicleId) != null &&
-                boardingBusIndex != null &&
-                boardingBusIndex > boardingIndex
-        if (vehiclePassedBoarding) {
-            if (activeBoardingVehiclePassedAtMs == 0L) {
-                activeBoardingVehiclePassedAtMs = System.currentTimeMillis()
-            }
-        } else if (boardingBusIndex != null && boardingBusIndex <= boardingIndex) {
-            activeBoardingVehiclePassedAtMs = 0L
-        }
-        val userReachedBoarding = nearestIndex >= boardingIndex
-        val userAdvancedPastBoardingStop = nearestIndex > boardingIndex
-        val userMovingWithBus =
-            movement.isTransitLike &&
-                (busNearUser || vehiclePassedBoarding) &&
-                (movedForward || movement.routeIndexDelta > 0 || boardingDistanceMeters > BOARDING_CONFIRM_DISTANCE_METERS)
-        val strongBoardingSignal =
-            boardingWindowOpen &&
-                userReachedBoarding &&
-                vehiclePassedBoarding &&
-                (
-                    userMovingWithBus ||
-                        (
-                            busMovedForward &&
-                                userAdvancedPastBoardingStop &&
-                                boardingDistanceMeters <= BOARDING_CONFIRM_DISTANCE_METERS
-                        )
-                )
-
-        if (!rideConfirmed && movement.sampleAdvanced) {
-            // Count evidence only on fresh GPS samples, and decay instead of
-            // hard-resetting so a single noisy fix cannot erase progress.
-            rideConfirmationSamples = if (strongBoardingSignal) {
-                rideConfirmationSamples + 1
-            } else {
-                (rideConfirmationSamples - 1).coerceAtLeast(0)
-            }
-            if (rideConfirmationSamples >= REQUIRED_RIDE_CONFIRMATION_SAMPLES) {
-                rideConfirmed = true
-                boardingCheckPromptSent = true
-                boardingCheckPromptSentAtMs = System.currentTimeMillis()
-                normalizeVehicleId(boardingVehicleId)?.let { vehicleId ->
-                    trackedBusId = vehicleId
-                    trackedBusLastSeenAtMs = System.currentTimeMillis()
-                }
-                notificationManager.cancel(ALERT_NOTIFICATION_ID)
-            }
-        }
-
-        val boardingPromptEligible =
-            !rideConfirmed &&
-                boardingWindowOpen &&
-                vehiclePassedBoarding &&
-                !movement.isTransitLike &&
-                activeBoardingVehiclePassedAtMs != 0L &&
-                System.currentTimeMillis() - activeBoardingVehiclePassedAtMs >=
-                    BOARDING_CHECK_AFTER_PASS_DELAY_MS
-
-        return RideStateUpdate(
-            hasBoarded = rideConfirmed,
-            boardingVehiclePassedStop = vehiclePassedBoarding,
-            boardingPromptEligible = boardingPromptEligible,
-        )
-    }
-
-    private fun updateUserMovement(
-        location: Location,
-        nearestIndex: Int,
-    ): UserMovementState {
-        val now = SystemClock.elapsedRealtime()
-        val previousLocation = lastMovementLocation
-
-        // Re-processing the same fix (refreshes happen more often than GPS
-        // updates) or a junk fix must not count as "the user stopped moving" —
-        // keep the previous verdict instead of resetting it.
-        val isSameFix = previousLocation != null &&
-            previousLocation.time == location.time &&
-            previousLocation.latitude == location.latitude &&
-            previousLocation.longitude == location.longitude
-        val isPoorAccuracy = location.hasAccuracy() &&
-            location.accuracy > MAX_USABLE_LOCATION_ACCURACY_METERS
-        if (isSameFix || isPoorAccuracy) {
-            return UserMovementState(
-                routeIndexDelta = 0,
-                isTransitLike = isTransitLikeStillFresh(now),
-                sampleAdvanced = false,
-            )
-        }
-
-        val previousNearestIndex = lastMovementNearestIndex
-        val previousRecordedAtMs = lastMovementRecordedAtMs
-        val distanceMovedMeters = if (previousLocation == null) {
-            0.0
-        } else {
-            distanceMeters(
-                previousLocation.latitude,
-                previousLocation.longitude,
-                location.latitude,
-                location.longitude,
-            )
-        }
-        val elapsedMs = if (previousRecordedAtMs == 0L) 0L else now - previousRecordedAtMs
-        val estimatedSpeedMetersPerSecond =
-            elapsedMs.takeIf { it > 0L }?.let { distanceMovedMeters / (it / 1_000.0) }
-        // GPS chips report instantaneous speed far more reliably than the
-        // distance between two throttled notification refreshes.
-        val reportedSpeedMetersPerSecond = location.speed
-            .takeIf { location.hasSpeed() && it > 0f }
-            ?.toDouble()
-        val routeIndexDelta = if (previousNearestIndex == null) {
-            0
-        } else {
-            nearestIndex - previousNearestIndex
-        }
-        lastMovementLocation = Location(location)
-        lastMovementNearestIndex = nearestIndex
-        lastMovementRecordedAtMs = now
-
-        val transitLikeEvidence =
-            (
-                reportedSpeedMetersPerSecond != null &&
-                    reportedSpeedMetersPerSecond >= USER_TRANSIT_LIKE_SPEED_MPS
-            ) ||
-                (
-                    estimatedSpeedMetersPerSecond != null &&
-                        distanceMovedMeters >= USER_MOVEMENT_MIN_DISTANCE_METERS &&
-                        estimatedSpeedMetersPerSecond >= USER_TRANSIT_LIKE_SPEED_MPS
-                ) ||
-                (
-                    routeIndexDelta > 0 &&
-                        distanceMovedMeters >= USER_ROUTE_PROGRESS_MIN_DISTANCE_METERS
-                )
-        if (transitLikeEvidence) {
-            lastTransitLikeAtMs = now
-        }
-        return UserMovementState(
-            routeIndexDelta = routeIndexDelta,
-            // Buses stop at lights and stations; hold the transit verdict for a
-            // short window instead of flapping on every slow sample.
-            isTransitLike = transitLikeEvidence || isTransitLikeStillFresh(now),
-            sampleAdvanced = true,
-        )
-    }
-
-    private fun isTransitLikeStillFresh(nowElapsedMs: Long): Boolean {
-        return lastTransitLikeAtMs != 0L &&
-            nowElapsedMs - lastTransitLikeAtMs < TRANSIT_LIKE_STICKY_MS
-    }
-
-    private fun hasBusReachedBoardingStop(
-        busStopsUntilBoarding: Int?,
-        boardingEtaText: String,
-        boardingEtaSeconds: Int?,
-    ): Boolean {
-        if (busStopsUntilBoarding == null || busStopsUntilBoarding > 0) {
-            return false
-        }
-        if (isImmediateEtaText(boardingEtaText)) {
-            return true
-        }
-        // Without background location we cannot verify the user actually got
-        // on, so only treat the bus as boarded when it is genuinely at the
-        // stop — a 3-minute ETA is way too early.
-        return boardingEtaSeconds != null &&
-            boardingEtaSeconds <= BOARDING_NO_LOCATION_MAX_ETA_SECONDS
-    }
-
-    private fun resolveNoLocationRideState(
-        busStopsUntilBoarding: Int?,
-        boardingEtaText: String,
-        boardingEtaSeconds: Int?,
-    ): RideStateUpdate {
-        // Latch the boarded state: once the tracked bus reaches the boarding
-        // stop the ETA feed rolls over to the NEXT bus, which used to flip the
-        // notification back to "not boarded" until the user re-confirmed.
-        if (!rideConfirmed &&
-            hasBusReachedBoardingStop(
-                busStopsUntilBoarding = busStopsUntilBoarding,
-                boardingEtaText = boardingEtaText,
-                boardingEtaSeconds = boardingEtaSeconds,
-            )
-        ) {
-            rideConfirmed = true
-        }
-        return RideStateUpdate(hasBoarded = rideConfirmed)
     }
 
     private fun buildNearestStatusText(
@@ -1419,70 +996,6 @@ class RouteTripMonitorService : Service() {
         )
     }
 
-    private fun selectTrackedBusId(
-        stops: List<TrackingStop>,
-        liveStops: Map<Int, LiveStopState>,
-        currentTrackedBusId: String?,
-        fallbackLiveStops: List<LiveStopState?>,
-    ): String? {
-        val now = System.currentTimeMillis()
-        val normalizedCurrent = normalizeVehicleId(currentTrackedBusId)
-        if (normalizedCurrent != null) {
-            val seenAnywhereOnRoute = findTrackedBusIndex(
-                stops = stops,
-                liveStops = liveStops,
-                preferredVehicleId = normalizedCurrent,
-            ) != null
-            if (seenAnywhereOnRoute) {
-                trackedBusLastSeenAtMs = now
-                return normalizedCurrent
-            }
-            if (trackedBusLastSeenAtMs == 0L) {
-                trackedBusLastSeenAtMs = now
-                return normalizedCurrent
-            }
-            // Vehicle temporarily missing from the live feed — keep the lock
-            // during the grace window so it re-attaches when the feed recovers
-            // instead of hopping to the next bus.
-            if (now - trackedBusLastSeenAtMs < TRACKED_BUS_STALE_MS) {
-                return normalizedCurrent
-            }
-        }
-
-        fallbackLiveStops.forEach { stopState ->
-            firstKnownVehicleId(stopState)?.let { vehicleId ->
-                trackedBusLastSeenAtMs = now
-                return vehicleId
-            }
-        }
-
-        trackedBusLastSeenAtMs = 0L
-        return null
-    }
-
-    private fun firstKnownVehicleId(stopState: LiveStopState?): String? {
-        stopState ?: return null
-        stopState.etaEntries.firstNotNullOfOrNull { entry ->
-            normalizeVehicleId(entry.vehicleId)
-        }?.let { return it }
-        return stopState.vehicleIds.firstNotNullOfOrNull { vehicleId ->
-            normalizeVehicleId(vehicleId)
-        }
-    }
-
-    private fun isVehicleSeenAtStop(
-        stopState: LiveStopState?,
-        normalizedVehicleId: String,
-    ): Boolean {
-        stopState ?: return false
-        if (stopState.vehicleIds.any { normalizeVehicleId(it) == normalizedVehicleId }) {
-            return true
-        }
-        return stopState.etaEntries.any { etaEntry ->
-            normalizeVehicleId(etaEntry.vehicleId) == normalizedVehicleId
-        }
-    }
-
     private fun findEtaForVehicle(
         stopState: LiveStopState?,
         preferredVehicleId: String?,
@@ -1510,16 +1023,6 @@ class RouteTripMonitorService : Service() {
     ): Int? {
         val selectedEta = findEtaForVehicle(stopState, preferredVehicleId)
         return selectedEta?.seconds ?: stopState?.seconds
-    }
-
-    private fun isLikelyBoardingArrival(
-        etaSeconds: Int?,
-        etaText: String?,
-    ): Boolean {
-        if (isImmediateEtaText(etaText)) {
-            return true
-        }
-        return etaSeconds != null && etaSeconds <= BOARDING_ARRIVAL_MAX_ETA_SECONDS
     }
 
     private fun composeEtaText(seconds: Int?, message: String?): String {
@@ -1571,22 +1074,22 @@ class RouteTripMonitorService : Service() {
         return value.contains("進站") || value.contains("即將")
     }
 
-    private fun buildNearestSubText(
-        session: TrackingSession,
-        nearestStop: TrackingStop,
-        busStopsAway: Int?,
-        nearestEtaText: String,
-    ): String {
-        val parts = mutableListOf<String>()
-        if (session.pathName.isNotBlank()) {
-            parts += session.pathName
+    /**
+     * The button that lets the user answer the boarding question by hand. It is
+     * offered while waiting for the bus as well, so detection is never the only
+     * way to start a trip.
+     */
+    private fun TrackingSnapshot.boardingActions(): String? {
+        return when {
+            hasBoarded -> null
+            boardingName != null -> "我已上車"
+            else -> null
         }
-        parts += "最近站牌 ${nearestStop.stopName}"
-        if (nearestEtaText != "--") {
-            parts += nearestEtaText
-        }
-        buildBusDistanceText(busStopsAway)?.let(parts::add)
-        return parts.joinToString(" · ")
+    }
+
+    /** The counterpart button, offered once a ride is being tracked. */
+    private fun TrackingSnapshot.notBoardedAction(): String? {
+        return if (hasBoarded) "還沒上車" else null
     }
 
     private fun buildTrackingNotification(snapshot: TrackingSnapshot): Notification {
@@ -1705,6 +1208,17 @@ class RouteTripMonitorService : Service() {
                 ).build(),
             )
 
+        snapshot.boardingActions()?.let { action ->
+            builder.addAction(
+                NotificationCompat.Action.Builder(0, action, markBoardedIntent).build(),
+            )
+        }
+        snapshot.notBoardedAction()?.let { action ->
+            builder.addAction(
+                NotificationCompat.Action.Builder(0, action, notBoardedIntent).build(),
+            )
+        }
+
         applyShortCriticalPresentation(builder, snapshot.shortCriticalText)
 
         requestPromotedOngoing(builder)
@@ -1780,6 +1294,13 @@ class RouteTripMonitorService : Service() {
                 ).build(),
             )
 
+        snapshot.boardingActions()?.let { action ->
+            builder.addAction(Notification.Action.Builder(null, action, markBoardedIntent).build())
+        }
+        snapshot.notBoardedAction()?.let { action ->
+            builder.addAction(Notification.Action.Builder(null, action, notBoardedIntent).build())
+        }
+
         applyShortCriticalPresentation(builder, snapshot.shortCriticalText)
 
         requestPromotedOngoing(builder)
@@ -1849,74 +1370,6 @@ class RouteTripMonitorService : Service() {
         )
     }
 
-    private fun buildLegacyTrackingNotification(snapshot: TrackingSnapshot): android.app.Notification {
-        val currentSession = session ?: return NotificationCompat.Builder(
-            this,
-            TRACKING_CHANNEL_ID,
-        ).setSmallIcon(R.drawable.ic_status_bus)
-            .setContentTitle("YABus")
-            .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .build()
-
-        val builder = NotificationCompat.Builder(this, TRACKING_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_status_bus)
-            .setContentTitle(snapshot.title)
-            .setContentText(snapshot.content)
-            .setContentIntent(createOpenRoutePendingIntent(currentSession))
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setRequestPromotedOngoing(true)
-            .addAction(
-                NotificationCompat.Action.Builder(
-                    0,
-                    "停止",
-                    createStopPendingIntent(),
-                ).build(),
-            )
-
-        if (snapshot.subText.isNotBlank()) {
-            builder.setSubText(snapshot.subText)
-        }
-        applyShortCriticalPresentation(builder, snapshot.shortCriticalText)
-
-        val progressMax = snapshot.progressMax
-        val progressValue = snapshot.progressValue
-        if (progressMax != null && progressValue != null && progressMax > 0) {
-            val clampedValue = progressValue.coerceIn(0, progressMax)
-            val progressPoints = buildProgressPointPositions(progressMax)
-            builder.setProgress(progressMax, clampedValue, false)
-            val progressStyle = NotificationCompat.ProgressStyle()
-                .setStyledByProgress(true)
-                .setProgress(clampedValue)
-                .setProgressTrackerIcon(
-                    IconCompat.createWithResource(this, R.drawable.ic_progress_bus),
-                )
-                .setProgressSegments(
-                    mutableListOf(
-                        NotificationCompat.ProgressStyle.Segment(progressMax),
-                    ),
-                )
-                .setProgressPoints(
-                    progressPoints.mapTo(mutableListOf()) { position ->
-                        NotificationCompat.ProgressStyle.Point(position)
-                            .setColor(PROGRESS_POINT_COLOR)
-                    },
-                )
-                .setProgressEndIcon(
-                    IconCompat.createWithResource(this, R.drawable.ic_progress_flag),
-                )
-            builder.setStyle(progressStyle)
-        } else {
-            builder.setProgress(0, 0, false)
-        }
-
-        return builder.build()
-    }
-
     private fun maybeSendTripAlerts(
         session: TrackingSession,
         snapshot: TrackingSnapshot,
@@ -1944,11 +1397,11 @@ class RouteTripMonitorService : Service() {
             return
         }
         if (!snapshot.hasBoarded) {
-            maybeExpireBoardingCheckPrompt()
             maybeSendBoardingAlert(session, snapshot)
             maybeSendBoardingCheckPrompt(session, snapshot)
             return
         }
+        cancelBoardingCheckPrompt()
         maybeSendDestinationAlert(session, snapshot)
         maybePauseAfterArrivalGrace()
     }
@@ -1999,49 +1452,30 @@ class RouteTripMonitorService : Service() {
         )
     }
 
-    private fun maybeExpireBoardingCheckPrompt() {
-        if (!boardingCheckPromptSent || boardingCheckPromptSentAtMs == 0L) {
-            return
-        }
-        val now = System.currentTimeMillis()
-        if (now - boardingCheckPromptSentAtMs < BOARDING_CHECK_PROMPT_MAX_AGE_MS) {
-            return
-        }
-        if (!boardingWindowOpen) {
-            boardingCheckPromptSent = false
-            boardingCheckPromptSentAtMs = 0L
-            boardingAlertSent = false
-            notificationManager.cancel(ALERT_NOTIFICATION_ID)
-        }
-    }
-
     private fun maybeSendBoardingCheckPrompt(
         session: TrackingSession,
         snapshot: TrackingSnapshot,
     ) {
-        if (!session.backgroundLocationAlwaysGranted || snapshot.hasBoarded) {
+        val ride = currentRideSnapshot()
+        if (!ride.boardingPromptDue || ride.boardingCheckId == 0L) {
+            // The question was answered, retired or overtaken by a detection.
+            if (snapshot.hasBoarded || ride.boardingCheckId == 0L) {
+                cancelBoardingCheckPrompt()
+            }
             return
         }
-        if (boardingCheckPromptSent) {
-            return
-        }
-        if (!snapshot.boardingPromptEligible) {
-            return
-        }
-        val now = System.currentTimeMillis()
-        if (now < boardingCheckSnoozeUntilMs) {
+        if (boardingCheckNotificationId == ride.boardingCheckId) {
             return
         }
         val boardingName = snapshot.boardingName ?: return
 
-        boardingCheckPromptSent = true
-        boardingCheckPromptSentAtMs = System.currentTimeMillis()
+        boardingCheckNotificationId = ride.boardingCheckId
         notificationManager.notify(
-            ALERT_NOTIFICATION_ID,
+            BOARDING_CHECK_NOTIFICATION_ID,
             NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_status_bus)
                 .setContentTitle("你有上車嗎？")
-                .setContentText("$boardingName 的那台車已經過站了。")
+                .setContentText("$boardingName 的公車剛剛離站了。")
                 .setSubText(session.pathName)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
@@ -2064,6 +1498,11 @@ class RouteTripMonitorService : Service() {
                 )
                 .build(),
         )
+    }
+
+    private fun cancelBoardingCheckPrompt() {
+        boardingCheckNotificationId = 0L
+        notificationManager.cancel(BOARDING_CHECK_NOTIFICATION_ID)
     }
 
     private fun maybeSendDestinationSetupPrompt(
@@ -2096,6 +1535,12 @@ class RouteTripMonitorService : Service() {
         )
     }
 
+    /**
+     * Two heads-up alerts. "Stops remaining" counts the destination itself, so
+     * one remaining means the next stop is the user's — that, rather than a
+     * fixed distance, is what should prompt them to get ready, because a
+     * long segment can easily run past a couple of hundred metres.
+     */
     private fun maybeSendDestinationAlert(
         session: TrackingSession,
         snapshot: TrackingSnapshot,
@@ -2104,6 +1549,7 @@ class RouteTripMonitorService : Service() {
         val remainingStops = snapshot.remainingStops ?: return
         val distanceMeters = snapshot.destinationDistanceMeters ?: return
         val now = System.currentTimeMillis()
+        val nextStopIsDestination = remainingStops <= 1
 
         if (remainingStops <= 2 && destinationAlertStage < 1) {
             destinationAlertStage = 1
@@ -2136,9 +1582,10 @@ class RouteTripMonitorService : Service() {
             )
         }
 
-        if ((remainingStops == 0 || distanceMeters <= 120.0) && destinationAlertStage < 2) {
+        if ((nextStopIsDestination || distanceMeters <= DESTINATION_ARRIVED_DISTANCE_METERS) &&
+            destinationAlertStage < 2
+        ) {
             destinationAlertStage = 2
-            arrivalDetectedAtMs = now
             notificationManager.notify(
                 ALERT_NOTIFICATION_ID,
                 NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
@@ -2166,7 +1613,13 @@ class RouteTripMonitorService : Service() {
                     .setContentIntent(createOpenRoutePendingIntent(session))
                     .build(),
             )
-        } else if (destinationAlertStage >= 2 && arrivalDetectedAtMs == 0L) {
+        }
+
+        // Arrival — not "the next stop is yours" — is what starts the countdown
+        // to the auto-pause and the overshoot check.
+        if (arrivalDetectedAtMs == 0L &&
+            (remainingStops == 0 || distanceMeters <= DESTINATION_ARRIVED_DISTANCE_METERS)
+        ) {
             arrivalDetectedAtMs = now
         }
     }
@@ -2344,26 +1797,7 @@ class RouteTripMonitorService : Service() {
         foregroundStarted = false
         session = null
         latestLocation = null
-        lastMovementLocation = null
-        lastMovementNearestIndex = null
-        lastMovementRecordedAtMs = 0L
-        lastTransitLikeAtMs = 0L
         boardingAlertSent = false
-        boardingCheckPromptSent = false
-        boardingCheckPromptSentAtMs = 0L
-        boardingWindowOpen = false
-        boardingWindowOpenedAtMs = 0L
-        boardingCheckSnoozeUntilMs = 0L
-        rideConfirmed = false
-        rideConfirmationSamples = 0
-        lastNearestStopIndex = null
-        lastBusStopIndex = null
-        activeBoardingVehicleId = null
-        activeBoardingVehicleStopIndex = null
-        activeBoardingVehicleLastSeenAtMs = 0L
-        activeBoardingVehiclePassedAtMs = 0L
-        trackedBusId = null
-        trackedBusLastSeenAtMs = 0L
         destinationSetupPromptSent = false
         arrivalDetectedAtMs = 0L
         destinationAlertStage = 0
@@ -2375,6 +1809,16 @@ class RouteTripMonitorService : Service() {
         cachedLivePathId = null
         cachedLiveFetchedAtMs = 0L
         cachedLiveStops = emptyMap()
+        cachedBusesRouteId = null
+        cachedBusesFetchedAtMs = 0L
+        cachedBusReports = emptyList()
+        liveFetchBackoffUntilMs = 0L
+        synchronized(detectorLock) {
+            detector = null
+            latestRide = RideSnapshot()
+        }
+        cancelBoardingCheckPrompt()
+        releaseWakeLock()
         mainHandler.removeCallbacksAndMessages(null)
         runCatching {
             if (::fusedLocationClient.isInitialized) {
@@ -2393,49 +1837,80 @@ class RouteTripMonitorService : Service() {
         }
     }
 
+    /**
+     * The cached stop feed. Fetching happens in [updateLiveData] so that the
+     * snapshot builder never blocks on the network and both feeds are
+     * throttled together.
+     */
     private fun fetchLiveStopMap(session: TrackingSession): Map<Int, LiveStopState> {
-        val routeIds = session.realtimeRouteIds
-        if (routeIds.isEmpty()) {
+        if (session.realtimeRouteIds.isEmpty()) {
             return emptyMap()
         }
-        val now = SystemClock.elapsedRealtime()
-        synchronized(refreshLock) {
-            if (
-                appInForeground &&
-                cachedLiveRouteIds == routeIds &&
-                cachedLivePathId == session.pathId
-            ) {
-                return cachedLiveStops
-            }
-            if (
-                cachedLiveRouteIds == routeIds &&
-                cachedLivePathId == session.pathId &&
-                cachedLiveFetchedAtMs != 0L &&
-                now - cachedLiveFetchedAtMs < LIVE_STOP_CACHE_TTL_MS
-            ) {
-                return cachedLiveStops
+        return synchronized(refreshLock) {
+            if (cachedLiveRouteIds == session.realtimeRouteIds && cachedLivePathId == session.pathId) {
+                cachedLiveStops
+            } else {
+                emptyMap()
             }
         }
-        if (appInForeground) {
-            return emptyMap()
-        }
-        val liveStops = familyRealtime.fetch(session)
-        synchronized(refreshLock) {
-            if (this.session === session) {
-                cachedLiveRouteIds = routeIds
-                cachedLivePathId = session.pathId
-                cachedLiveFetchedAtMs = now
-                cachedLiveStops = liveStops
-            }
-        }
-        return liveStops
     }
 
-    private fun fetchBackendJson(path: String): JSONObject? {
+    /** The live feed for the route and its variants; empty when fetching failed. */
+    private fun fetchLiveStopMapFromBackend(
+        session: TrackingSession,
+    ): Map<Int, LiveStopState> {
+        if (session.realtimeRouteIds.isEmpty()) {
+            return emptyMap()
+        }
+        // The family fetch covers the route and its variants; a single-route
+        // session is just the one-id case of it.
+        return familyRealtime.fetch(session)
+    }
+
+    /** Live positions of every vehicle on the route; null when the request failed. */
+    private fun fetchBusReportsFromBackend(routeId: String): List<RideBusReport>? {
+        val encodedRouteId = URLEncoder.encode(routeId, Charsets.UTF_8.name())
+        val array = fetchBackendJsonArray("/api/v1/routes/$encodedRouteId/realtime/buses")
+            ?: return null
+        val receivedAtMs = System.currentTimeMillis()
+        return runCatching { parseBusReports(array, receivedAtMs) }.getOrNull()
+    }
+
+    private fun parseBusReports(
+        array: JSONArray,
+        receivedAtMs: Long,
+    ): List<RideBusReport> {
+        val reports = ArrayList<RideBusReport>(array.length())
+        for (index in 0 until array.length()) {
+            val bus = array.optJSONObject(index) ?: continue
+            val vehicleId = normalizeVehicleId(bus.opt("id")?.toString())
+                ?: normalizeVehicleId(bus.opt("plate")?.toString())
+                ?: continue
+            val latitude = bus.optDouble("lat", Double.NaN)
+            val longitude = bus.optDouble("lon", Double.NaN)
+            if (latitude.isNaN() || longitude.isNaN()) {
+                continue
+            }
+            // GPSTime is unix seconds; a missing one makes the report unusable
+            // because there is nothing to line the user's track up against.
+            val gpsTimeMs = (toIntOrNull(bus.opt("time"))?.toLong() ?: continue) * 1000L
+            reports += RideBusReport(
+                vehicleId = vehicleId,
+                pathId = toIntOrNull(bus.opt("direction")),
+                latitude = latitude,
+                longitude = longitude,
+                gpsTimeMs = gpsTimeMs,
+                receivedAtMs = receivedAtMs,
+            )
+        }
+        return reports
+    }
+
+    /** Raw body of a backend GET; null when the request failed. */
+    private fun fetchBackendJsonText(path: String): String? {
         var connection: HttpURLConnection? = null
         return try {
-            connection = URL("https://bus.avianjay.sbs/api/v1/$path")
-                .openConnection() as HttpURLConnection
+            connection = URL("$BACKEND_BASE_URL$path").openConnection() as HttpURLConnection
             connection.connectTimeout = 10_000
             connection.readTimeout = 10_000
             connection.requestMethod = "GET"
@@ -2446,10 +1921,9 @@ class RouteTripMonitorService : Service() {
             if (connection.responseCode !in 200..299) {
                 return null
             }
-            val jsonText = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+            connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 reader.readText()
             }
-            JSONObject(jsonText)
         } catch (_: Exception) {
             null
         } finally {
@@ -2457,66 +1931,24 @@ class RouteTripMonitorService : Service() {
         }
     }
 
-    private fun formatEtaText(liveStopState: LiveStopState?): String {
-        liveStopState ?: return "--"
-        val message = normalizeEtaMessage(liveStopState.message)
-        if (message != null) {
-            return message
-        }
-
-        val seconds = liveStopState.seconds ?: return "--"
-        if (seconds <= 0) {
-            return "進站中"
-        }
-        if (seconds < 60) {
-            return "即將進站"
-        }
-        return "${seconds / 60} 分"
-    }
-
-    private fun formatShortEtaText(liveStopState: LiveStopState?): String {
-        liveStopState ?: return "--"
-        val message = liveStopState.message?.trim().orEmpty()
-        if (message.isNotEmpty()) {
-            return when {
-                message.contains("進站") || message.contains("到站") -> "進站"
-                message.contains("即將") -> "即將"
-                message.contains("未發車") -> "未發"
-                message.contains("末班") -> "末班"
-                else -> message.take(6)
-            }
-        }
-
-        val seconds = liveStopState.seconds ?: return "--"
-        if (seconds <= 0) {
-            return "進站"
-        }
-        if (seconds < 60) {
-            return "<1分"
-        }
-        return "${seconds / 60}分"
-    }
-
-    private fun normalizeEtaMessage(message: String?): String? {
-        val trimmed = message?.trim().orEmpty()
-        if (trimmed.isEmpty()) {
-            return null
-        }
-
-        return when {
-            trimmed.contains("進站") || trimmed.contains("到站") -> "進站中"
-            trimmed.contains("即將") -> "即將進站"
-            trimmed.contains("未發車") -> "未發車"
-            trimmed.contains("末班") -> "末班已過"
-            else -> trimmed
+    /** A JSON object response, addressed relative to `/api/v1/`. */
+    private fun fetchBackendJson(path: String): JSONObject? {
+        return fetchBackendJsonText("/api/v1/$path")?.let { text ->
+            runCatching { JSONObject(text) }.getOrNull()
         }
     }
 
-    private fun buildBusDistanceText(busStopsAway: Int?): String? {
-        return when (busStopsAway) {
-            null -> null
-            0 -> "公車就在附近"
-            else -> "公車還有 $busStopsAway 站"
+    /** A JSON array response; `/realtime/buses` returns one. */
+    private fun fetchBackendJsonArray(path: String): JSONArray? {
+        return fetchBackendJsonText(path)?.let { text ->
+            runCatching { JSONArray(text) }.getOrNull()
+        }
+    }
+
+    private fun toIntOrNull(raw: Any?): Int? {
+        return when (raw) {
+            is Number -> raw.toInt()
+            else -> raw?.toString()?.trim()?.toIntOrNull()
         }
     }
 
@@ -2548,67 +1980,7 @@ class RouteTripMonitorService : Service() {
         return trimmed.take(7)
     }
 
-    private fun buildLegacyShortCriticalText(stopsAway: Int?, etaText: String): String? {
-        if (stopsAway == null && etaText == "--") {
-            return null
-        }
-
-        if (stopsAway == 0 && etaText != "--") {
-            return etaText.take(7)
-        }
-
-        val left = when (stopsAway) {
-            null -> null
-            0 -> "到站"
-            else -> "${stopsAway}站"
-        }
-        if (left == null) {
-            return etaText
-        }
-        if (etaText == "--") {
-            return left
-        }
-        return "$left | $etaText"
-    }
-
-    private fun findClosestBusIndex(
-        stops: List<TrackingStop>,
-        liveStops: Map<Int, LiveStopState>,
-        nearestIndex: Int,
-    ): Int? {
-        val busIndexes = stops.mapIndexedNotNull { index, stop ->
-            val liveStop = liveStops[stop.stopId] ?: return@mapIndexedNotNull null
-            if (isBusApproachingStop(liveStop)) {
-                index
-            } else {
-                null
-            }
-        }
-        val behindOrAtUser = busIndexes.filter { it <= nearestIndex }
-        if (behindOrAtUser.isNotEmpty()) {
-            return behindOrAtUser.maxOrNull()
-        }
-        return busIndexes.minOrNull()
-    }
-
-    private fun findClosestBusIndexForBoarding(
-        stops: List<TrackingStop>,
-        liveStops: Map<Int, LiveStopState>,
-        boardingIndex: Int,
-    ): Int? {
-        val busIndexes = stops.mapIndexedNotNull { index, stop ->
-            val liveStop = liveStops[stop.stopId] ?: return@mapIndexedNotNull null
-            if (isBusApproachingStop(liveStop)) {
-                index
-            } else {
-                null
-            }
-        }
-        return busIndexes
-            .filter { it <= boardingIndex }
-            .maxOrNull()
-    }
-
+    /** Index of the stop where the live feed last saw [preferredVehicleId]. */
     private fun findTrackedBusIndex(
         stops: List<TrackingStop>,
         liveStops: Map<Int, LiveStopState>,
@@ -2616,19 +1988,15 @@ class RouteTripMonitorService : Service() {
     ): Int? {
         val normalizedVehicleId = normalizeVehicleId(preferredVehicleId) ?: return null
         return stops.indexOfFirst { stop ->
-            isVehicleSeenAtStop(
-                stopState = liveStops[stop.stopId],
-                normalizedVehicleId = normalizedVehicleId,
-            )
+            val stopState = liveStops[stop.stopId]
+            stopState != null &&
+                (
+                    stopState.vehicleIds.any { normalizeVehicleId(it) == normalizedVehicleId } ||
+                        stopState.etaEntries.any {
+                            normalizeVehicleId(it.vehicleId) == normalizedVehicleId
+                        }
+                    )
         }.takeIf { it >= 0 }
-    }
-
-    private fun isBusApproachingStop(liveStop: LiveStopState): Boolean {
-        val message = liveStop.message?.trim().orEmpty()
-        return liveStop.vehicleIds.isNotEmpty() ||
-            (liveStop.seconds != null && liveStop.seconds <= 0) ||
-            message.contains("進站") ||
-            message.contains("到站")
     }
 
     private fun distanceMeters(
@@ -2684,38 +2052,28 @@ class RouteTripMonitorService : Service() {
         private const val ALERT_CHANNEL_ID = "trip_monitor_alerts"
         private const val TRACKING_NOTIFICATION_ID = 6021
         private const val ALERT_NOTIFICATION_ID = 6022
+        private const val BOARDING_CHECK_NOTIFICATION_ID = 6023
 
+        private const val BACKEND_BASE_URL = "https://bus.avianjay.sbs"
         private const val POLL_INTERVAL_MS = 15_000L
+        private const val LIVE_STOP_REFRESH_INTERVAL_MS = 20_000L
+        private const val LIVE_BUS_REFRESH_INTERVAL_MS = 15_000L
+        private const val LIVE_FETCH_BACKOFF_MS = 60_000L
         private const val MIN_REFRESH_INTERVAL_MS = 2_000L
-        private const val LIVE_STOP_CACHE_TTL_MS = 2_000L
         private const val LOCATION_UPDATE_INTERVAL_MS = 12_000L
         private const val LOCATION_MIN_UPDATE_INTERVAL_MS = 6_000L
-        private const val BOARDING_STOP_RADIUS_METERS = 180.0
-        private const val BOARDING_CONFIRM_DISTANCE_METERS = 250.0
-        private const val BOARDING_ARRIVAL_MAX_ETA_SECONDS = 180
-        private const val BOARDING_NO_LOCATION_MAX_ETA_SECONDS = 40
-        private const val BOARDING_CHECK_PROMPT_MAX_ETA_SECONDS = 180
-        private const val REQUIRED_RIDE_CONFIRMATION_SAMPLES = 2
         private const val BACKGROUND_AUTO_PAUSE_GRACE_MS = 90_000L
-        private const val BOARDING_CHECK_PROMPT_DELAY_MS = 45_000L
-        private const val BOARDING_CHECK_SNOOZE_MS = 180_000L
-        private const val BOARDING_CHECK_AFTER_PASS_DELAY_MS = 20_000L
-        private const val ACTIVE_BOARDING_VEHICLE_STALE_MS = 90_000L
-        private const val TRACKED_BUS_STALE_MS = 120_000L
-        private const val BOARDING_WINDOW_MAX_DURATION_MS = 300_000L
-        private const val BOARDING_CHECK_PROMPT_MAX_AGE_MS = 300_000L
-        private const val USER_NEARBY_STOP_COUNT = 2
-        private const val USER_MOVEMENT_MIN_DISTANCE_METERS = 35.0
-        private const val USER_ROUTE_PROGRESS_MIN_DISTANCE_METERS = 45.0
-        private const val USER_TRANSIT_LIKE_SPEED_MPS = 4.2
-        private const val MAX_USABLE_LOCATION_ACCURACY_METERS = 100f
-        private const val TRANSIT_LIKE_STICKY_MS = 90_000L
+        private const val WAKE_LOCK_TAG = "YABus::TripMonitor"
+        // The lock is renewed on every start, so this only bounds a session that
+        // was never cleaned up; it is not the expected trip length.
+        private const val WAKE_LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L
         private const val PROGRESS_POINT_UNIT = 100
         private const val PROGRESS_POINT_COLOR = 0x80000000.toInt()
         private const val OVERSHOOT_CONFIRM_DELAY_MS = 45_000L
         private const val ARRIVAL_AUTO_PAUSE_DELAY_MS = 60_000L
         private const val ROUTE_PROXIMITY_MAX_DISTANCE_METERS = 100.0
         private const val DESTINATION_OVERSHOOT_DISTANCE_METERS = 100.0
+        private const val DESTINATION_ARRIVED_DISTANCE_METERS = 120.0
         private const val LIVE_UPDATE_SDK_INT = 36
         private const val PAUSE_REASON_USER = "user"
         private const val PAUSE_REASON_ARRIVED = "arrived"
@@ -2733,7 +2091,9 @@ class RouteTripMonitorService : Service() {
                 for (index in 0 until stopsJson.length()) {
                     val stop = stopsJson.optJSONObject(index) ?: continue
                     stops += TrackingStop(
-                        stopId = stop.optInt("stopId", 0),
+                        // Must match how the live feed folds the same id, or the
+                        // two maps never line up for 64-bit ids (高雄).
+                        stopId = foldStopId(stop.opt("stopId")),
                         rawStopId = stop.optString("rawStopId", "")
                             .trim().takeIf { it.isNotEmpty() && it != "null" },
                         stopName = stop.optString("stopName", ""),
@@ -2767,11 +2127,11 @@ class RouteTripMonitorService : Service() {
                         .takeUnless { it.isNaN() },
                     initialLongitude = root.optDouble("initialLongitude", Double.NaN)
                         .takeUnless { it.isNaN() },
-                    boardingStopId = root.optInt("boardingStopId", -1)
+                    boardingStopId = foldStopId(root.opt("boardingStopId"))
                         .takeIf { it > 0 },
                     boardingStopName = root.optString("boardingStopName", "")
                         .takeIf { it.isNotBlank() },
-                    destinationStopId = root.optInt("destinationStopId", -1)
+                    destinationStopId = foldStopId(root.opt("destinationStopId"))
                         .takeIf { it > 0 },
                     destinationStopName = root.optString("destinationStopName", "")
                         .takeIf { it.isNotBlank() },

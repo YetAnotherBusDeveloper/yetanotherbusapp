@@ -622,7 +622,10 @@ internal object SmartRouteNotificationSupport {
             while (cursor.moveToNext()) {
                 result += SmartRouteStop(
                     pathId = cursor.getInt(0),
-                    stopId = cursor.getInt(1),
+                    // stopid is a TEXT column and 高雄 ids exceed Int; reading it
+                    // with getInt would truncate the key the live feed is folded
+                    // with, and the two would never meet.
+                    stopId = foldStopId(cursor.getString(1)),
                     stopName = cursor.getString(2).orEmpty(),
                     sequence = cursor.getInt(3),
                     lon = cursor.getDouble(4),
@@ -678,21 +681,7 @@ internal object SmartRouteNotificationSupport {
         return result
     }
 
-    private fun parseStopId(raw: Any?): Int {
-        if (raw is Number) {
-            return raw.toInt()
-        }
-        val text = raw?.toString()?.trim().orEmpty()
-        val parsed = text.toIntOrNull()
-        if (parsed != null) {
-            return parsed
-        }
-        var hash = 17
-        for (char in text) {
-            hash = (hash * 31 + char.code) and 0x7fffffff
-        }
-        return hash
-    }
+    private fun parseStopId(raw: Any?): Int = foldStopId(raw)
 
     private fun toIntOrNull(raw: Any?): Int? {
         return when (raw) {

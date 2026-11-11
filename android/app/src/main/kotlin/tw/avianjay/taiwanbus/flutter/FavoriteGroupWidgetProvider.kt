@@ -449,7 +449,9 @@ object FavoriteGroupWidgetSupport {
                 val item = groupArray.optJSONObject(index) ?: continue
                 val type = item.optString("type", "boarding").trim().ifEmpty { "boarding" }
                 val routeKey = item.optInt("routeKey", 0)
-                val stopId = item.optInt("stopId", 0)
+                // The config is written by Dart with the raw feed id, which can
+                // exceed Int for 高雄; fold it the same way the live feed does.
+                val stopId = foldStopId(item.opt("stopId"))
                 val routeId = item.optString("routeId", "").trim().takeIf { it.isNotEmpty() }
                 val stationId = item.optString("stationId", "").trim()
                 val valid = when (type) {
@@ -461,7 +463,7 @@ object FavoriteGroupWidgetSupport {
                 if (!valid) {
                     continue
                 }
-                val destinationStopId = item.optInt("destinationStopId", 0)
+                val destinationStopId = foldStopId(item.opt("destinationStopId"))
                     .takeIf { it > 0 }
                 val destinationPathId = if (destinationStopId == null) {
                     null
@@ -690,21 +692,7 @@ object FavoriteGroupWidgetSupport {
         return result
     }
 
-    private fun parseStopId(raw: Any?): Int {
-        if (raw is Number) {
-            return raw.toInt()
-        }
-        val text = raw?.toString()?.trim().orEmpty()
-        val parsed = text.toIntOrNull()
-        if (parsed != null) {
-            return parsed
-        }
-        var hash = 17
-        for (char in text) {
-            hash = (hash * 31 + char.code) and 0x7fffffff
-        }
-        return hash
-    }
+    private fun parseStopId(raw: Any?): Int = foldStopId(raw)
 
     private fun toIntOrNull(raw: Any?): Int? {
         return when (raw) {
