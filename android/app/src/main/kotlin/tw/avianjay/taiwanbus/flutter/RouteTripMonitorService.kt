@@ -78,7 +78,8 @@ class RouteTripMonitorService : Service() {
     private var cachedBusesRouteId: String? = null
     private var cachedBusesFetchedAtMs = 0L
     private var cachedBusReports: List<RideBusReport> = emptyList()
-    private var liveFetchBackoffUntilMs = 0L
+    private var liveStopBackoffUntilMs = 0L
+    private var liveBusBackoffUntilMs = 0L
     private var wakeLock: PowerManager.WakeLock? = null
 
     private val pollingRunnable = object : Runnable {
@@ -236,6 +237,8 @@ class RouteTripMonitorService : Service() {
                 val previousBoarding = session?.boardingStopId
                 val previousRouteId = session?.routeId
                 val previousRouteKey = session?.routeKey
+                val previousPathId = session?.pathId
+                val previousStopIds = session?.stops?.map { it.stopId }
                 val previousFamily = session?.realtimeRouteIds?.toSet()
                 val hadSession = session != null
                 val hadDetector = session != null && detectorExists()
@@ -273,7 +276,13 @@ class RouteTripMonitorService : Service() {
                         previousRouteId != parsedSession.routeId ||
                         // Some providers leave routeId blank, so the route key
                         // is what actually tells two routes apart.
-                        previousRouteKey != parsedSession.routeKey
+                        previousRouteKey != parsedSession.routeKey ||
+                        // The other direction of the same route can share a
+                        // boarding stop, yet it is another line of stops: the
+                        // detector measures everything along the one it was
+                        // built with.
+                        previousPathId != parsedSession.pathId ||
+                        previousStopIds != parsedSession.stops.map { it.stopId }
                 val destinationChanged =
                     previousDestination != parsedSession.destinationStopId
                 val familyChanged = previousFamily != parsedSession.realtimeRouteIds.toSet()
@@ -660,8 +669,10 @@ class RouteTripMonitorService : Service() {
      * ETA, and the live positions of every vehicle on the route.
      *
      * Both feeds share one rate-limit bucket with the rest of the app, so they
-     * are throttled by age rather than fetched on every refresh, and a rejection
-     * from the server backs everything off instead of hammering it.
+     * are throttled by age rather than fetched on every refresh, and a failed
+     * request backs that feed off instead of hammering the server. Each feed
+     * backs off on its own: the vehicle positions are what detection runs on
+     * when the phone has no fix, and must not go dark because the stop feed did.
      */
     private fun updateLiveData(session: TrackingSession) {
         val routeIds = session.realtimeRouteIds
@@ -669,13 +680,12 @@ class RouteTripMonitorService : Service() {
             return
         }
         val nowElapsed = SystemClock.elapsedRealtime()
-        if (nowElapsed < liveFetchBackoffUntilMs) {
-            return
-        }
 
-        val wantsStops = cachedLiveRouteIds != routeIds ||
-            cachedLivePathId != session.pathId ||
-            nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
+        val wantsStops = nowElapsed >= liveStopBackoffUntilMs && (
+            cachedLiveRouteIds != routeIds ||
+                cachedLivePathId != session.pathId ||
+                nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
+            )
         if (wantsStops) {
             val liveStops = fetchLiveStopMapFromBackend(session)
             // familyRealtime folds a failed request into an empty map, and a
@@ -683,26 +693,30 @@ class RouteTripMonitorService : Service() {
             // failure rather than an empty feed — so back off rather than
             // spend the shared rate limit on retries.
             if (liveStops.isEmpty()) {
-                liveFetchBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
-                return
+                liveStopBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
+            } else {
+                synchronized(refreshLock) {
+                    cachedLiveRouteIds = routeIds
+                    cachedLivePathId = session.pathId
+                    cachedLiveFetchedAtMs = nowElapsed
+                    cachedLiveStops = liveStops
+                }
+                feedBoardingEta(session, liveStops)
             }
-            synchronized(refreshLock) {
-                cachedLiveRouteIds = routeIds
-                cachedLivePathId = session.pathId
-                cachedLiveFetchedAtMs = nowElapsed
-                cachedLiveStops = liveStops
-            }
-            feedBoardingEta(session, liveStops)
         }
 
         val primaryRouteId = session.routeId?.trim().orEmpty()
-        if (primaryRouteId.isEmpty()) {
+        if (primaryRouteId.isEmpty() || nowElapsed < liveBusBackoffUntilMs) {
             return
         }
         val wantsBuses = cachedBusesRouteId != primaryRouteId ||
             nowElapsed - cachedBusesFetchedAtMs >= LIVE_BUS_REFRESH_INTERVAL_MS
         if (wantsBuses) {
-            val reports = fetchBusReportsFromBackend(primaryRouteId) ?: return
+            val reports = fetchBusReportsFromBackend(primaryRouteId)
+            if (reports == null) {
+                liveBusBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
+                return
+            }
             synchronized(refreshLock) {
                 cachedBusesRouteId = primaryRouteId
                 cachedBusesFetchedAtMs = nowElapsed
@@ -721,8 +735,10 @@ class RouteTripMonitorService : Service() {
         val boardingStopId = session.boardingStopId ?: return
         val liveStop = liveStops[boardingStopId] ?: return
         val etaEntry = liveStop.etaEntries.firstOrNull()
+        // A plate on an ETA entry is a bus still on its way, possibly ten
+        // minutes out; only a bus the feed places at the stop counts as here.
         val arriving = liveStop.seconds?.let { it <= 0 } == true ||
-            liveStop.vehicleIds.isNotEmpty() ||
+            liveStop.busesAtStop.isNotEmpty() ||
             liveStop.message?.contains("進站") == true ||
             liveStop.message?.contains("到站") == true
         val now = System.currentTimeMillis()
@@ -1892,7 +1908,8 @@ class RouteTripMonitorService : Service() {
         cachedBusesRouteId = null
         cachedBusesFetchedAtMs = 0L
         cachedBusReports = emptyList()
-        liveFetchBackoffUntilMs = 0L
+        liveStopBackoffUntilMs = 0L
+        liveBusBackoffUntilMs = 0L
         synchronized(detectorLock) {
             detector = null
             latestRide = RideSnapshot()
@@ -1986,8 +2003,10 @@ class RouteTripMonitorService : Service() {
         return reports
     }
 
-    /** Raw body of a backend GET; null when the request failed. */
-    private fun fetchBackendJsonText(path: String): String? {
+    /** Raw body of a backend GET; null when the request failed. Replaced in tests. */
+    internal var fetchBackendJsonText: (String) -> String? = ::httpGetBackend
+
+    private fun httpGetBackend(path: String): String? {
         var connection: HttpURLConnection? = null
         return try {
             connection = URL("$BACKEND_BASE_URL$path").openConnection() as HttpURLConnection
@@ -2349,8 +2368,11 @@ data class TrackingStop(
 data class LiveStopState(
     val seconds: Int?,
     val message: String?,
+    /** Every vehicle the stop's feed names, including buses still on their way. */
     val vehicleIds: List<String>,
     val etaEntries: List<LiveEtaEntry> = emptyList(),
+    /** Only the vehicles the feed places at this stop right now. */
+    val busesAtStop: List<String> = emptyList(),
 )
 
 data class LiveEtaEntry(

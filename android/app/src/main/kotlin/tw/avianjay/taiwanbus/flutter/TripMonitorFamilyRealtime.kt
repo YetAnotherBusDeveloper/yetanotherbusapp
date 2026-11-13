@@ -116,6 +116,7 @@ internal fun parseTripMonitorLiveStop(stop: JSONObject): LiveStopState {
         message = text(stop, "message"),
         vehicleIds = (buses + etas.mapNotNull { it.vehicleId }).distinct(),
         etaEntries = etas,
+        busesAtStop = buses,
     )
 }
 
@@ -131,6 +132,7 @@ private fun mergeStops(stops: List<LiveStopState>): LiveStopState {
         message = if (earliest == null) stops.firstNotNullOfOrNull { it.message } else null,
         vehicleIds = (entries.mapNotNull { it.vehicleId } + stops.flatMap { it.vehicleIds }).distinct(),
         etaEntries = entries,
+        busesAtStop = stops.flatMap { it.busesAtStop }.distinct(),
     )
 }
 

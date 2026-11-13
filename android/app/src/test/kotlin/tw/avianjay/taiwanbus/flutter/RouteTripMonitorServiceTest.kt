@@ -46,11 +46,16 @@ class RouteTripMonitorServiceTest {
     private lateinit var service: RouteTripMonitorService
     private lateinit var shadow: RecordingTripServiceShadow
 
+    @Volatile
+    private var backend: (String) -> String? = { null }
+
     @Before
     fun setUp() {
         controller = Robolectric.buildService(RouteTripMonitorService::class.java).create()
         service = controller.get()
         shadow = Shadow.extract(service)
+        // No test reaches the real backend; each one says what it answers.
+        service.fetchBackendJsonText = { path -> backend(path) }
     }
 
     @After
@@ -224,7 +229,7 @@ class RouteTripMonitorServiceTest {
 
     @Test
     fun familyChangesDoNotResetConfirmedRide() {
-        val initial = sessionPayload() + mapOf("routeId" to "TXG1")
+        val initial = tripWithDestination() + mapOf("routeId" to "TXG1")
         service.onStartCommand(startIntent(initial), 0, 1)
         service.onStartCommand(command("MARK_BOARDED"), 0, 2)
         assertTrue(ride(service).hasBoarded)
@@ -241,7 +246,7 @@ class RouteTripMonitorServiceTest {
 
     @Test
     fun reportingNotBoardedClearsTheRide() {
-        service.onStartCommand(startIntent(), 0, 1)
+        service.onStartCommand(startIntent(tripWithDestination()), 0, 1)
         service.onStartCommand(command("MARK_BOARDED"), 0, 2)
         assertTrue(ride(service).hasBoarded)
 
@@ -253,12 +258,12 @@ class RouteTripMonitorServiceTest {
 
     @Test
     fun switchingRouteRebuildsTheRideState() {
-        service.onStartCommand(startIntent(), 0, 1)
+        service.onStartCommand(startIntent(tripWithDestination()), 0, 1)
         service.onStartCommand(command("MARK_BOARDED"), 0, 2)
         assertTrue(ride(service).hasBoarded)
 
         service.onStartCommand(
-            startIntent(sessionPayload() + mapOf("routeKey" to 7, "routeName" to "7")),
+            startIntent(tripWithDestination() + mapOf("routeKey" to 7, "routeName" to "7")),
             0,
             3,
         )
@@ -269,7 +274,7 @@ class RouteTripMonitorServiceTest {
 
     @Test
     fun keepingTheSameTripDoesNotRebuildTheRide() {
-        val session = sessionPayload() + mapOf("routeId" to "TXG1")
+        val session = tripWithDestination() + mapOf("routeId" to "TXG1")
         service.onStartCommand(startIntent(session), 0, 1)
         service.onStartCommand(command("MARK_BOARDED"), 0, 2)
 
@@ -499,6 +504,115 @@ class RouteTripMonitorServiceTest {
 
         assertEquals(rawStopId, (payload["stopId"] as Number).toLong())
     }
+
+    @Test
+    fun theEtaRollingOverToAPlatedLaterBusStillRaisesTheQuestion() {
+        // The bus at the stop has no position feed, so the ETA rolling over is
+        // the only sign it left. The next bus is ten minutes out and its ETA
+        // entry carries a plate, which used to read as "a bus is here".
+        var stopFeed = stopFeed(eta = 0, plate = "AAA-001")
+        backend = { path -> if (path.endsWith("/realtime")) stopFeed else "[]" }
+        val session = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        service.onStartCommand(startIntent(session), 0, 1)
+        fetchLiveData()
+        assertEquals(0L, ride(service).boardingCheckId)
+
+        stopFeed = stopFeed(eta = 600, plate = "BBB-002")
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        fetchLiveData()
+
+        assertTrue(
+            "the departure must be registered so the rider can be asked",
+            ride(service).boardingCheckId != 0L,
+        )
+    }
+
+    @Test
+    fun aFailingStopFeedDoesNotSilenceTheVehicleFeed() {
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        backend = { path ->
+            requests += path
+            if (path.endsWith("/realtime/buses")) {
+                """[{"id":"AAA-001","direction":0,"lat":24.1,"lon":120.6,"time":1700000000}]"""
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(threeStopSession() + mapOf("routeId" to "TXG1")), 0, 1)
+        fetchLiveData()
+
+        assertEquals(
+            listOf("AAA-001"),
+            ReflectionHelpers.getField<List<RideBusReport>>(service, "cachedBusReports").map { it.vehicleId },
+        )
+
+        // And it keeps being fetched while the stop feed sits out its backoff.
+        val busFetches = requests.count { it.endsWith("/realtime/buses") }
+        val stopFetches = requests.size - busFetches
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        fetchLiveData()
+
+        assertEquals(busFetches + 1, requests.count { it.endsWith("/realtime/buses") })
+        assertEquals(stopFetches, requests.count { !it.endsWith("/realtime/buses") })
+    }
+
+    @Test
+    fun switchingDirectionRebuildsTheRideEvenWithTheSameBoardingStop() {
+        val outbound = threeStopSession() + mapOf("boardingStopId" to 2, "destinationStopId" to 3)
+        service.onStartCommand(startIntent(outbound), 0, 1)
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        assertTrue(ride(service).hasBoarded)
+
+        // The other direction calls at the same stops in the opposite order.
+        @Suppress("UNCHECKED_CAST")
+        val inbound = outbound + mapOf(
+            "pathId" to 1,
+            "destinationStopId" to 1,
+            "stops" to (outbound.getValue("stops") as List<Map<String, Any?>>).reversed()
+                .mapIndexed { index, stop -> stop + mapOf("sequence" to index + 1) },
+        )
+        service.onStartCommand(startIntent(inbound), 0, 3)
+
+        assertFalse("the other direction is a different trip", ride(service).hasBoarded)
+        assertEquals(
+            "the boarding stop is found on the new direction's stops",
+            1,
+            ride(service).boardingStopIndex,
+        )
+
+        // The same stops in a new order are a new line too, whatever the path id.
+        service.onStartCommand(command("MARK_BOARDED"), 0, 4)
+        service.onStartCommand(startIntent(inbound + mapOf("stops" to outbound.getValue("stops"))), 0, 5)
+        assertFalse(ride(service).hasBoarded)
+    }
+
+    private fun stopFeed(eta: Int, plate: String) =
+        """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":$eta,"etas":[{"plate":"$plate","eta":$eta}]}]}]}"""
+
+    /** One round of the service's own feed fetch, after anything it already queued. */
+    private fun fetchLiveData() {
+        val executor = ReflectionHelpers.getField<ExecutorService>(service, "ioExecutor")
+        executor.submit {
+            ReflectionHelpers.callInstanceMethod<Any?>(
+                service,
+                "updateLiveData",
+                ReflectionHelpers.ClassParameter.from(
+                    TrackingSession::class.java,
+                    ReflectionHelpers.getField<TrackingSession>(service, "session"),
+                ),
+            )
+        }.get(10, TimeUnit.SECONDS)
+        refreshRide()
+    }
+
+    /**
+     * A ride confirmed with nowhere to get off is paused within moments to ask
+     * for a destination, so tests about a ride that carries on give it one.
+     */
+    private fun tripWithDestination(): Map<String, Any?> = sessionPayload() + mapOf(
+        "destinationStopId" to 1,
+        "destinationStopName" to "測試站",
+    )
 
     private fun threeStopSession(): Map<String, Any?> = sessionPayload() + mapOf(
         "stops" to THREE_STOPS.mapIndexed { index, (lat, lon) ->
