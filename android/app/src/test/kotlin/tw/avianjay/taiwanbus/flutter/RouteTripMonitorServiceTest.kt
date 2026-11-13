@@ -739,6 +739,138 @@ class RouteTripMonitorServiceTest {
         )
     }
 
+    @Test
+    fun skippingTheDestinationStillRaisesTheOvershootAlert() {
+        jumpPastDestination()
+        val arrivalAt = ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs")
+        assertTrue("passing the destination must start the arrival clock", arrivalAt > 0L)
+
+        // The service uses the JVM wall clock, not Robolectric's uptime. Age
+        // its recorded baseline instead of waiting for the real deadline.
+        val beforeDeadline = System.currentTimeMillis() - 30_000L
+        ReflectionHelpers.setField(service, "arrivalDetectedAtMs", beforeDeadline)
+        refreshAndDeliverAlerts()
+        assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+        assertEquals(
+            "later overshot snapshots must not restart the clock",
+            beforeDeadline,
+            ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs"),
+        )
+
+        ReflectionHelpers.setField(service, "arrivalDetectedAtMs", System.currentTimeMillis() - 45_000L)
+        refreshAndDeliverAlerts()
+
+        assertEquals("overshot", AppRuntimeStateStore.loadPausedTripMonitor(service)?.reason)
+        val alert = service.getSystemService(NotificationManager::class.java)
+            .activeNotifications.single { it.id == 6022 }.notification
+        assertEquals("可能坐過站了", alert.extras.getString(Notification.EXTRA_TITLE))
+    }
+
+    @Test
+    fun skippingTheDestinationStillPausesAfterArrivalGraceWhenOffRoute() {
+        // A fix 150 m from the line cannot confirm an overshoot, but arrival's
+        // grace period must still finish rather than leaving the trip running.
+        jumpPastDestination(longitudeOffset = 0.0015)
+        assertTrue(
+            "passing the destination must start the arrival clock even off route",
+            ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs") > 0L,
+        )
+        ReflectionHelpers.setField(service, "arrivalDetectedAtMs", System.currentTimeMillis() - 60_000L)
+        refreshAndDeliverAlerts()
+
+        assertEquals("arrived", AppRuntimeStateStore.loadPausedTripMonitor(service)?.reason)
+    }
+
+    @Test
+    fun anOldStopFetchCannotOverwriteANewerAppUpdateForTheSameTrip() {
+        assertNewerAppStopFeedWins(stopFeed(eta = 600, plate = "OLD-001"))
+    }
+
+    @Test
+    fun anOldStopFetchFailureCannotBackOffANewerAppUpdateForTheSameTrip() {
+        assertNewerAppStopFeedWins(null)
+    }
+
+    private fun assertNewerAppStopFeedWins(oldResponse: String?) {
+        val initial = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        val oldFetchStarted = CountDownLatch(1)
+        val releaseOldFetch = CountDownLatch(1)
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed("CURRENT-001", stopsOf(initial).first())
+            } else {
+                oldFetchStarted.countDown()
+                check(releaseOldFetch.await(10, TimeUnit.SECONDS)) { "old stop request was never released" }
+                oldResponse
+            }
+        }
+        service.onStartCommand(startIntent(initial), 0, 1)
+        try {
+            assertTrue("the old stop request never started", oldFetchStarted.await(10, TimeUnit.SECONDS))
+            val originalDetector = ReflectionHelpers.getField<Any>(service, "detector")
+            val currentStops = stopsOf(initial).map { stop ->
+                stop + mapOf("liveData" to mapOf("eta" to 0))
+            }
+            service.onStartCommand(startIntent(initial + mapOf("stops" to currentStops)), 0, 2)
+            assertTrue(
+                "an ordinary update must keep the detector",
+                originalDetector === ReflectionHelpers.getField<Any>(service, "detector"),
+            )
+        } finally {
+            releaseOldFetch.countDown()
+        }
+        awaitQueuedRefreshes()
+        refreshRide()
+
+        val stops = ReflectionHelpers.getField<Map<Int, LiveStopState>>(service, "cachedLiveStops")
+        assertEquals("the app's arrival is newer than the pending response", 0, stops.getValue(1).seconds)
+        assertEquals(
+            "an obsolete failure must not back off the current stop feed",
+            0L,
+            ReflectionHelpers.getField<Long>(service, "liveStopBackoffUntilMs"),
+        )
+        assertEquals(
+            "an old ETA must not invent a departure after the app reported an arrival",
+            0L,
+            ride(service).boardingCheckId,
+        )
+        assertEquals(
+            "discarding the stop response must not discard valid vehicle positions",
+            "CURRENT-001",
+            ride(service).nextBusVehicleId,
+        )
+    }
+
+    private fun jumpPastDestination(longitudeOffset: Double = 0.0) {
+        ShadowSystemClock.advanceBy(10, TimeUnit.MINUTES)
+        val trip = threeStopSession() + mapOf("boardingStopId" to 1, "destinationStopId" to 2)
+        service.onStartCommand(startIntent(trip), 0, 1)
+        awaitQueuedRefreshes()
+        feedFix(stopIndex = 0, ageMinutes = 1)
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        refreshAndDeliverAlerts()
+        assertTrue(ride(service).hasBoarded)
+        assertEquals(1, ride(service).remainingStops)
+        assertEquals(0L, ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs"))
+
+        // No fix at the destination: progress goes straight from before it to
+        // the following stop after a gap in location updates.
+        feedFix(stopIndex = 2, ageMinutes = 0, longitudeOffset = longitudeOffset)
+        refreshAndDeliverAlerts()
+        assertEquals(
+            "the fix must jump past the destination: ${ride(service)}; " +
+                "pause=${AppRuntimeStateStore.loadPausedTripMonitor(service)}",
+            1,
+            ride(service).passedDestinationByStops,
+        )
+        assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+    }
+
+    private fun refreshAndDeliverAlerts() {
+        fetchLiveData()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
     /** The other direction of [session]: the same stops, called at in the opposite order. */
     private fun reversed(session: Map<String, Any?>): Map<String, Any?> = session + mapOf(
         "pathId" to 1,
@@ -809,16 +941,17 @@ class RouteTripMonitorServiceTest {
     )
 
     /** Delivers a fix at a stop, as the location callback does, and re-reads the ride. */
-    private fun feedFix(stopIndex: Int, ageMinutes: Long) {
+    private fun feedFix(stopIndex: Int, ageMinutes: Long, longitudeOffset: Double = 0.0) {
         val (lat, lon) = THREE_STOPS[stopIndex]
         val fix = Location("fused").apply {
             latitude = lat
-            longitude = lon
+            longitude = lon + longitudeOffset
             accuracy = 10f
             elapsedRealtimeNanos =
                 SystemClock.elapsedRealtimeNanos() - TimeUnit.MINUTES.toNanos(ageMinutes)
             time = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(ageMinutes)
         }
+        ReflectionHelpers.setField(service, "latestLocation", fix)
         ReflectionHelpers.callInstanceMethod<Any?>(
             service,
             "onUserLocation",

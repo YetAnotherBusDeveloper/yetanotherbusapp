@@ -61,6 +61,8 @@ class RouteTripMonitorService : Service() {
     private var detector: TripRideDetector? = null
     private var latestRide = RideSnapshot()
     private val detectorLock = Any()
+    /** Under detectorLock: newer app-provided stop data supersedes pending stop requests. */
+    private var stopFeedRevision = 0L
     private var boardingAlertSent = false
     private var boardingCheckNotificationId = 0L
     private var destinationSetupPromptSent = false
@@ -322,6 +324,7 @@ class RouteTripMonitorService : Service() {
                         detector?.also { it.updateDestination(parsedSession.destinationStopId) }
                     }
                     if (providedStops.isNotEmpty()) {
+                        stopFeedRevision++
                         synchronized(refreshLock) {
                             cachedLiveRouteIds = parsedSession.realtimeRouteIds
                             cachedLivePathId = parsedSession.pathId
@@ -361,12 +364,16 @@ class RouteTripMonitorService : Service() {
     private fun detectorExists(): Boolean = synchronized(detectorLock) { detector != null }
 
     /** A trip as one refresh sees it: the session, and the detector built for it. */
-    private class TrackedTrip(val session: TrackingSession, val detector: TripRideDetector)
+    private class TrackedTrip(
+        val session: TrackingSession,
+        val detector: TripRideDetector,
+        val stopFeedRevision: Long,
+    )
 
     private fun currentTrip(): TrackedTrip? = synchronized(detectorLock) {
         val currentSession = session ?: return null
         val currentDetector = detector ?: return null
-        TrackedTrip(currentSession, currentDetector)
+        TrackedTrip(currentSession, currentDetector, stopFeedRevision)
     }
 
     /**
@@ -781,6 +788,12 @@ class RouteTripMonitorService : Service() {
         if (wantsStops) {
             val liveStops = fetchLiveStopMapFromBackend(session)
             val stillTracked = applyToTrip(trip) {
+                // The same detector can receive a newer foreground update while
+                // this request is out. Discard its stop data and back-off only;
+                // the independently fetched vehicle positions remain useful.
+                if (stopFeedRevision != trip.stopFeedRevision) {
+                    return@applyToTrip
+                }
                 // familyRealtime folds a failed request into an empty map, and a
                 // route with stops to look up that answers with nothing is a
                 // failure rather than an empty feed — so back off rather than
@@ -1574,6 +1587,11 @@ class RouteTripMonitorService : Service() {
         snapshot: TrackingSnapshot,
     ) {
         if (snapshot.passedDestinationByStops != null) {
+            // Fixes can skip the destination entirely. Passing it is also an
+            // arrival baseline, without restarting a countdown already running.
+            if (arrivalDetectedAtMs == 0L) {
+                arrivalDetectedAtMs = System.currentTimeMillis()
+            }
             if (maybeSendOvershotAlert(session, snapshot)) {
                 return
             }
