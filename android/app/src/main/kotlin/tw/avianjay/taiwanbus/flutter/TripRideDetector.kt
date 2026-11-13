@@ -377,6 +377,11 @@ internal class TripRideDetector(
      * Standing at the stop while the bus drives off makes the gap grow by the
      * bus's whole travel, and walking beside a bus stuck in traffic fails the
      * speed floor, so neither counts.
+     *
+     * Only an unbroken run of reports made on this trip's direction, on the
+     * route, is evidence. The feed lists every vehicle of the route — the other
+     * direction's, and ones parked or deadheading beside it — and each of those
+     * still projects to some position along this line.
      */
     private fun detectCoMovement(nowMs: Long): String? {
         if (userTrack.size < 2) {
@@ -389,6 +394,12 @@ internal class TripRideDetector(
             }
             pairs.clear()
             track.forEach { report ->
+                if (!report.samePath || !report.onRoute) {
+                    // Whatever came before is not joined to what follows as
+                    // though the bus had run on through.
+                    pairs.clear()
+                    return@forEach
+                }
                 if (report.receivedAtMs < nowMs - COMOVE_WINDOW_MS) {
                     return@forEach
                 }
@@ -623,7 +634,9 @@ internal class TripRideDetector(
     /**
      * Once on board, the vehicle to follow is the one the user is inside. Its
      * reported position trails the user's own fix by the feed's delay, so it is
-     * expected a little behind and never far ahead.
+     * expected a little behind and never far ahead. It is also on this trip's
+     * direction and on the route: a vehicle parked beside the route projects
+     * onto it too, and can be the nearest one there is.
      */
     private fun resolveTrackedVehicle(
         vehicles: List<LiveVehicle>,
@@ -642,7 +655,7 @@ internal class TripRideDetector(
             return locked.vehicleId
         }
         return vehicles
-            .filter { it.samePath }
+            .filter { it.samePath && it.onRoute }
             .filter { usableUser.alongMeters - it.alongMeters in -TRACK_MAX_AHEAD_METERS..TRACK_PICK_BEHIND_METERS }
             .minByOrNull { abs(usableUser.alongMeters - it.alongMeters) }
             ?.vehicleId

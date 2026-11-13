@@ -60,7 +60,7 @@ class RouteTripMonitorService : Service() {
      */
     private var detector: TripRideDetector? = null
     private var latestRide = RideSnapshot()
-    private var detectorLock = Any()
+    private val detectorLock = Any()
     private var boardingAlertSent = false
     private var boardingCheckNotificationId = 0L
     private var destinationSetupPromptSent = false
@@ -77,7 +77,6 @@ class RouteTripMonitorService : Service() {
     private var cachedLiveStops: Map<Int, LiveStopState> = emptyMap()
     private var cachedBusesRouteId: String? = null
     private var cachedBusesFetchedAtMs = 0L
-    private var cachedBusReports: List<RideBusReport> = emptyList()
     private var liveStopBackoffUntilMs = 0L
     private var liveBusBackoffUntilMs = 0L
     private var wakeLock: PowerManager.WakeLock? = null
@@ -243,7 +242,6 @@ class RouteTripMonitorService : Service() {
                 val hadSession = session != null
                 val hadDetector = session != null && detectorExists()
                 if (AppRuntimeStateStore.isTripMonitorPausedFor(this, parsedSession)) {
-                    session = parsedSession
                     appInForeground = parsedSession.appInForeground
                     stopTracking()
                     return START_NOT_STICKY
@@ -254,19 +252,10 @@ class RouteTripMonitorService : Service() {
                     session = parsedSession,
                     nowMs = startedAtMs,
                 )
-                session = parsedSession
                 appInForeground = parsedSession.appInForeground
                 val providedStops = parsedSession.stops.mapNotNull { stop ->
                     stop.liveData?.let { stop.stopId to it }
                 }.toMap()
-                if (providedStops.isNotEmpty()) {
-                    synchronized(refreshLock) {
-                        cachedLiveRouteIds = parsedSession.realtimeRouteIds
-                        cachedLivePathId = parsedSession.pathId
-                        cachedLiveFetchedAtMs = SystemClock.elapsedRealtime()
-                        cachedLiveStops = providedStops
-                    }
-                }
                 if (!appInForeground && lastWentBackgroundAtMs == 0L) {
                     lastWentBackgroundAtMs = System.currentTimeMillis()
                 }
@@ -291,27 +280,60 @@ class RouteTripMonitorService : Service() {
                 // detector must exist before anything can consult it. A ride the
                 // user already confirmed is never rebuilt out from under them.
                 val rideAlreadyConfirmed = currentRideSnapshot().hasBoarded
-                if (
-                    tripOriginChanged ||
+                val startsNewTrip = tripOriginChanged ||
                     (familyChanged && !rideAlreadyConfirmed) ||
                     !hadDetector
-                ) {
+                if (startsNewTrip) {
                     boardingAlertSent = false
                     destinationSetupPromptSent = false
                     arrivalDetectedAtMs = 0L
                     destinationAlertStage = 0
                     overshootAlertSent = false
                     cancelBoardingCheckPrompt()
-                    synchronized(detectorLock) {
-                        detector = createDetector(parsedSession).also { created ->
+                } else if (destinationChanged) {
+                    // Choosing a destination after boarding must not unlock the
+                    // current vehicle and fall back to the next bus at the
+                    // boarding stop. Only the destination alert lifecycle is new.
+                    destinationSetupPromptSent = false
+                    arrivalDetectedAtMs = 0L
+                    destinationAlertStage = 0
+                    overshootAlertSent = false
+                }
+                // The session and the detector built for it change hands in one
+                // step: a refresh still fetching for the previous trip looks
+                // for exactly this before it applies what it brought back.
+                synchronized(detectorLock) {
+                    session = parsedSession
+                    val tracking = if (startsNewTrip) {
+                        createDetector(parsedSession).also { created ->
                             if (continuesBoardedRide) {
                                 // Choosing where to get off, in answer to "you
                                 // have boarded", is the rider confirming it.
                                 created.confirmBoardedByUser(startedAtMs)
                             }
+                            detector = created
+                            latestRide = RideSnapshot()
+                            // It starts knowing nothing, so both feeds are due
+                            // at once, and the last trip's failures are not its
+                            // own to sit out.
+                            forgetLiveFeeds()
                         }
-                        latestRide = RideSnapshot()
+                    } else {
+                        detector?.also { it.updateDestination(parsedSession.destinationStopId) }
                     }
+                    if (providedStops.isNotEmpty()) {
+                        synchronized(refreshLock) {
+                            cachedLiveRouteIds = parsedSession.realtimeRouteIds
+                            cachedLivePathId = parsedSession.pathId
+                            cachedLiveFetchedAtMs = SystemClock.elapsedRealtime()
+                            cachedLiveStops = providedStops
+                        }
+                        // While the app is open it does the fetching, and this is
+                        // all the detector hears of the boarding stop's ETA.
+                        tracking?.let { feedBoardingEta(it, parsedSession, providedStops) }
+                    }
+                }
+                if (startsNewTrip) {
                     if (continuesBoardedRide) {
                         boardingAlertSent = true
                         AppRuntimeStateStore.clearPausedTripMonitor(this)
@@ -323,19 +345,6 @@ class RouteTripMonitorService : Service() {
                     if (!hadSession) {
                         latestLocation = createSessionLocation(parsedSession) ?: latestLocation
                         latestLocation?.let(::onUserLocation)
-                    }
-                } else {
-                    // Choosing a destination after boarding must not unlock the
-                    // current vehicle and fall back to the next bus at the
-                    // boarding stop. Only the destination alert lifecycle is new.
-                    if (destinationChanged) {
-                        destinationSetupPromptSent = false
-                        arrivalDetectedAtMs = 0L
-                        destinationAlertStage = 0
-                        overshootAlertSent = false
-                    }
-                    synchronized(detectorLock) {
-                        detector?.updateDestination(parsedSession.destinationStopId)
                     }
                 }
 
@@ -350,6 +359,51 @@ class RouteTripMonitorService : Service() {
     }
 
     private fun detectorExists(): Boolean = synchronized(detectorLock) { detector != null }
+
+    /** A trip as one refresh sees it: the session, and the detector built for it. */
+    private class TrackedTrip(val session: TrackingSession, val detector: TripRideDetector)
+
+    private fun currentTrip(): TrackedTrip? = synchronized(detectorLock) {
+        val currentSession = session ?: return null
+        val currentDetector = detector ?: return null
+        TrackedTrip(currentSession, currentDetector)
+    }
+
+    /**
+     * Applies what a request brought back for [trip], unless the trip has been
+     * replaced while the request was out; returns whether it was applied.
+     *
+     * The rider can open another route, or the other direction, while a request
+     * is in flight. The check and [apply] share the lock the detector is
+     * replaced under, so what was fetched for one trip never lands in the next.
+     */
+    private fun applyToTrip(trip: TrackedTrip, apply: () -> Unit): Boolean =
+        synchronized(detectorLock) {
+            if (detector !== trip.detector) {
+                return false
+            }
+            apply()
+            true
+        }
+
+    /**
+     * Runs [action] on the main thread unless by then [trackedSession] has been
+     * replaced, or the ride has moved on from [ride] — the rider has answered
+     * the boarding question, say. Sessions are only ever replaced on the main
+     * thread and answers arrive there, so once the check has passed neither can
+     * happen before [action] has run.
+     */
+    private fun postIfStillTracking(
+        trackedSession: TrackingSession,
+        ride: RideSnapshot? = null,
+        action: () -> Unit,
+    ) {
+        mainHandler.post {
+            if (session === trackedSession && (ride == null || currentRideSnapshot() === ride)) {
+                action()
+            }
+        }
+    }
 
     /**
      * Whether [session] is the ride that was paused for want of a destination,
@@ -378,6 +432,11 @@ class RouteTripMonitorService : Service() {
     }
 
     override fun onDestroy() {
+        // A refresh still in flight has no trip left to apply itself to.
+        synchronized(detectorLock) {
+            session = null
+            detector = null
+        }
         mainHandler.removeCallbacksAndMessages(null)
         runCatching {
             if (::fusedLocationClient.isInitialized) {
@@ -589,7 +648,9 @@ class RouteTripMonitorService : Service() {
     }
 
     private fun refreshNotification(force: Boolean = false) {
-        val currentSession = session ?: return
+        if (session == null) {
+            return
+        }
         synchronized(refreshLock) {
             val now = SystemClock.elapsedRealtime()
             if (refreshInFlight) {
@@ -609,32 +670,7 @@ class RouteTripMonitorService : Service() {
         val submitted = runCatching {
             ioExecutor.execute {
                 try {
-                    runCatching {
-                        if (session !== currentSession) return@runCatching
-                        if (force) {
-                            // Rich notifications (including OEM integrations) are
-                            // built off the main thread, after foreground promotion.
-                            notificationManager.notify(
-                                TRACKING_NOTIFICATION_ID,
-                                buildTrackingNotification(buildStartupSnapshot(currentSession)),
-                            )
-                        }
-                        // Fetched before the snapshot: everything the detector
-                        // learns arrives through here.
-                        updateLiveData(currentSession)
-                        // Advanced on every refresh, not just when the bus feed
-                        // came back, because the question timing and the user's
-                        // own progress move independently of it.
-                        refreshRideSnapshot(System.currentTimeMillis())
-                        val trackingSnapshot = buildSnapshot(
-                            currentSession,
-                            latestLocation ?: createSessionLocation(currentSession),
-                        )
-                        if (session !== currentSession) return@runCatching
-                        val notification = buildTrackingNotification(trackingSnapshot)
-                        notificationManager.notify(TRACKING_NOTIFICATION_ID, notification)
-                        maybeSendTripAlerts(currentSession, trackingSnapshot)
-                    }
+                    runCatching { refreshTrip(force) }
                 } finally {
                     var shouldRefreshAgain = false
                     synchronized(refreshLock) {
@@ -665,6 +701,49 @@ class RouteTripMonitorService : Service() {
     }
 
     /**
+     * One refresh, on the IO thread: fetch, let the detector look again, and
+     * hand what is to be shown and alerted to the main thread.
+     *
+     * The trip is read here rather than where the refresh was asked for, and is
+     * checked again after every wait, because the main thread can replace it at
+     * any moment.
+     */
+    private fun refreshTrip(force: Boolean) {
+        val trip = currentTrip() ?: return
+        val trackedSession = trip.session
+        if (force) {
+            // Rich notifications (including OEM integrations) are built off the
+            // main thread, after foreground promotion.
+            val startup = buildTrackingNotification(buildStartupSnapshot(trackedSession))
+            postIfStillTracking(trackedSession) {
+                notificationManager.notify(TRACKING_NOTIFICATION_ID, startup)
+            }
+        }
+        // Fetched before the snapshot: everything the detector learns arrives
+        // through here.
+        if (!updateLiveData(trip)) {
+            return
+        }
+        // Advanced on every refresh, not just when the bus feed came back,
+        // because the question timing and the user's own progress move
+        // independently of it.
+        val ride = advanceRide(trip, System.currentTimeMillis()) ?: return
+        val trackingSnapshot = buildSnapshot(
+            trackedSession,
+            latestLocation ?: createSessionLocation(trackedSession),
+            ride,
+        )
+        val notification = buildTrackingNotification(trackingSnapshot)
+        // Alerts can pause or stop the trip, so they are decided where trips
+        // are replaced and the rider's answers arrive: one worked out for the
+        // last trip, or from before "I am not on it", must not be acted on.
+        postIfStillTracking(trackedSession, ride) {
+            notificationManager.notify(TRACKING_NOTIFICATION_ID, notification)
+            maybeSendTripAlerts(trackedSession, trackingSnapshot)
+        }
+    }
+
+    /**
      * Pulls whatever the detector needs from the backend: the boarding stop's
      * ETA, and the live positions of every vehicle on the route.
      *
@@ -673,62 +752,79 @@ class RouteTripMonitorService : Service() {
      * request backs that feed off instead of hammering the server. Each feed
      * backs off on its own: the vehicle positions are what detection runs on
      * when the phone has no fix, and must not go dark because the stop feed did.
+     *
+     * Returns false when [trip] was replaced while a request was out; nothing
+     * fetched after that point has been applied, and the caller should stop.
      */
-    private fun updateLiveData(session: TrackingSession) {
+    private fun updateLiveData(trip: TrackedTrip): Boolean {
+        val session = trip.session
         val routeIds = session.realtimeRouteIds
         if (routeIds.isEmpty()) {
-            return
+            return true
         }
+        val primaryRouteId = session.routeId?.trim().orEmpty()
         val nowElapsed = SystemClock.elapsedRealtime()
+        val (wantsStops, wantsBuses) = synchronized(refreshLock) {
+            val stopsDue = nowElapsed >= liveStopBackoffUntilMs && (
+                cachedLiveRouteIds != routeIds ||
+                    cachedLivePathId != session.pathId ||
+                    nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
+                )
+            val busesDue = primaryRouteId.isNotEmpty() &&
+                nowElapsed >= liveBusBackoffUntilMs && (
+                cachedBusesRouteId != primaryRouteId ||
+                    nowElapsed - cachedBusesFetchedAtMs >= LIVE_BUS_REFRESH_INTERVAL_MS
+                )
+            stopsDue to busesDue
+        }
 
-        val wantsStops = nowElapsed >= liveStopBackoffUntilMs && (
-            cachedLiveRouteIds != routeIds ||
-                cachedLivePathId != session.pathId ||
-                nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
-            )
         if (wantsStops) {
             val liveStops = fetchLiveStopMapFromBackend(session)
-            // familyRealtime folds a failed request into an empty map, and a
-            // route with stops to look up that answers with nothing is a
-            // failure rather than an empty feed — so back off rather than
-            // spend the shared rate limit on retries.
-            if (liveStops.isEmpty()) {
-                liveStopBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
-            } else {
-                synchronized(refreshLock) {
-                    cachedLiveRouteIds = routeIds
-                    cachedLivePathId = session.pathId
-                    cachedLiveFetchedAtMs = nowElapsed
-                    cachedLiveStops = liveStops
+            val stillTracked = applyToTrip(trip) {
+                // familyRealtime folds a failed request into an empty map, and a
+                // route with stops to look up that answers with nothing is a
+                // failure rather than an empty feed — so back off rather than
+                // spend the shared rate limit on retries.
+                if (liveStops.isEmpty()) {
+                    synchronized(refreshLock) {
+                        liveStopBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
+                    }
+                } else {
+                    synchronized(refreshLock) {
+                        cachedLiveRouteIds = routeIds
+                        cachedLivePathId = session.pathId
+                        cachedLiveFetchedAtMs = nowElapsed
+                        cachedLiveStops = liveStops
+                    }
+                    feedBoardingEta(trip.detector, session, liveStops)
                 }
-                feedBoardingEta(session, liveStops)
+            }
+            if (!stillTracked) {
+                return false
             }
         }
 
-        val primaryRouteId = session.routeId?.trim().orEmpty()
-        if (primaryRouteId.isEmpty() || nowElapsed < liveBusBackoffUntilMs) {
-            return
-        }
-        val wantsBuses = cachedBusesRouteId != primaryRouteId ||
-            nowElapsed - cachedBusesFetchedAtMs >= LIVE_BUS_REFRESH_INTERVAL_MS
         if (wantsBuses) {
             val reports = fetchBusReportsFromBackend(primaryRouteId)
-            if (reports == null) {
-                liveBusBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
-                return
-            }
-            synchronized(refreshLock) {
-                cachedBusesRouteId = primaryRouteId
-                cachedBusesFetchedAtMs = nowElapsed
-                cachedBusReports = reports
-            }
-            synchronized(detectorLock) {
-                detector?.onBusReports(reports)
+            return applyToTrip(trip) {
+                if (reports == null) {
+                    synchronized(refreshLock) {
+                        liveBusBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
+                    }
+                } else {
+                    synchronized(refreshLock) {
+                        cachedBusesRouteId = primaryRouteId
+                        cachedBusesFetchedAtMs = nowElapsed
+                    }
+                    trip.detector.onBusReports(reports)
+                }
             }
         }
+        return true
     }
 
     private fun feedBoardingEta(
+        target: TripRideDetector,
         session: TrackingSession,
         liveStops: Map<Int, LiveStopState>,
     ) {
@@ -743,7 +839,7 @@ class RouteTripMonitorService : Service() {
             liveStop.message?.contains("到站") == true
         val now = System.currentTimeMillis()
         synchronized(detectorLock) {
-            detector?.onBoardingStopEta(
+            target.onBoardingStopEta(
                 etaSeconds = liveStop.seconds ?: etaEntry?.seconds,
                 arriving = arriving,
                 nowMs = now,
@@ -757,6 +853,17 @@ class RouteTripMonitorService : Service() {
         }
     }
 
+    /**
+     * Lets [trip]'s detector look again and returns what it now makes of the
+     * ride; null when the trip has been replaced.
+     */
+    private fun advanceRide(trip: TrackedTrip, nowMs: Long): RideSnapshot? = synchronized(detectorLock) {
+        if (detector !== trip.detector) {
+            return null
+        }
+        trip.detector.snapshot(nowMs).also { latestRide = it }
+    }
+
     private fun currentRideSnapshot(): RideSnapshot = synchronized(detectorLock) { latestRide }
 
     /**
@@ -767,13 +874,13 @@ class RouteTripMonitorService : Service() {
     private fun buildSnapshot(
         session: TrackingSession,
         location: Location?,
+        ride: RideSnapshot,
     ): TrackingSnapshot {
         val liveStops = fetchLiveStopMap(session)
         if (this.session !== session) return buildStartupSnapshot(session)
         // A missing fix is not an early exit: the detector can still raise the
         // boarding question without any location at all, and the notification
         // is built from what it knows rather than from a nearest-stop guess.
-        val ride = currentRideSnapshot()
         val nearestIndex = location?.let { findNearestStopIndex(session.stops, it) } ?: -1
         val nearestStop = session.stops.getOrNull(nearestIndex)
         val nearestLiveStop = nearestStop?.let { liveStops[it.stopId] }
@@ -1891,29 +1998,23 @@ class RouteTripMonitorService : Service() {
         // involve other processes (location and notification services).
         stopSelf()
         foregroundStarted = false
-        session = null
         latestLocation = null
         boardingAlertSent = false
         destinationSetupPromptSent = false
         arrivalDetectedAtMs = 0L
         destinationAlertStage = 0
         overshootAlertSent = false
-        refreshInFlight = false
-        refreshPending = false
-        lastRefreshStartedAtMs = 0L
-        cachedLiveRouteIds = emptyList()
-        cachedLivePathId = null
-        cachedLiveFetchedAtMs = 0L
-        cachedLiveStops = emptyMap()
-        cachedBusesRouteId = null
-        cachedBusesFetchedAtMs = 0L
-        cachedBusReports = emptyList()
-        liveStopBackoffUntilMs = 0L
-        liveBusBackoffUntilMs = 0L
         synchronized(detectorLock) {
+            session = null
             detector = null
             latestRide = RideSnapshot()
         }
+        synchronized(refreshLock) {
+            refreshInFlight = false
+            refreshPending = false
+            lastRefreshStartedAtMs = 0L
+        }
+        forgetLiveFeeds()
         cancelBoardingCheckPrompt()
         releaseWakeLock()
         mainHandler.removeCallbacksAndMessages(null)
@@ -1932,6 +2033,18 @@ class RouteTripMonitorService : Service() {
         if (cancelAlertNotification) {
             notificationManager.cancel(ALERT_NOTIFICATION_ID)
         }
+    }
+
+    /** Forgets what was fetched and when, which makes both feeds due at once. */
+    private fun forgetLiveFeeds() = synchronized(refreshLock) {
+        cachedLiveRouteIds = emptyList()
+        cachedLivePathId = null
+        cachedLiveFetchedAtMs = 0L
+        cachedLiveStops = emptyMap()
+        cachedBusesRouteId = null
+        cachedBusesFetchedAtMs = 0L
+        liveStopBackoffUntilMs = 0L
+        liveBusBackoffUntilMs = 0L
     }
 
     /**

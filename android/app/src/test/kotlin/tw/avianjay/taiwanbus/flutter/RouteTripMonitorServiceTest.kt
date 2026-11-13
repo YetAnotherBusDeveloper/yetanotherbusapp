@@ -13,8 +13,10 @@ import android.os.Looper
 import android.os.SystemClock
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowSystemClock
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -62,8 +64,7 @@ class RouteTripMonitorServiceTest {
     fun tearDown() {
         service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 99)
         controller.destroy()
-        val executor = ReflectionHelpers.getField<ExecutorService>(service, "ioExecutor")
-        assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
+        assertTrue(ioExecutor().awaitTermination(5, TimeUnit.SECONDS))
     }
 
     @Test
@@ -538,13 +539,11 @@ class RouteTripMonitorServiceTest {
                 null
             }
         }
-        service.onStartCommand(startIntent(threeStopSession() + mapOf("routeId" to "TXG1")), 0, 1)
+        val session = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        service.onStartCommand(startIntent(session), 0, 1)
         fetchLiveData()
 
-        assertEquals(
-            listOf("AAA-001"),
-            ReflectionHelpers.getField<List<RideBusReport>>(service, "cachedBusReports").map { it.vehicleId },
-        )
+        assertEquals("the bus at the boarding stop must be seen", "AAA-001", ride(service).nextBusVehicleId)
 
         // And it keeps being fetched while the stop feed sits out its backoff.
         val busFetches = requests.count { it.endsWith("/realtime/buses") }
@@ -563,14 +562,7 @@ class RouteTripMonitorServiceTest {
         service.onStartCommand(command("MARK_BOARDED"), 0, 2)
         assertTrue(ride(service).hasBoarded)
 
-        // The other direction calls at the same stops in the opposite order.
-        @Suppress("UNCHECKED_CAST")
-        val inbound = outbound + mapOf(
-            "pathId" to 1,
-            "destinationStopId" to 1,
-            "stops" to (outbound.getValue("stops") as List<Map<String, Any?>>).reversed()
-                .mapIndexed { index, stop -> stop + mapOf("sequence" to index + 1) },
-        )
+        val inbound = reversed(outbound) + mapOf("destinationStopId" to 1)
         service.onStartCommand(startIntent(inbound), 0, 3)
 
         assertFalse("the other direction is a different trip", ride(service).hasBoarded)
@@ -586,24 +578,214 @@ class RouteTripMonitorServiceTest {
         assertFalse(ride(service).hasBoarded)
     }
 
-    private fun stopFeed(eta: Int, plate: String) =
-        """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":$eta,"etas":[{"plate":"$plate","eta":$eta}]}]}]}"""
+    @Test
+    fun aFetchStillInFlightForTheLastTripDoesNotReachTheNextOne() {
+        val first = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 2)
+        val anotherRoute = first + mapOf("routeKey" to 2, "routeId" to "TXG2")
+        val theOtherDirection = reversed(first)
+        for (next in listOf(anotherRoute, theOtherDirection)) {
+            val firstStop = stopsOf(next).first()
+            val oldFetchStarted = CountDownLatch(1)
+            val releaseOldFetch = CountDownLatch(1)
+            val answersTheNewTrip = AtomicBoolean(false)
+            backend = { path ->
+                val wantsBuses = path.endsWith("/realtime/buses")
+                when {
+                    // The new trip: its bus is a stop back, ten minutes out.
+                    answersTheNewTrip.get() && wantsBuses -> busFeed("NEW-001", firstStop)
+                    answersTheNewTrip.get() -> stopFeed(eta = 600, plate = "NEW-001", stopId = 2)
+                    // The old one: a bus pulling in at the boarding stop.
+                    wantsBuses -> busFeed("OLD-001", stopsOf(first)[1])
+                    else -> {
+                        oldFetchStarted.countDown()
+                        releaseOldFetch.await(10, TimeUnit.SECONDS)
+                        stopFeed(eta = 0, plate = "OLD-001", stopId = 2)
+                    }
+                }
+            }
+            service.onStartCommand(startIntent(first), 0, 1)
+            assertTrue("the first trip's fetch never started", oldFetchStarted.await(10, TimeUnit.SECONDS))
 
-    /** One round of the service's own feed fetch, after anything it already queued. */
+            // The rider switches while that request is still out. Both trips
+            // share stops, so everything it brings back would fit the new one.
+            service.onStartCommand(startIntent(next), 0, 2)
+            releaseOldFetch.countDown()
+            awaitQueuedRefreshes()
+            answersTheNewTrip.set(true)
+            fetchLiveData()
+
+            assertEquals(
+                "the new trip must see its own vehicles, at once, and none of the old trip's",
+                "NEW-001",
+                ride(service).nextBusVehicleId,
+            )
+            assertEquals(
+                "the old trip's ETA must not count as a bus arriving, and so later as one leaving",
+                0L,
+                ride(service).boardingCheckId,
+            )
+            service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 3)
+        }
+    }
+
+    @Test
+    fun aRebuiltTripHearsOfTheVehiclesOnItsFirstRefresh() {
+        // One bus at the middle stop, running the direction about to be chosen.
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                """[{"id":"AAA-001","direction":1,"lat":24.1045,"lon":120.6,"time":1700000000}]"""
+            } else {
+                null
+            }
+        }
+        val outbound = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 2)
+        service.onStartCommand(startIntent(outbound), 0, 1)
+        fetchLiveData()
+        assertNull("it is the other direction's bus", ride(service).nextBusVehicleId)
+
+        // The route's vehicles were fetched a moment ago, but for a detector
+        // that no longer exists; the new one must not wait out that interval.
+        service.onStartCommand(startIntent(reversed(outbound)), 0, 2)
+        fetchLiveData()
+
+        assertEquals("AAA-001", ride(service).nextBusVehicleId)
+    }
+
+    @Test
+    fun whatARefreshDecidedForAReplacedTripIsNotActedOn() {
+        // On board with nowhere to get off: this trip's refresh ends by pausing
+        // the monitor to ask for a destination.
+        service.onStartCommand(startIntent(threeStopSession() + mapOf("boardingStopId" to 1)), 0, 1)
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        fetchLiveData()
+
+        // Before that is acted on, the rider opens another route.
+        val next = tripWithDestination() + mapOf("routeKey" to 7, "routeName" to "7")
+        service.onStartCommand(startIntent(next), 0, 3)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertNull(
+            "the pause meant for the old trip must not land on the new one",
+            AppRuntimeStateStore.loadPausedTripMonitor(service),
+        )
+        assertEquals(7, ReflectionHelpers.getField<TrackingSession>(service, "session").routeKey)
+    }
+
+    @Test
+    fun whatARefreshDecidedBeforeTheRiderAnsweredIsNotActedOn() {
+        // Taken for on board with nowhere to get off, so this refresh too ends
+        // by pausing the monitor to ask for a destination.
+        service.onStartCommand(startIntent(threeStopSession() + mapOf("boardingStopId" to 1)), 0, 1)
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        fetchLiveData()
+
+        // Before that is acted on, the rider says they are not on the bus.
+        beforeTheNextRefresh {
+            service.onStartCommand(command("NOT_BOARDED"), 0, 3)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+
+        assertNull(
+            "a rider still waiting must not have the monitor paused as though on board",
+            AppRuntimeStateStore.loadPausedTripMonitor(service),
+        )
+        assertNotNull(ReflectionHelpers.getField<TrackingSession?>(service, "session"))
+    }
+
+    @Test
+    fun whatARefreshDecidedBeforeADestinationWasChosenIsNotActedOn() {
+        val boarded = threeStopSession() + mapOf("boardingStopId" to 1)
+        service.onStartCommand(startIntent(boarded), 0, 1)
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        fetchLiveData()
+
+        // Before the pause for want of a destination lands, the rider picks one.
+        beforeTheNextRefresh {
+            val chosen = mapOf("destinationStopId" to 3, "destinationStopName" to "三站")
+            service.onStartCommand(startIntent(boarded + chosen), 0, 3)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+
+        assertNull(
+            "the ride now has somewhere to get off, and must carry on to it",
+            AppRuntimeStateStore.loadPausedTripMonitor(service),
+        )
+        assertEquals(3, ReflectionHelpers.getField<TrackingSession>(service, "session").destinationStopId)
+    }
+
+    @Test
+    fun theStopFeedTheAppHandsOverWhileOpenReachesTheDetector() {
+        // With the app open the route screen sends its own copy of the stop feed
+        // every few seconds, and the monitor does not fetch one of its own.
+        fun update(eta: Int, plate: String): Intent {
+            val session = threeStopSession()
+            val stops = stopsOf(session).map { stop ->
+                stop + mapOf(
+                    "liveData" to mapOf("eta" to eta, "etas" to listOf(mapOf("plate" to plate, "eta" to eta))),
+                )
+            }
+            return startIntent(session + mapOf("boardingStopId" to 1, "stops" to stops))
+        }
+        service.onStartCommand(update(eta = 0, plate = "AAA-001"), 0, 1)
+        refreshRide()
+        assertEquals(0L, ride(service).boardingCheckId)
+
+        service.onStartCommand(update(eta = 600, plate = "BBB-002"), 0, 2)
+        refreshRide()
+
+        assertTrue(
+            "the bus leaving must be noticed from the app's copy of the feed too",
+            ride(service).boardingCheckId != 0L,
+        )
+    }
+
+    /** The other direction of [session]: the same stops, called at in the opposite order. */
+    private fun reversed(session: Map<String, Any?>): Map<String, Any?> = session + mapOf(
+        "pathId" to 1,
+        "stops" to stopsOf(session).reversed()
+            .mapIndexed { index, stop -> stop + mapOf("sequence" to index + 1) },
+    )
+
+    @Suppress("UNCHECKED_CAST")
+    private fun stopsOf(session: Map<String, Any?>) = session.getValue("stops") as List<Map<String, Any?>>
+
+    private fun stopFeed(eta: Int, plate: String, stopId: Int = 1) =
+        """{"paths":[{"stops":[{"stopid":"$stopId","eta":$eta,"etas":[{"plate":"$plate","eta":$eta}]}]}]}"""
+
+    /** One vehicle at [stop], reporting no direction, so that it counts for either. */
+    private fun busFeed(vehicleId: String, stop: Map<String, Any?>) =
+        """[{"id":"$vehicleId","lat":${stop["lat"]},"lon":${stop["lon"]},"time":1700000000}]"""
+
+    /** One refresh as the service runs it, after anything it already queued. */
     private fun fetchLiveData() {
-        val executor = ReflectionHelpers.getField<ExecutorService>(service, "ioExecutor")
-        executor.submit {
+        ioExecutor().submit {
             ReflectionHelpers.callInstanceMethod<Any?>(
                 service,
-                "updateLiveData",
-                ReflectionHelpers.ClassParameter.from(
-                    TrackingSession::class.java,
-                    ReflectionHelpers.getField<TrackingSession>(service, "session"),
-                ),
+                "refreshTrip",
+                ReflectionHelpers.ClassParameter.from(Boolean::class.javaPrimitiveType, false),
             )
         }.get(10, TimeUnit.SECONDS)
-        refreshRide()
     }
+
+    private fun awaitQueuedRefreshes() {
+        ioExecutor().submit {}.get(10, TimeUnit.SECONDS)
+    }
+
+    /**
+     * Runs [block] with the refresh it sets off held back, so that what the
+     * last refresh left for the main thread is all that can happen in it.
+     */
+    private fun beforeTheNextRefresh(block: () -> Unit) {
+        val held = CountDownLatch(1)
+        ioExecutor().execute { held.await(10, TimeUnit.SECONDS) }
+        try {
+            block()
+        } finally {
+            held.countDown()
+        }
+    }
+
+    private fun ioExecutor(): ExecutorService = ReflectionHelpers.getField(service, "ioExecutor")
 
     /**
      * A ride confirmed with nowhere to get off is paused within moments to ask
