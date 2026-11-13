@@ -306,7 +306,10 @@ class MainActivity : FlutterActivity() {
         val routeKey = call.argument<Int>("routeKey")
         val routeId = call.argument<String>("routeId")?.trim().orEmpty()
         val pathId = call.argument<Int>("pathId")
-        val stopId = call.argument<Int>("stopId")
+        // Stop ids can exceed Int (高雄's are 64-bit), and the channel decodes a
+        // Dart int to Integer or Long depending on its magnitude, so both are
+        // accepted rather than letting the larger ones read back as null.
+        val stopId = call.argument<Number>("stopId")?.toLong()
         val routeName = call.argument<String>("routeName")?.trim().orEmpty()
         val stopName = call.argument<String>("stopName")?.trim().orEmpty()
         val stationId = call.argument<String>("stationId")?.trim().orEmpty()

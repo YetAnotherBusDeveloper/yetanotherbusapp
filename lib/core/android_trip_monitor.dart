@@ -105,6 +105,7 @@ class TripMonitorSession {
     required this.stops,
     this.initialLatitude,
     this.initialLongitude,
+    this.initialLocationTimestampMs,
     this.boardingStopId,
     this.boardingStopName,
     this.destinationStopId,
@@ -123,6 +124,11 @@ class TripMonitorSession {
   final List<TripMonitorStop> stops;
   final double? initialLatitude;
   final double? initialLongitude;
+
+  /// When the initial position was measured, in epoch milliseconds. The route
+  /// screen's last fix can be minutes old by the time a trip starts, and the
+  /// monitor must not mistake where the rider was for where they are.
+  final int? initialLocationTimestampMs;
   final int? boardingStopId;
   final String? boardingStopName;
   final int? destinationStopId;
@@ -141,6 +147,7 @@ class TripMonitorSession {
       'backgroundLocationAlwaysGranted': backgroundLocationAlwaysGranted,
       'initialLatitude': initialLatitude,
       'initialLongitude': initialLongitude,
+      'initialLocationTimestampMs': initialLocationTimestampMs,
       'boardingStopId': boardingStopId,
       'boardingStopName': boardingStopName,
       'destinationStopId': destinationStopId,

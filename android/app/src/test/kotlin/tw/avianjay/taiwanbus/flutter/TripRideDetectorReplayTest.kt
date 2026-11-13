@@ -165,21 +165,29 @@ class TripRideDetectorReplayTest {
     }
 
     @Test
-    fun decliningABoardingKeepsTheRideCancelled() {
+    fun aDeclineIsNotOverruledByTheEvidenceItAnswered() {
         val replay = Replay.load("ride_replay_TXG300_0")
         val detector = replay.detector()
         var declined = false
+        val looksAfterTheAnswer = ArrayList<RideSnapshot>()
         replay.pump(detector, withUserFixes = true) { nowMs, snapshot ->
             if (!declined && snapshot.hasBoarded) {
-                detector.declineBoarding()
+                // Everything that detected this ride is still in the detector's
+                // window when the rider says no.
+                detector.declineBoarding(nowMs)
                 declined = true
+                looksAfterTheAnswer += detector.snapshot(nowMs)
+            } else if (declined && looksAfterTheAnswer.size < 2) {
+                looksAfterTheAnswer += snapshot
             }
         }
 
-        assertTrue("expected a ride to be detected before declining it", declined)
-        val snapshot = detector.snapshot(replay.lastFrameMs)
-        assertFalse("declining must stick", snapshot.hasBoarded)
-        assertEquals(BoardingEvidence.NONE, snapshot.evidence)
+        assertTrue("expected the recorded ride to be detected", declined)
+        assertEquals(2, looksAfterTheAnswer.size)
+        looksAfterTheAnswer.forEach { snapshot ->
+            assertFalse("the answer holds at the next look", snapshot.hasBoarded)
+            assertEquals(BoardingEvidence.NONE, snapshot.evidence)
+        }
     }
 
     @Test

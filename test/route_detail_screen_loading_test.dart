@@ -830,6 +830,62 @@ void main() {
     expect(live['buses'], isEmpty);
   });
 
+  _screenTest('choosing a destination restarts a monitor paused without one', (
+    tester,
+    repository,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    GeolocatorPlatform.instance = _BackgroundLocation();
+    const channel = MethodChannel('tw.avianjay.taiwanbus.flutter/trip_monitor');
+    final sessions = <Map<Object?, Object?>>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      final session = (call.arguments as Map?)?['session'] as Map?;
+      if (call.method == 'startOrUpdateTripMonitor') sessions.add(session!);
+      // The service paused the trip that had no destination, as it does once
+      // it has detected boarding and asked where the rider gets off.
+      if (call.method == 'isTripMonitorPaused') {
+        return session!['destinationStopId'] == null;
+      }
+      return null;
+    });
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      );
+    });
+    final controller = AppControllerScope.read(
+      tester.element(find.byType(RouteDetailScreen)),
+    );
+    await controller.updateEnableRouteBackgroundMonitor(true);
+    repository.topologyRequests.single.complete(_detail());
+    repository.primaryRequests.single.complete(_detail(eta: 300));
+    await _frames(tester, 8);
+    repository.familyRequests.single.completer.complete(
+      repository.familyRequests.single.selected,
+    );
+    await _frames(tester);
+    expect(sessions, isNotEmpty);
+    final sentWhilePaused = sessions.length;
+
+    await tester.tap(find.byTooltip('背景乘車提醒'));
+    await _frames(tester);
+    await tester.tap(find.text('設定下車提醒'));
+    await _frames(tester);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.text('返程站5'),
+      ),
+    );
+    await _frames(tester, 8);
+
+    expect(sessions.length, greaterThan(sentWhilePaused));
+    expect(sessions.last['destinationStopId'], 5);
+  });
+
   _screenTest('a new refresh rejects late family results', (
     tester,
     repository,

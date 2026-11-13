@@ -105,7 +105,24 @@ internal class TripRideDetector(
     private var boarded = false
     private var evidence = BoardingEvidence.NONE
     private var trackedVehicleId: String? = null
-    private var autoDetectionSuppressed = false
+
+    /**
+     * Vehicles the rider has answered "not this one" about, each with the moment
+     * of that answer. The answer is about one bus, not about the trip: only the
+     * vehicle it named is set aside, and only for [REJECTED_VEHICLE_TTL_MS], so
+     * the next bus both raises the question and gets detected as normal. See
+     * [declineBoarding].
+     */
+    private val rejectedAt = HashMap<String, Long>()
+    private var lastDeclineAtMs = 0L
+
+    /**
+     * The departure behind the last "not yet" answer: when it was registered,
+     * and whether the bus it belonged to is still unknown because only the ETA
+     * had reported it.
+     */
+    private var declinedDepartureAtMs = 0L
+    private var declinedDepartureUnattributed = false
 
     private var etaArrivingAtMs = 0L
     private var pendingCheckSinceMs = 0L
@@ -159,11 +176,6 @@ internal class TripRideDetector(
         )
         while (userTrack.size > MAX_USER_SAMPLES) {
             userTrack.removeFirst()
-        }
-        if (anchoredBoardingIndex < 0) {
-            // Used only when no boarding stop was chosen: the trip starts
-            // wherever the user actually is.
-            anchoredBoardingIndex = line.nearestStopIndex(projection.alongMeters)
         }
         return true
     }
@@ -223,29 +235,62 @@ internal class TripRideDetector(
     fun confirmBoardedByUser(nowMs: Long) {
         boarded = true
         evidence = BoardingEvidence.USER_CONFIRMED
-        autoDetectionSuppressed = false
+        rejectedAt.clear()
         trackedVehicleId = pendingCheckVehicleId ?: vehicleJustPastBoardingStop(nowMs)
         clearPendingCheck()
     }
 
     /**
-     * The user says they are not on the bus. Automatic detection stays off for
-     * the rest of the trip: whatever raised the false positive is still in the
-     * feed, so re-deriving it a minute later would only contradict the user
-     * again. They can still confirm the ride by hand.
+     * The user says they are not on the bus the app thinks they are on.
+     *
+     * The answer is about one bus, not about the trip, so only what was just
+     * asserted is set aside: the vehicle of the pending question if there is
+     * one, else the vehicle the detected ride named, for
+     * [REJECTED_VEHICLE_TTL_MS]; and the rider's own movement up to this
+     * moment, which no longer counts as evidence of a ride. The next bus raises
+     * its own question and is detected exactly as this one was.
+     *
+     * Switching detection off for the rest of the trip instead would leave the
+     * rider sitting on their real bus with no boarding alert and no destination
+     * reminders, so one repeated question is the better failure.
      */
-    fun declineBoarding() {
+    fun declineBoarding(nowMs: Long) {
+        val answeredAQuestion = pendingCheckSinceMs != 0L
+        val rejected = pendingCheckVehicleId ?: trackedVehicleId
         boarded = false
         evidence = BoardingEvidence.NONE
         trackedVehicleId = null
-        autoDetectionSuppressed = true
+        lastDeclineAtMs = nowMs
+        declinedDepartureAtMs = if (answeredAQuestion) pendingCheckSinceMs else nowMs
+        declinedDepartureUnattributed = answeredAQuestion && rejected == null
+        if (rejected != null) {
+            rejectedAt[rejected] = nowMs
+        }
         clearPendingCheck()
+    }
+
+    /**
+     * Whether [vehicleId] is a bus the rider has already turned down and whose
+     * rejection is still in force. Entries lapse after
+     * [REJECTED_VEHICLE_TTL_MS] so a vehicle that comes round again is treated
+     * as new.
+     */
+    private fun isRejected(vehicleId: String, nowMs: Long): Boolean {
+        val declinedAt = rejectedAt[vehicleId] ?: return false
+        return nowMs - declinedAt <= REJECTED_VEHICLE_TTL_MS
     }
 
     fun snapshot(nowMs: Long): RideSnapshot {
         prune(nowMs)
         val latestUser = userTrack.lastOrNull()
         val usableUser = latestUser?.takeIf { nowMs - it.timestampMs <= LOCATION_STALE_MS }
+        if (anchoredBoardingIndex < 0 && usableUser != null) {
+            // Used only when no boarding stop was chosen: the trip starts
+            // wherever the user actually is. Only a current fix can say that —
+            // a cached one from minutes ago would pin the whole trip to a stop
+            // the user may have left long before.
+            anchoredBoardingIndex = line.nearestStopIndex(usableUser.alongMeters)
+        }
         val boardingStop = boardingIndex
         val boardingAlong = if (boardingStop >= 0) line.alongOfStop(boardingStop) else null
         val vehicles = liveVehicles(nowMs)
@@ -253,7 +298,7 @@ internal class TripRideDetector(
         if (boardingAlong != null) {
             trackDepartures(vehicles, boardingAlong, nowMs)
         }
-        if (!boarded && !autoDetectionSuppressed) {
+        if (!boarded) {
             val coMovingVehicleId = detectCoMovement(nowMs)
             if (coMovingVehicleId != null) {
                 markBoarded(BoardingEvidence.BUS_CO_MOVEMENT, coMovingVehicleId)
@@ -339,6 +384,9 @@ internal class TripRideDetector(
         }
         val pairs = ArrayList<CoMovementPair>()
         busTracks.forEach { (vehicleId, track) ->
+            if (isRejected(vehicleId, nowMs)) {
+                return@forEach
+            }
             pairs.clear()
             track.forEach { report ->
                 if (report.receivedAtMs < nowMs - COMOVE_WINDOW_MS) {
@@ -401,13 +449,21 @@ internal class TripRideDetector(
      * Layer B. 500 m in 200 s is 2.5 m/s — above a brisk walk and above a bus
      * that sat in traffic for the whole window — so a pedestrian following the
      * same street from the stop is not mistaken for a passenger.
+     *
+     * Travel that happened before the rider last answered "not yet" does not
+     * count: that is the movement the answer was about, and letting it count
+     * again would overrule the answer a moment after it was given. Evidence
+     * starts accumulating from scratch instead.
      */
     private fun detectSelfProgress(
         nowMs: Long,
         boardingAlong: Double,
         latestUser: UserSample,
     ): Boolean {
-        val windowStartMs = nowMs - SELF_PROGRESS_WINDOW_MS
+        if (latestUser.timestampMs < lastDeclineAtMs) {
+            return false
+        }
+        val windowStartMs = maxOf(nowMs - SELF_PROGRESS_WINDOW_MS, lastDeclineAtMs)
         val origin = userTrack.firstOrNull { sample ->
             sample.timestampMs >= windowStartMs &&
                 sample.accuracyMeters <= SELF_PROGRESS_MAX_ACCURACY_METERS &&
@@ -466,8 +522,33 @@ internal class TripRideDetector(
     }
 
     private fun registerDeparture(vehicleId: String?, nowMs: Long) {
-        if (boarded || autoDetectionSuppressed) {
+        if (boarded) {
             return
+        }
+        if (vehicleId != null && isRejected(vehicleId, nowMs)) {
+            // The rider already said this bus was not theirs. Asking again
+            // about the same one is the noise the rejection exists to avoid;
+            // every other vehicle is untouched.
+            return
+        }
+        if (declinedDepartureAtMs != 0L && nowMs - declinedDepartureAtMs < DEPARTURE_DEDUPE_MS) {
+            // One departure reaches the app twice — from the position feed and
+            // from the ETA rolling over — up to a minute and a half apart, and
+            // this one has already been answered. The window runs from the
+            // departure, not from the answer: a rider may take minutes to
+            // reply, and what leaves the stop after that is the next bus.
+            if (vehicleId == null) {
+                return
+            }
+            if (declinedDepartureUnattributed) {
+                // The question came from the ETA alone, so the answer had no
+                // vehicle to be held against. This is that bus, now named.
+                declinedDepartureUnattributed = false
+                rejectedAt[vehicleId] = lastDeclineAtMs
+                return
+            }
+            // A different vehicle this close behind is a second bus, and gets
+            // a question of its own.
         }
         if (pendingCheckSinceMs != 0L && nowMs - pendingCheckSinceMs < DEPARTURE_DEDUPE_MS) {
             // The position feed and the ETA rollover both report the same bus.
@@ -496,7 +577,7 @@ internal class TripRideDetector(
         usableUser: UserSample?,
         boardingStop: Int,
     ): Boolean {
-        if (boarded || autoDetectionSuppressed || pendingCheckSinceMs == 0L) {
+        if (boarded || pendingCheckSinceMs == 0L) {
             return false
         }
         val ageMs = nowMs - pendingCheckSinceMs
@@ -626,6 +707,7 @@ internal class TripRideDetector(
             }
         }
         busTracks.entries.removeAll { it.value.isEmpty() }
+        rejectedAt.entries.removeAll { nowMs - it.value > REJECTED_VEHICLE_TTL_MS }
     }
 
     private fun indexOfStop(stopId: Int?): Int {
@@ -710,6 +792,14 @@ internal class TripRideDetector(
         const val BOARDING_STOP_ABANDONED_RADIUS_METERS = 400.0
         const val BOARDING_PROMPT_DELAY_MS = 40_000L
         const val BOARDING_CHECK_MAX_AGE_MS = 300_000L
+
+        /**
+         * How long a turned-down vehicle stays set aside. Long enough to cover
+         * the wait for the next bus being asked about, short enough that a
+         * vehicle which really is the rider's — a late arrival, or the same
+         * vehicle on its next trip — is not written off for the rest of the day.
+         */
+        const val REJECTED_VEHICLE_TTL_MS = 1_200_000L
         const val STAYED_BEHIND_MAX_FIX_AGE_MS = 30_000L
         const val STAYED_BEHIND_MAX_ACCURACY_METERS = 50f
         const val STAYED_BEHIND_MAX_MOVE_METERS = 60.0

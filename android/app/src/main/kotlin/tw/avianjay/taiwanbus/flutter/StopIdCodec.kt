@@ -43,3 +43,28 @@ internal fun foldStopId(raw: Any?): Int {
     }
     return hash
 }
+
+/**
+ * The stop id as Flutter holds it, for launch payloads (widget taps, notification
+ * taps, pinned shortcuts).
+ *
+ * Dart keys stops by the id it read from the feed: numeric ids stay 64-bit
+ * (高雄's `100100128221` would not fit in an `Int`), non-numeric ones hash. The
+ * native fold is only for joining the live feeds and must not be sent to Dart —
+ * a folded id names no stop the Flutter side knows, so the tap would silently
+ * open the wrong stop or none at all. This returns the value Dart itself would
+ * have computed for the same raw id.
+ */
+internal fun launchStopId(raw: Any?): Long {
+    val text = when (raw) {
+        is Number -> raw.toLong().toString()
+        else -> raw?.toString()?.trim().orEmpty()
+    }
+    if (text.isEmpty() || text.equals("null", ignoreCase = true)) {
+        return 0L
+    }
+    text.toLongOrNull()?.let { return it }
+    // Non-numeric ids hash on both sides, and both hashes start at 17, so the
+    // folded value already is what Dart computed.
+    return foldStopId(raw).toLong()
+}

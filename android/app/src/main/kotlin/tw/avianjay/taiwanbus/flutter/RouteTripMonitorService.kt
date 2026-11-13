@@ -109,11 +109,9 @@ class RouteTripMonitorService : Service() {
             RideGeoPoint(
                 latitude = location.latitude,
                 longitude = location.longitude,
-                // Fixes can be minutes old when the provider hands back a
-                // cached position; ageing them here keeps the whole detector on
-                // the wall clock the rest of the service uses.
-                timestampMs = System.currentTimeMillis() -
-                    (SystemClock.elapsedRealtime() - location.time).coerceAtLeast(0L),
+                // The fix's real age, so that a cached one from minutes ago is
+                // recognised as stale instead of passing for the present.
+                timestampMs = rideFixTimestampMs(location),
                 accuracyMeters = if (location.hasAccuracy()) location.accuracy else 0f,
                 speedMetersPerSecond = location.speed.takeIf { location.hasSpeed() && it > 0f },
             ),
@@ -209,9 +207,12 @@ class RouteTripMonitorService : Service() {
                     stopTracking()
                     return START_NOT_STICKY
                 }
+                val now = System.currentTimeMillis()
                 synchronized(detectorLock) {
-                    detector?.declineBoarding()
-                    latestRide = detector?.snapshot(System.currentTimeMillis()) ?: RideSnapshot()
+                    // Only the bus that was asked about is set aside; the next
+                    // one still gets detected and asked about in its turn.
+                    detector?.declineBoarding(now)
+                    latestRide = detector?.snapshot(now) ?: RideSnapshot()
                 }
                 boardingAlertSent = false
                 destinationSetupPromptSent = false
@@ -244,6 +245,12 @@ class RouteTripMonitorService : Service() {
                     stopTracking()
                     return START_NOT_STICKY
                 }
+                val startedAtMs = System.currentTimeMillis()
+                val continuesBoardedRide = !hadDetector && continuesBoardedRide(
+                    paused = AppRuntimeStateStore.loadPausedTripMonitor(this),
+                    session = parsedSession,
+                    nowMs = startedAtMs,
+                )
                 session = parsedSession
                 appInForeground = parsedSession.appInForeground
                 val providedStops = parsedSession.stops.mapNotNull { stop ->
@@ -287,8 +294,18 @@ class RouteTripMonitorService : Service() {
                     overshootAlertSent = false
                     cancelBoardingCheckPrompt()
                     synchronized(detectorLock) {
-                        detector = createDetector(parsedSession)
+                        detector = createDetector(parsedSession).also { created ->
+                            if (continuesBoardedRide) {
+                                // Choosing where to get off, in answer to "you
+                                // have boarded", is the rider confirming it.
+                                created.confirmBoardedByUser(startedAtMs)
+                            }
+                        }
                         latestRide = RideSnapshot()
+                    }
+                    if (continuesBoardedRide) {
+                        boardingAlertSent = true
+                        AppRuntimeStateStore.clearPausedTripMonitor(this)
                     }
                     refreshRideSnapshot(System.currentTimeMillis())
                     // Only the very first update seeds the detector from the
@@ -324,6 +341,32 @@ class RouteTripMonitorService : Service() {
     }
 
     private fun detectorExists(): Boolean = synchronized(detectorLock) { detector != null }
+
+    /**
+     * Whether [session] is the ride that was paused for want of a destination,
+     * now given one.
+     *
+     * On board with nowhere to get off there is nothing to remind the rider of,
+     * so the monitor asks them to choose a stop and pauses. Their answer starts
+     * it again — on the same bus. Coming back as "waiting to board" would throw
+     * the ride away at the very moment the reminders it was chosen for become
+     * possible, and mid-route there may be nothing left to detect it from.
+     */
+    private fun continuesBoardedRide(
+        paused: TripMonitorPauseState?,
+        session: TrackingSession,
+        nowMs: Long,
+    ): Boolean {
+        paused ?: return false
+        return paused.reason == PAUSE_REASON_BOARDED_NO_DESTINATION &&
+            paused.destinationStopId == null &&
+            session.destinationStopId != null &&
+            paused.provider == session.provider &&
+            paused.routeKey == session.routeKey &&
+            paused.pathId == session.pathId &&
+            paused.boardingStopId == session.boardingStopId &&
+            nowMs - paused.pausedAtMs in 0L..BOARDED_RIDE_RESUME_WINDOW_MS
+    }
 
     override fun onDestroy() {
         mainHandler.removeCallbacksAndMessages(null)
@@ -409,6 +452,10 @@ class RouteTripMonitorService : Service() {
                 Location("trip_monitor_session").apply {
                     this.latitude = latitude
                     this.longitude = longitude
+                    // The route screen's last position can be minutes old by
+                    // the time the trip starts; carrying when it was taken lets
+                    // the detector judge that for itself.
+                    session.initialLocationTimestampMs?.let { time = it }
                 }
             }
         }
@@ -749,6 +796,35 @@ class RouteTripMonitorService : Service() {
                     preferredVehicleId = tracked,
                 )
             }?.let { (index - it).coerceAtLeast(0) }
+        }
+
+        if (ride.hasBoarded && destinationStop == null) {
+            // On board with nowhere to get off yet. This comes before every
+            // waiting branch — including the one for a trip with neither end
+            // chosen — because a confirmed ride has to be reported as one:
+            // that is what makes the destination-setup prompt fire.
+            val travelIndex = ride.progressStopIndex.takeIf { it >= 0 }
+                ?: ride.nearestStopIndexOnBoard(liveStops, session.stops)
+                ?: nearestIndex
+            val currentStop = session.stops.getOrNull(travelIndex)
+            return TrackingSnapshot(
+                title = session.routeName,
+                content = if (currentStop != null) {
+                    "已上車 · 最近站牌 ${currentStop.stopName}"
+                } else {
+                    "已上車 · 追蹤中"
+                },
+                subText = buildOnboardTripSubText(
+                    currentStop?.stopName ?: session.pathName.ifBlank { "乘車中" },
+                ),
+                progressMax = null,
+                progressValue = null,
+                shortCriticalText = null,
+                hasBoarded = true,
+                boardingName = boardingStop?.stopName,
+                boardingVehicleId = ride.trackedVehicleId ?: boardingVehicleId,
+                nearestStopDistanceMeters = nearestStopDistanceMeters,
+            )
         }
 
         if (boardingStop == null && destinationStop == null) {
@@ -1726,7 +1802,11 @@ class RouteTripMonitorService : Service() {
             provider = session.provider,
             routeKey = session.routeKey,
             pathId = session.pathId,
-            stopId = session.destinationStopId ?: session.stops.firstOrNull()?.stopId ?: 0,
+            // The full-width id, because Dart compares it against the ids its
+            // own stop models carry: a folded 高雄 id matches nothing there, so
+            // tapping the notification would not select the stop.
+            stopId = session.destinationLaunchStopId
+                ?: session.stops.firstOrNull()?.launchStopId?.takeIf { it > 0L },
         )
         return PendingIntent.getActivity(
             this,
@@ -2063,6 +2143,13 @@ class RouteTripMonitorService : Service() {
         private const val LOCATION_UPDATE_INTERVAL_MS = 12_000L
         private const val LOCATION_MIN_UPDATE_INTERVAL_MS = 6_000L
         private const val BACKGROUND_AUTO_PAUSE_GRACE_MS = 90_000L
+
+        /**
+         * How long after pausing for a destination the same ride may still be
+         * picked up. A city ride is rarely longer; past this the rider is
+         * re-detected from their movement like anyone else.
+         */
+        private const val BOARDED_RIDE_RESUME_WINDOW_MS = 60 * 60 * 1000L
         private const val WAKE_LOCK_TAG = "YABus::TripMonitor"
         // The lock is renewed on every start, so this only bounds a session that
         // was never cleaned up; it is not the expected trip length.
@@ -2090,10 +2177,16 @@ class RouteTripMonitorService : Service() {
                 val stops = mutableListOf<TrackingStop>()
                 for (index in 0 until stopsJson.length()) {
                     val stop = stopsJson.optJSONObject(index) ?: continue
+                    // The id as Dart holds it, which is 64-bit for 高雄. It is
+                    // needed twice, as two different numbers: folded, to key
+                    // the live feeds; and at full width, for anything a
+                    // notification tap carries back into Flutter.
+                    val dartStopId = stop.opt("stopId")
                     stops += TrackingStop(
                         // Must match how the live feed folds the same id, or the
                         // two maps never line up for 64-bit ids (高雄).
-                        stopId = foldStopId(stop.opt("stopId")),
+                        stopId = foldStopId(dartStopId),
+                        launchStopId = launchStopId(dartStopId),
                         rawStopId = stop.optString("rawStopId", "")
                             .trim().takeIf { it.isNotEmpty() && it != "null" },
                         stopName = stop.optString("stopName", ""),
@@ -2127,6 +2220,8 @@ class RouteTripMonitorService : Service() {
                         .takeUnless { it.isNaN() },
                     initialLongitude = root.optDouble("initialLongitude", Double.NaN)
                         .takeUnless { it.isNaN() },
+                    initialLocationTimestampMs = root.optLong("initialLocationTimestampMs", 0L)
+                        .takeIf { it > 0L },
                     boardingStopId = foldStopId(root.opt("boardingStopId"))
                         .takeIf { it > 0 },
                     boardingStopName = root.optString("boardingStopName", "")
@@ -2135,6 +2230,10 @@ class RouteTripMonitorService : Service() {
                         .takeIf { it > 0 },
                     destinationStopName = root.optString("destinationStopName", "")
                         .takeIf { it.isNotBlank() },
+                    boardingLaunchStopId = launchStopId(root.opt("boardingStopId"))
+                        .takeIf { it > 0L },
+                    destinationLaunchStopId = launchStopId(root.opt("destinationStopId"))
+                        .takeIf { it > 0L },
                     stops = stops.sortedBy { stop -> stop.sequence },
                 )
             } catch (_: Exception) {
@@ -2224,6 +2323,11 @@ data class TrackingSession(
     val destinationStopName: String?,
     val stops: List<TrackingStop>,
     val familyRouteIds: List<String> = emptyList(),
+    /** Full-width ids as Flutter holds them; only for launch payloads. */
+    val boardingLaunchStopId: Long? = null,
+    val destinationLaunchStopId: Long? = null,
+    /** Epoch milliseconds of the fix behind the initial position, when known. */
+    val initialLocationTimestampMs: Long? = null,
 ) {
     val realtimeRouteIds: List<String>
         get() = (listOfNotNull(routeId) + familyRouteIds).map { it.trim() }
@@ -2238,6 +2342,8 @@ data class TrackingStop(
     val lon: Double,
     val rawStopId: String? = null,
     val liveData: LiveStopState? = null,
+    /** Full-width id as Flutter holds it; only for launch payloads. */
+    val launchStopId: Long = 0L,
 )
 
 data class LiveStopState(

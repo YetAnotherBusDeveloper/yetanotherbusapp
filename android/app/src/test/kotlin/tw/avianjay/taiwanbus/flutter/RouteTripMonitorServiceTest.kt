@@ -3,9 +3,16 @@ package tw.avianjay.taiwanbus.flutter
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.location.Location
+import android.os.Looper
+import android.os.SystemClock
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowSystemClock
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
 import org.junit.After
@@ -345,6 +352,203 @@ class RouteTripMonitorServiceTest {
         assertEquals(120, liveStops[boardingStopId]!!.seconds)
     }
 
+    @Test
+    fun aCachedFixFromMinutesAgoIsNotTreatedAsWhereTheRiderIs() {
+        // Robolectric's clock starts at boot; move on so "five minutes ago" exists.
+        ShadowSystemClock.advanceBy(10, TimeUnit.MINUTES)
+        service.onStartCommand(startIntent(threeStopSession()), 0, 1)
+
+        // What the fused provider hands back first: its cached last location.
+        feedFix(stopIndex = 2, ageMinutes = 5)
+
+        assertFalse("a five-minute-old fix is not a usable position", ride(service).hasUsableLocation)
+        assertEquals(
+            "and must not decide where the trip starts",
+            -1,
+            ride(service).boardingStopIndex,
+        )
+
+        feedFix(stopIndex = 1, ageMinutes = 0)
+
+        assertTrue(ride(service).hasUsableLocation)
+        assertEquals("the trip starts where the rider is now", 1, ride(service).boardingStopIndex)
+    }
+
+    @Test
+    fun theSessionsStartingPositionIsAgedByWhenFlutterMeasuredIt() {
+        ShadowSystemClock.advanceBy(10, TimeUnit.MINUTES)
+        val (lat, lon) = THREE_STOPS[2]
+        service.onStartCommand(
+            startIntent(
+                threeStopSession() + mapOf(
+                    "initialLatitude" to lat,
+                    "initialLongitude" to lon,
+                    "initialLocationTimestampMs" to System.currentTimeMillis() - 5 * 60_000L,
+                ),
+            ),
+            0,
+            1,
+        )
+        refreshRide()
+
+        assertFalse(ride(service).hasUsableLocation)
+        assertEquals(-1, ride(service).boardingStopIndex)
+    }
+
+    @Test
+    fun boardingWithoutADestinationAsksForOneAndPicksTheRideBackUp() {
+        val withBoardingStop = threeStopSession() + mapOf(
+            "boardingStopId" to 1,
+            "boardingStopName" to "一站",
+        )
+        // With and without a boarding stop chosen: both used to be reported as
+        // "still waiting" however the ride had been confirmed.
+        for (waiting in listOf(withBoardingStop, threeStopSession())) {
+            service.onStartCommand(startIntent(waiting), 0, 1)
+            service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+            assertTrue(ride(service).hasBoarded)
+
+            val paused = awaitPause()
+
+            assertEquals("boarded_no_destination", paused.reason)
+            val prompt = shadowOf(service.getSystemService(NotificationManager::class.java))
+                .getNotification(6022)
+            assertNotNull("the rider must be asked where they get off", prompt)
+            assertEquals("已偵測上車", prompt.extras.getString(Notification.EXTRA_TITLE))
+
+            // The rider answers by choosing a stop.
+            service.onStartCommand(
+                startIntent(waiting + mapOf("destinationStopId" to 3, "destinationStopName" to "三站")),
+                0,
+                3,
+            )
+
+            assertTrue("choosing a destination continues the same ride", ride(service).hasBoarded)
+            assertEquals(BoardingEvidence.USER_CONFIRMED, ride(service).evidence)
+            assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+
+            service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 4)
+        }
+    }
+
+    @Test
+    fun onlyTheRidePausedForADestinationIsPickedBackUp() {
+        val waiting = threeStopSession() + mapOf("boardingStopId" to 1)
+        val withDestination = waiting + mapOf("destinationStopId" to 3)
+        fun startedAsBoarded(
+            pausedAs: Map<String, Any?>,
+            reason: String,
+            resumedAs: Map<String, Any?>,
+            pausedMinutesAgo: Long = 1,
+        ): Boolean {
+            AppRuntimeStateStore.savePausedTripMonitor(
+                service,
+                RouteTripMonitorService.parseSessionPayload(pausedAs)!!,
+                reason,
+            )
+            // The store stamps the pause with the real clock, so it is aged here.
+            service.getSharedPreferences("app_runtime_state", Context.MODE_PRIVATE).edit()
+                .putLong(
+                    "trip_monitor_paused_at_ms",
+                    System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(pausedMinutesAgo),
+                )
+                .commit()
+            service.onStartCommand(startIntent(resumedAs), 0, 1)
+            val boarded = ride(service).hasBoarded
+            service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 2)
+            return boarded
+        }
+
+        assertTrue(startedAsBoarded(waiting, "boarded_no_destination", withDestination))
+        assertFalse(
+            "a pause the rider asked for says nothing about being on board",
+            startedAsBoarded(waiting, "user", withDestination),
+        )
+        assertFalse(
+            "another boarding stop is another trip",
+            startedAsBoarded(waiting, "boarded_no_destination", withDestination + mapOf("boardingStopId" to 2)),
+        )
+        assertFalse(
+            "an hour on, that ride is over",
+            startedAsBoarded(waiting, "boarded_no_destination", withDestination, pausedMinutesAgo = 61),
+        )
+    }
+
+    @Test
+    fun tappingATripNotificationLaunchesWithTheFullWidthStopId() {
+        val rawStopId = 101111144601L
+        val session = RouteTripMonitorService.parseSessionPayload(
+            mapOf(
+                "provider" to "khh",
+                "routeKey" to 100,
+                "pathId" to 0,
+                "destinationStopId" to rawStopId,
+                "stops" to listOf(
+                    mapOf("stopId" to rawStopId, "stopName" to "測試站", "lat" to 22.6, "lon" to 120.3),
+                ),
+            ),
+        )!!
+        assertEquals("the feed join still uses the folded key", foldStopId(rawStopId), session.destinationStopId)
+
+        val tap = ReflectionHelpers.callInstanceMethod<PendingIntent>(
+            service,
+            "createOpenRoutePendingIntent",
+            ReflectionHelpers.ClassParameter.from(TrackingSession::class.java, session),
+        )
+        val payload = AppLaunchConstants.extractLaunchPayload(shadowOf(tap).savedIntent)!!
+
+        assertEquals(rawStopId, (payload["stopId"] as Number).toLong())
+    }
+
+    private fun threeStopSession(): Map<String, Any?> = sessionPayload() + mapOf(
+        "stops" to THREE_STOPS.mapIndexed { index, (lat, lon) ->
+            mapOf(
+                "stopId" to index + 1,
+                "stopName" to "${"一二三"[index]}站",
+                "sequence" to index + 1,
+                "lat" to lat,
+                "lon" to lon,
+            )
+        },
+    )
+
+    /** Delivers a fix at a stop, as the location callback does, and re-reads the ride. */
+    private fun feedFix(stopIndex: Int, ageMinutes: Long) {
+        val (lat, lon) = THREE_STOPS[stopIndex]
+        val fix = Location("fused").apply {
+            latitude = lat
+            longitude = lon
+            accuracy = 10f
+            elapsedRealtimeNanos =
+                SystemClock.elapsedRealtimeNanos() - TimeUnit.MINUTES.toNanos(ageMinutes)
+            time = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(ageMinutes)
+        }
+        ReflectionHelpers.callInstanceMethod<Any?>(
+            service,
+            "onUserLocation",
+            ReflectionHelpers.ClassParameter.from(Location::class.java, fix),
+        )
+        refreshRide()
+    }
+
+    private fun refreshRide() {
+        ReflectionHelpers.callInstanceMethod<Any?>(
+            service,
+            "refreshRideSnapshot",
+            ReflectionHelpers.ClassParameter.from(Long::class.javaPrimitiveType, System.currentTimeMillis()),
+        )
+    }
+
+    /** Lets the service's own refresh loop run until it pauses the trip. */
+    private fun awaitPause(): TripMonitorPauseState {
+        repeat(100) {
+            AppRuntimeStateStore.loadPausedTripMonitor(service)?.let { return it }
+            shadowOf(Looper.getMainLooper()).idleFor(500, TimeUnit.MILLISECONDS)
+            Thread.sleep(50)
+        }
+        throw AssertionError("the monitor never paused to ask for a destination")
+    }
+
     private fun ride(service: RouteTripMonitorService): RideSnapshot =
         ReflectionHelpers.getField(service, "latestRide")
 
@@ -372,6 +576,9 @@ class RouteTripMonitorServiceTest {
         "stops" to listOf(mapOf("stopId" to 1, "stopName" to "測試站", "lat" to 24.1, "lon" to 120.6)),
     )
 }
+
+/** Three stops about 500 m apart, running north. */
+private val THREE_STOPS = listOf(24.1000 to 120.6, 24.1045 to 120.6, 24.1090 to 120.6)
 
 @Implements(Service::class)
 class RecordingTripServiceShadow : ShadowService() {

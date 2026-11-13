@@ -2130,6 +2130,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       destinationStopName: _destinationStopName,
       initialLatitude: _lastPosition?.latitude,
       initialLongitude: _lastPosition?.longitude,
+      initialLocationTimestampMs:
+          _lastPosition?.timestamp.millisecondsSinceEpoch,
       stops: resolvedStops.map(TripMonitorStop.fromStop).toList(),
     );
   }
@@ -2730,6 +2732,16 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _destinationStopId = stop.stopId;
       _destinationStopName = stop.stopName;
     });
+    if (_isAndroid && _backgroundTripMonitorPaused) {
+      // The service pauses a trip, not the screen: with a destination this is
+      // a different trip to it, and holding on to the old answer would leave
+      // the monitor off. That stranded the "you have boarded, choose where to
+      // get off" prompt — choosing never started anything again.
+      await _syncBackgroundTripMonitorPausedState();
+      if (!mounted) {
+        return;
+      }
+    }
     if (boardingStop != null && pathId != null) {
       final controller = AppControllerScope.read(context);
       await controller.recordDestinationChoice(
