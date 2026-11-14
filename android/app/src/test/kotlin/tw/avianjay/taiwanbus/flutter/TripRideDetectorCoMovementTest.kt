@@ -84,7 +84,7 @@ class TripRideDetectorCoMovementTest {
     fun anInvalidReportCannotDriveAnAlreadyConfirmedRide() {
         for ((pathId, offsetMeters) in listOf(1 to 0.0, 0 to 350.0)) {
             val detector = newDetector()
-            detector.onBusReports(listOf(report(0, along = 100.0)))
+            detector.onBusReports(listOf(report(0, along = 0.0)))
             detector.confirmBoardedByUser(at(0))
             assertEquals(BUS, detector.snapshot(at(0)).trackedVehicleId)
 
@@ -106,7 +106,7 @@ class TripRideDetectorCoMovementTest {
     @Test
     fun aVehicleFeedOutageDoesNotLoseTheRideOrSwitchToAnotherBus() {
         val detector = newDetector()
-        detector.onBusReports(listOf(report(0, along = 100.0)))
+        detector.onBusReports(listOf(report(0, along = 0.0)))
         detector.confirmBoardedByUser(at(0))
         detector.onBusReports(listOf(report(200, along = 50.0, vehicleId = "OTHER")))
 
@@ -126,7 +126,7 @@ class TripRideDetectorCoMovementTest {
     fun aStalePhoneFixDoesNotPreventConfirmationFromPickingTheBus() {
         val detector = newDetector()
         detector.onUserLocation(fix(-300, along = 0.0))
-        detector.onBusReports(listOf(report(0, along = 100.0)))
+        detector.onBusReports(listOf(report(0, along = 0.0)))
         detector.confirmBoardedByUser(at(0))
 
         val ride = detector.snapshot(at(0))

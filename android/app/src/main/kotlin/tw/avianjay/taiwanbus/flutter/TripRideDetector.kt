@@ -107,6 +107,8 @@ internal class TripRideDetector(
     private var boarded = false
     private var evidence = BoardingEvidence.NONE
     private var trackedVehicleId: String? = null
+    private var manualConfirmationAtMs: Long? = null
+    private var manualVehicleAmbiguous = false
 
     /**
      * Vehicles the rider has answered "not this one" about, each with the moment
@@ -196,6 +198,8 @@ internal class TripRideDetector(
             }
             val projection = line.project(report.latitude, report.longitude, last?.alongMeters)
             track += BusSample(
+                latitude = report.latitude,
+                longitude = report.longitude,
                 alongMeters = projection.alongMeters,
                 gpsTimeMs = report.gpsTimeMs,
                 receivedAtMs = report.receivedAtMs,
@@ -235,10 +239,17 @@ internal class TripRideDetector(
     }
 
     fun confirmBoardedByUser(nowMs: Long) {
+        val identifiedVehicle = trackedVehicleId.takeIf { boarded }
+        if (!boarded || evidence != BoardingEvidence.USER_CONFIRMED) {
+            manualConfirmationAtMs = nowMs
+            manualVehicleAmbiguous = false
+        }
         boarded = true
         evidence = BoardingEvidence.USER_CONFIRMED
         rejectedAt.clear()
-        trackedVehicleId = pendingCheckVehicleId ?: vehicleJustPastBoardingStop(nowMs)
+        // Confirming the ride does not confirm a plate. An already identified
+        // vehicle remains the ride even if another bus is nearer the stop now.
+        trackedVehicleId = identifiedVehicle ?: identifyBoardingVehicle(nowMs)
         clearPendingCheck()
     }
 
@@ -262,6 +273,8 @@ internal class TripRideDetector(
         boarded = false
         evidence = BoardingEvidence.NONE
         trackedVehicleId = null
+        manualConfirmationAtMs = null
+        manualVehicleAmbiguous = false
         lastDeclineAtMs = nowMs
         declinedDepartureAtMs = if (answeredAQuestion) pendingCheckSinceMs else nowMs
         declinedDepartureUnattributed = answeredAQuestion && rejected == null
@@ -380,6 +393,8 @@ internal class TripRideDetector(
         boarded = true
         this.evidence = evidence
         trackedVehicleId = vehicleId
+        manualConfirmationAtMs = null
+        manualVehicleAmbiguous = false
         clearPendingCheck()
     }
 
@@ -664,7 +679,7 @@ internal class TripRideDetector(
             // only a fresh, valid report supplies progress in snapshot(). A
             // manual confirmation may also precede the first vehicle response.
             return trackedVehicleId ?: if (evidence == BoardingEvidence.USER_CONFIRMED) {
-                vehicleJustPastBoardingStop(nowMs)
+                identifyBoardingVehicle(nowMs)
             } else {
                 null
             }
@@ -681,7 +696,21 @@ internal class TripRideDetector(
             ?.vehicleId
     }
 
-    private fun vehicleJustPastBoardingStop(nowMs: Long): String? {
+    /**
+     * Associates a manual confirmation with a vehicle, not just a route.
+     *
+     * The bus must have a recent, unbroken run on this direction and route
+     * containing a fix physically at the boarding stop, and still be at most
+     * 250 m ahead. Projection alone would clamp a bus before the first stop to
+     * zero progress, or put a bus on a parallel street level with the stop.
+     * Identification may arrive after confirmation, but only for two minutes:
+     * otherwise a later bus could be mistaken for the one already ridden.
+     */
+    private fun identifyBoardingVehicle(nowMs: Long): String? {
+        val confirmedAt = manualConfirmationAtMs ?: return null
+        if (nowMs - confirmedAt !in 0L..MANUAL_IDENTIFICATION_WINDOW_MS || manualVehicleAmbiguous) {
+            return null
+        }
         val boardingStop = boardingIndex
         val hasUsableUser = userTrack.lastOrNull()?.let { nowMs - it.timestampMs <= LOCATION_STALE_MS } == true
         if (boardingStop < 0 || hasUsableUser) {
@@ -689,10 +718,35 @@ internal class TripRideDetector(
             return null
         }
         val boardingAlong = line.alongOfStop(boardingStop)
-        return liveVehicles(nowMs)
-            .filter { it.samePath && it.onRoute && it.alongMeters >= boardingAlong - AT_STOP_MARGIN_METERS }
-            .minByOrNull { it.alongMeters }
-            ?.vehicleId
+        val candidates = liveVehicles(nowMs).filter { vehicle ->
+            if (!vehicle.samePath || !vehicle.onRoute ||
+                vehicle.alongMeters - boardingAlong !in -AT_STOP_MARGIN_METERS..MANUAL_VEHICLE_MAX_AHEAD_METERS
+            ) {
+                return@filter false
+            }
+            val track = busTracks[vehicle.vehicleId] ?: return@filter false
+            val latest = track.lastOrNull() ?: return@filter false
+            if (nowMs - latest.receivedAtMs !in 0L..MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS) {
+                return@filter false
+            }
+            track.reversed().takeWhile { it.samePath && it.onRoute }.any { sample ->
+                nowMs - sample.receivedAtMs in 0L..MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS &&
+                    abs(sample.alongMeters - boardingAlong) <= AT_STOP_MARGIN_METERS &&
+                    line.metersToStop(sample.latitude, sample.longitude, boardingStop) <=
+                    MANUAL_AT_STOP_RADIUS_METERS
+            }
+        }
+        val namedDeparture = pendingCheckVehicleId.takeIf {
+            nowMs - pendingCheckSinceMs in 0L..MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS
+        }
+        candidates.firstOrNull { it.vehicleId == namedDeparture }?.let { return it.vehicleId }
+        if (candidates.size > 1) {
+            // One candidate later leaving the distance bound does not prove
+            // that the rider took the other one. A usable phone fix can still
+            // identify the ride through resolveTrackedVehicle().
+            manualVehicleAmbiguous = true
+        }
+        return candidates.singleOrNull()?.vehicleId
     }
 
     private fun liveVehicles(nowMs: Long): List<LiveVehicle> {
@@ -758,6 +812,8 @@ internal class TripRideDetector(
     )
 
     private data class BusSample(
+        val latitude: Double,
+        val longitude: Double,
         val alongMeters: Double,
         val gpsTimeMs: Long,
         val receivedAtMs: Long,
@@ -816,6 +872,10 @@ internal class TripRideDetector(
         const val ON_ROUTE_SEGMENT_SHARE = 0.6
         const val AT_STOP_MARGIN_METERS = 40.0
         const val LEFT_STOP_MARGIN_METERS = 120.0
+        const val MANUAL_AT_STOP_RADIUS_METERS = 80.0
+        const val MANUAL_VEHICLE_MAX_AHEAD_METERS = 250.0
+        const val MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS = 90_000L
+        const val MANUAL_IDENTIFICATION_WINDOW_MS = 120_000L
 
         const val ETA_ARRIVING_SECONDS = 30
         const val ETA_ROLLOVER_SECONDS = 240

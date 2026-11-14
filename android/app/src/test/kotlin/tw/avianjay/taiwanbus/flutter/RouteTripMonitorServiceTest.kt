@@ -945,6 +945,63 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun manualBoardingWaitsForTheActualBusInsteadOfAnEarlierBusPastTheDestination() {
+        val stops = (0..5).map { index ->
+            mapOf(
+                "stopId" to index + 1, "stopName" to "stop-$index", "sequence" to index + 1,
+                "lat" to 24.1 + index * 0.0045, "lon" to 120.6,
+            )
+        }
+        val trip = sessionPayload() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 4, "stops" to stops,
+        )
+        var actualStop: Map<String, Any?>? = null
+        var gpsTime = 1_700_000_000L
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                val reports = org.json.JSONArray(busFeed("EARLIER", stops[5], pathId = 0, gpsTimeSeconds = gpsTime))
+                actualStop?.let { stop ->
+                    reports.put(org.json.JSONArray(busFeed("ACTUAL", stop, pathId = 0, gpsTimeSeconds = gpsTime))
+                        .getJSONObject(0))
+                }
+                reports.toString()
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        fetchLiveData()
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        refreshAndDeliverAlerts()
+
+        assertTrue(ride(service).hasBoarded)
+        assertNull(ride(service).trackedVehicleId)
+        assertNull(ride(service).passedDestinationByStops)
+        assertEquals(0L, ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs"))
+        assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+
+        actualStop = stops.first()
+        gpsTime += 30
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertEquals("ACTUAL", ride(service).trackedVehicleId)
+        assertEquals(0, ride(service).progressStopIndex)
+
+        actualStop = stops[1]
+        gpsTime += 30
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertEquals("ACTUAL", ride(service).trackedVehicleId)
+        assertEquals(2, ride(service).remainingStops)
+        assertNull(ride(service).passedDestinationByStops)
+        assertEquals(0L, ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs"))
+        assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+        val alert = service.getSystemService(NotificationManager::class.java)
+            .activeNotifications.single { it.id == 6022 }.notification
+        assertEquals("1 快到了", alert.extras.getString(Notification.EXTRA_TITLE))
+    }
+
+    @Test
     fun wrongDirectionAndOffRouteVariantsCannotBeConfirmedAsTheRidersBus() {
         for ((pathId, longitudeOffset) in listOf(1 to 0.0, 0 to 0.004)) {
             val trip = threeStopSession() + mapOf(
