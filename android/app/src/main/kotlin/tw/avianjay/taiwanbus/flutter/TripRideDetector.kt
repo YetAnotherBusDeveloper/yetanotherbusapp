@@ -62,6 +62,8 @@ internal data class RideSnapshot(
     val remainingStops: Int? = null,
     val passedDestinationByStops: Int? = null,
     val destinationDistanceMeters: Double? = null,
+    /** Validity of the same fresh phone/bus sample that supplied the progress. */
+    val hasRouteValidProgress: Boolean = false,
 )
 
 /**
@@ -308,8 +310,10 @@ internal class TripRideDetector(
                 markBoarded(BoardingEvidence.SELF_PROGRESS, vehicleId = null)
             }
         }
-        trackedVehicleId = resolveTrackedVehicle(vehicles, usableUser)
-        val trackedVehicle = vehicles.firstOrNull { it.vehicleId == trackedVehicleId }
+        trackedVehicleId = resolveTrackedVehicle(vehicles, usableUser, nowMs)
+        val trackedVehicle = vehicles.firstOrNull {
+            it.vehicleId == trackedVehicleId && it.samePath && it.onRoute
+        }
 
         val nextBus = if (boardingAlong == null) {
             null
@@ -359,6 +363,16 @@ internal class TripRideDetector(
             remainingStops = stopsToGo?.coerceAtLeast(0),
             passedDestinationByStops = stopsToGo?.let { -it }?.takeIf { it > 0 },
             destinationDistanceMeters = destinationDistanceMeters,
+            // Keep the phone's existing near-stop guard. Without a usable phone
+            // fix, the tracked bus's direction and route geometry are the guard;
+            // an unrelated cached phone location must not veto its progress.
+            hasRouteValidProgress = when {
+                usableUser != null -> line.metersToStop(
+                    usableUser.latitude, usableUser.longitude, line.nearestStopIndex(usableUser.alongMeters),
+                ) <= USER_STOP_PROXIMITY_MAX_METERS
+                trackedVehicle != null -> trackedVehicle.samePath && trackedVehicle.onRoute
+                else -> false
+            },
         )
     }
 
@@ -516,14 +530,12 @@ internal class TripRideDetector(
         nowMs: Long,
     ) {
         vehicles.forEach { vehicle ->
-            if (!vehicle.samePath) {
+            if (!vehicle.samePath || !vehicle.onRoute) {
                 return@forEach
             }
             val offset = vehicle.alongMeters - boardingAlong
             if (offset <= AT_STOP_MARGIN_METERS) {
-                if (vehicle.onRoute) {
-                    vehiclesSeenBeforeBoardingStop += vehicle.vehicleId
-                }
+                vehiclesSeenBeforeBoardingStop += vehicle.vehicleId
             } else if (offset > LEFT_STOP_MARGIN_METERS &&
                 vehiclesSeenBeforeBoardingStop.remove(vehicle.vehicleId)
             ) {
@@ -641,13 +653,21 @@ internal class TripRideDetector(
     private fun resolveTrackedVehicle(
         vehicles: List<LiveVehicle>,
         usableUser: UserSample?,
+        nowMs: Long,
     ): String? {
         if (!boarded) {
             return null
         }
-        val locked = vehicles.firstOrNull { it.vehicleId == trackedVehicleId }
+        val locked = vehicles.firstOrNull { it.vehicleId == trackedVehicleId && it.samePath && it.onRoute }
         if (usableUser == null) {
-            return locked?.vehicleId
+            // Remember the ride through an outage or an invalid report, but
+            // only a fresh, valid report supplies progress in snapshot(). A
+            // manual confirmation may also precede the first vehicle response.
+            return trackedVehicleId ?: if (evidence == BoardingEvidence.USER_CONFIRMED) {
+                vehicleJustPastBoardingStop(nowMs)
+            } else {
+                null
+            }
         }
         if (locked != null &&
             usableUser.alongMeters - locked.alongMeters in -TRACK_MAX_AHEAD_METERS..TRACK_KEEP_BEHIND_METERS
@@ -663,8 +683,9 @@ internal class TripRideDetector(
 
     private fun vehicleJustPastBoardingStop(nowMs: Long): String? {
         val boardingStop = boardingIndex
-        if (boardingStop < 0 || userTrack.isNotEmpty()) {
-            // With a location the nearest vehicle is resolved from the user.
+        val hasUsableUser = userTrack.lastOrNull()?.let { nowMs - it.timestampMs <= LOCATION_STALE_MS } == true
+        if (boardingStop < 0 || hasUsableUser) {
+            // With a usable location the nearest vehicle is resolved from the user.
             return null
         }
         val boardingAlong = line.alongOfStop(boardingStop)
@@ -765,6 +786,7 @@ internal class TripRideDetector(
 
         const val MAX_USABLE_ACCURACY_METERS = 100f
         const val LOCATION_STALE_MS = 90_000L
+        const val USER_STOP_PROXIMITY_MAX_METERS = 100.0
         const val MAX_PLAUSIBLE_SPEED_MPS = 55.0
         const val INTERPOLATION_TOLERANCE_MS = 6_000L
         const val MAX_INTERPOLATION_SPAN_MS = 30_000L

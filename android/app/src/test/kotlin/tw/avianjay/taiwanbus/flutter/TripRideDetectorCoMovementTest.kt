@@ -80,6 +80,74 @@ class TripRideDetectorCoMovementTest {
         assertEquals(BUS, detector.snapshot(at(0)).trackedVehicleId)
     }
 
+    @Test
+    fun anInvalidReportCannotDriveAnAlreadyConfirmedRide() {
+        for ((pathId, offsetMeters) in listOf(1 to 0.0, 0 to 350.0)) {
+            val detector = newDetector()
+            detector.onBusReports(listOf(report(0, along = 100.0)))
+            detector.confirmBoardedByUser(at(0))
+            assertEquals(BUS, detector.snapshot(at(0)).trackedVehicleId)
+
+            detector.onBusReports(listOf(report(30, along = 1_500.0, pathId = pathId, offsetMeters = offsetMeters)))
+            val ride = detector.snapshot(at(30))
+            assertTrue(ride.hasBoarded)
+            assertEquals("keep the ride's identity without trusting the invalid position", BUS, ride.trackedVehicleId)
+            assertEquals(-1, ride.progressStopIndex)
+            assertFalse(ride.hasRouteValidProgress)
+
+            detector.onBusReports(listOf(report(60, along = 1_600.0)))
+            val recovered = detector.snapshot(at(60))
+            assertEquals(BUS, recovered.trackedVehicleId)
+            assertEquals(3, recovered.progressStopIndex)
+            assertTrue(recovered.hasRouteValidProgress)
+        }
+    }
+
+    @Test
+    fun aVehicleFeedOutageDoesNotLoseTheRideOrSwitchToAnotherBus() {
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 100.0)))
+        detector.confirmBoardedByUser(at(0))
+        detector.onBusReports(listOf(report(200, along = 50.0, vehicleId = "OTHER")))
+
+        val outage = detector.snapshot(at(200))
+        assertEquals(BUS, outage.trackedVehicleId)
+        assertEquals(-1, outage.progressStopIndex)
+        assertFalse(outage.hasRouteValidProgress)
+
+        detector.onBusReports(listOf(report(201, along = 1_600.0)))
+        val recovered = detector.snapshot(at(201))
+        assertEquals(BUS, recovered.trackedVehicleId)
+        assertEquals(3, recovered.progressStopIndex)
+        assertTrue(recovered.hasRouteValidProgress)
+    }
+
+    @Test
+    fun aStalePhoneFixDoesNotPreventConfirmationFromPickingTheBus() {
+        val detector = newDetector()
+        detector.onUserLocation(fix(-300, along = 0.0))
+        detector.onBusReports(listOf(report(0, along = 100.0)))
+        detector.confirmBoardedByUser(at(0))
+
+        val ride = detector.snapshot(at(0))
+        assertFalse(ride.hasUsableLocation)
+        assertEquals(BUS, ride.trackedVehicleId)
+    }
+
+    @Test
+    fun anOffRouteReportCannotAnnounceADeparture() {
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0)))
+        assertEquals(0L, detector.snapshot(at(0)).boardingCheckId)
+        detector.onBusReports(listOf(report(30, along = 600.0, offsetMeters = 350.0)))
+
+        assertEquals(
+            "leaving the route is not evidence of departing the boarding stop",
+            0L,
+            detector.snapshot(at(30)).boardingCheckId,
+        )
+    }
+
     /** The rider travels 300 m up the route in a minute, beside whatever [vehicle] reports. */
     private fun rideAlongside(vehicle: (Long) -> RideBusReport): RideSnapshot {
         val detector = newDetector()

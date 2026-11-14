@@ -77,10 +77,9 @@ class RouteTripMonitorService : Service() {
     private var cachedLivePathId: Int? = null
     private var cachedLiveFetchedAtMs = 0L
     private var cachedLiveStops: Map<Int, LiveStopState> = emptyMap()
-    private var cachedBusesRouteId: String? = null
-    private var cachedBusesFetchedAtMs = 0L
+    /** Under refreshLock: every family route shares the same polling policy. */
+    private val busFeedRefreshByRoute = mutableMapOf<String, BusFeedRefresh>()
     private var liveStopBackoffUntilMs = 0L
-    private var liveBusBackoffUntilMs = 0L
     private var wakeLock: PowerManager.WakeLock? = null
 
     private val pollingRunnable = object : Runnable {
@@ -321,6 +320,11 @@ class RouteTripMonitorService : Service() {
                             forgetLiveFeeds()
                         }
                     } else {
+                        if (familyChanged) {
+                            synchronized(refreshLock) {
+                                busFeedRefreshByRoute.keys.retainAll(parsedSession.realtimeRouteIds.toSet())
+                            }
+                        }
                         detector?.also { it.updateDestination(parsedSession.destinationStopId) }
                     }
                     if (providedStops.isNotEmpty()) {
@@ -368,6 +372,11 @@ class RouteTripMonitorService : Service() {
         val session: TrackingSession,
         val detector: TripRideDetector,
         val stopFeedRevision: Long,
+    )
+
+    private data class BusFeedRefresh(
+        val fetchedAtElapsedMs: Long? = null,
+        val retryAtElapsedMs: Long = 0L,
     )
 
     private fun currentTrip(): TrackedTrip? = synchronized(detectorLock) {
@@ -756,9 +765,9 @@ class RouteTripMonitorService : Service() {
      *
      * Both feeds share one rate-limit bucket with the rest of the app, so they
      * are throttled by age rather than fetched on every refresh, and a failed
-     * request backs that feed off instead of hammering the server. Each feed
-     * backs off on its own: the vehicle positions are what detection runs on
-     * when the phone has no fix, and must not go dark because the stop feed did.
+     * request backs that endpoint off instead of hammering the server. Every
+     * family route uses that same interval/back-off policy independently, so a
+     * failed stop feed or variant does not silence healthy vehicle endpoints.
      *
      * Returns false when [trip] was replaced while a request was out; nothing
      * fetched after that point has been applied, and the caller should stop.
@@ -769,19 +778,19 @@ class RouteTripMonitorService : Service() {
         if (routeIds.isEmpty()) {
             return true
         }
-        val primaryRouteId = session.routeId?.trim().orEmpty()
         val nowElapsed = SystemClock.elapsedRealtime()
-        val (wantsStops, wantsBuses) = synchronized(refreshLock) {
+        val (wantsStops, busRouteIdsDue) = synchronized(refreshLock) {
             val stopsDue = nowElapsed >= liveStopBackoffUntilMs && (
                 cachedLiveRouteIds != routeIds ||
                     cachedLivePathId != session.pathId ||
                     nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
                 )
-            val busesDue = primaryRouteId.isNotEmpty() &&
-                nowElapsed >= liveBusBackoffUntilMs && (
-                cachedBusesRouteId != primaryRouteId ||
-                    nowElapsed - cachedBusesFetchedAtMs >= LIVE_BUS_REFRESH_INTERVAL_MS
-                )
+            val busesDue = routeIds.filter { routeId ->
+                val state = busFeedRefreshByRoute[routeId]
+                state == null || (nowElapsed >= state.retryAtElapsedMs &&
+                    (state.fetchedAtElapsedMs == null ||
+                        nowElapsed - state.fetchedAtElapsedMs >= LIVE_BUS_REFRESH_INTERVAL_MS))
+            }
             stopsDue to busesDue
         }
 
@@ -817,23 +826,39 @@ class RouteTripMonitorService : Service() {
             }
         }
 
-        if (wantsBuses) {
-            val reports = fetchBusReportsFromBackend(primaryRouteId)
-            return applyToTrip(trip) {
-                if (reports == null) {
-                    synchronized(refreshLock) {
-                        liveBusBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
-                    }
-                } else {
-                    synchronized(refreshLock) {
-                        cachedBusesRouteId = primaryRouteId
-                        cachedBusesFetchedAtMs = nowElapsed
-                    }
-                    trip.detector.onBusReports(reports)
+        val reportsByRoute = linkedMapOf<String, List<RideBusReport>>()
+        for (routeId in busRouteIdsDue) {
+            val reports = fetchBusReportsFromBackend(routeId)
+            if (!applyToTrip(trip) {
+                // A confirmed ride survives family updates, but an endpoint
+                // removed from its family must not publish an in-flight result.
+                if (routeId !in this.session?.realtimeRouteIds.orEmpty()) {
+                    return@applyToTrip
                 }
+                synchronized(refreshLock) {
+                    val receivedAt = SystemClock.elapsedRealtime()
+                    busFeedRefreshByRoute[routeId] = if (reports == null) {
+                        (busFeedRefreshByRoute[routeId] ?: BusFeedRefresh()).copy(
+                            retryAtElapsedMs = receivedAt + LIVE_FETCH_BACKOFF_MS,
+                        )
+                    } else {
+                        BusFeedRefresh(fetchedAtElapsedMs = receivedAt)
+                    }
+                }
+                reports?.let { reportsByRoute[routeId] = it }
+            }) {
+                return false
             }
         }
-        return true
+        return applyToTrip(trip) {
+            val currentRoutes = this.session?.realtimeRouteIds.orEmpty().toSet()
+            // A plate can occur in more than one endpoint; it is still one bus.
+            // Keep its newest report, rather than letting route iteration order
+            // choose which position drives a ride with no phone location.
+            val reports = reportsByRoute.filterKeys { it in currentRoutes }.values.flatten()
+                .groupBy { it.vehicleId }.values.mapNotNull { track -> track.maxByOrNull { it.gpsTimeMs } }
+            trip.detector.onBusReports(reports)
+        }
     }
 
     private fun feedBoardingEta(
@@ -1107,6 +1132,7 @@ class RouteTripMonitorService : Service() {
             boardingVehicleId = ride.trackedVehicleId ?: boardingVehicleId,
             passedDestinationByStops = ride.passedDestinationByStops,
             nearestStopDistanceMeters = nearestStopDistanceMeters,
+            hasRouteValidProgress = ride.hasRouteValidProgress,
         )
     }
 
@@ -1857,10 +1883,9 @@ class RouteTripMonitorService : Service() {
         val destinationName = snapshot.destinationName ?: return false
         val passedByStops = snapshot.passedDestinationByStops ?: return false
         val destinationDistanceMeters = snapshot.destinationDistanceMeters ?: return false
-        val nearestStopDistanceMeters = snapshot.nearestStopDistanceMeters ?: return false
         if (
             destinationDistanceMeters <= DESTINATION_OVERSHOOT_DISTANCE_METERS ||
-                nearestStopDistanceMeters > ROUTE_PROXIMITY_MAX_DISTANCE_METERS
+                !snapshot.hasRouteValidProgress
         ) {
             return false
         }
@@ -2059,10 +2084,8 @@ class RouteTripMonitorService : Service() {
         cachedLivePathId = null
         cachedLiveFetchedAtMs = 0L
         cachedLiveStops = emptyMap()
-        cachedBusesRouteId = null
-        cachedBusesFetchedAtMs = 0L
+        busFeedRefreshByRoute.clear()
         liveStopBackoffUntilMs = 0L
-        liveBusBackoffUntilMs = 0L
     }
 
     /**
@@ -2308,7 +2331,6 @@ class RouteTripMonitorService : Service() {
         private const val PROGRESS_POINT_COLOR = 0x80000000.toInt()
         private const val OVERSHOOT_CONFIRM_DELAY_MS = 45_000L
         private const val ARRIVAL_AUTO_PAUSE_DELAY_MS = 60_000L
-        private const val ROUTE_PROXIMITY_MAX_DISTANCE_METERS = 100.0
         private const val DESTINATION_OVERSHOOT_DISTANCE_METERS = 100.0
         private const val DESTINATION_ARRIVED_DISTANCE_METERS = 120.0
         private const val LIVE_UPDATE_SDK_INT = 36
@@ -2533,6 +2555,7 @@ data class TrackingSnapshot(
     val destinationDistanceMeters: Double? = null,
     val passedDestinationByStops: Int? = null,
     val nearestStopDistanceMeters: Double? = null,
+    val hasRouteValidProgress: Boolean = false,
 )
 
 data class VehicleCandidate(

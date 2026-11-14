@@ -791,6 +791,225 @@ class RouteTripMonitorServiceTest {
         assertNewerAppStopFeedWins(null)
     }
 
+    @Test
+    fun aFamilyVariantCarriesAConfirmedRideWithoutPhoneFixes() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1",
+            "familyRouteIds" to listOf("TXG1", "TXG2"),
+            "boardingStopId" to 1,
+            "destinationStopId" to 3,
+        )
+        var busStop = stopsOf(trip).first()
+        var gpsTime = 1_700_000_000L
+        backend = { path ->
+            when (path) {
+                "/api/v1/routes/TXG1/realtime/buses" -> "[]"
+                "/api/v1/routes/TXG2/realtime/buses" ->
+                    busFeed("VARIANT-001", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+                else -> null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        fetchLiveData()
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        refreshAndDeliverAlerts()
+        assertFalse(ride(service).hasUsableLocation)
+        assertEquals("VARIANT-001", ride(service).trackedVehicleId)
+        assertEquals(2, ride(service).remainingStops)
+
+        busStop = stopsOf(trip)[1]
+        gpsTime += 30
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+
+        assertEquals(1, ride(service).progressStopIndex)
+        assertEquals(1, ride(service).remainingStops)
+        val alert = service.getSystemService(NotificationManager::class.java)
+            .activeNotifications.single { it.id == 6022 }.notification
+        assertEquals("準備下車", alert.extras.getString(Notification.EXTRA_TITLE))
+    }
+
+    @Test
+    fun familyVehicleFetchesAreThrottledAndFailedRoutesBackOffIndependently() {
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                requests += path
+                if (path.contains("/TXG2/")) null else "[]"
+            } else {
+                null
+            }
+        }
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1",
+            "familyRouteIds" to listOf("TXG1", "TXG2", "TXG3", "TXG2"),
+            "boardingStopId" to 1,
+        )
+        fun assertFetchCounts(primary: Int, failed: Int, healthy: Int) {
+            assertEquals(primary, requests.count { it.contains("/TXG1/") })
+            assertEquals(failed, requests.count { it.contains("/TXG2/") })
+            assertEquals(healthy, requests.count { it.contains("/TXG3/") })
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        fetchLiveData()
+        assertFetchCounts(primary = 1, failed = 1, healthy = 1)
+        fetchLiveData()
+        assertFetchCounts(primary = 1, failed = 1, healthy = 1)
+
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        fetchLiveData()
+        assertFetchCounts(primary = 2, failed = 1, healthy = 2)
+
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        fetchLiveData()
+        assertFetchCounts(primary = 3, failed = 2, healthy = 3)
+    }
+
+    @Test
+    fun aLateFamilyVariantIsFetchedWithoutRefetchingTheFreshPrimary() {
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                requests += path
+                if (path.contains("/TXG1/")) "[]" else busFeed("VARIANT-001", stopsOf(trip).first())
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        fetchLiveData()
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        awaitQueuedRefreshes()
+        val originalDetector = ReflectionHelpers.getField<Any>(service, "detector")
+        service.onStartCommand(
+            startIntent(trip + mapOf("familyRouteIds" to listOf("TXG1", "TXG2"))), 0, 3,
+        )
+        fetchLiveData()
+
+        assertTrue(originalDetector === ReflectionHelpers.getField<Any>(service, "detector"))
+        assertTrue(ride(service).hasBoarded)
+        assertEquals("VARIANT-001", ride(service).trackedVehicleId)
+        assertEquals(1, requests.count { it.contains("/TXG1/") })
+        assertEquals(1, requests.count { it.contains("/TXG2/") })
+    }
+
+    @Test
+    fun aRemovedFamilyVariantsInFlightResponseCannotReachTheConfirmedRide() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "familyRouteIds" to listOf("TXG2"),
+            "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        val variantFetchStarted = CountDownLatch(1)
+        val releaseVariantFetch = CountDownLatch(1)
+        backend = { path ->
+            when (path) {
+                "/api/v1/routes/TXG1/realtime/buses" -> "[]"
+                "/api/v1/routes/TXG2/realtime/buses" -> {
+                    variantFetchStarted.countDown()
+                    check(releaseVariantFetch.await(10, TimeUnit.SECONDS)) { "variant request was never released" }
+                    busFeed("REMOVED", stopsOf(trip)[2])
+                }
+                else -> null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        try {
+            assertTrue(variantFetchStarted.await(10, TimeUnit.SECONDS))
+            service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+            val originalDetector = ReflectionHelpers.getField<Any>(service, "detector")
+            service.onStartCommand(startIntent(trip + mapOf("familyRouteIds" to emptyList<String>())), 0, 3)
+            assertTrue(originalDetector === ReflectionHelpers.getField<Any>(service, "detector"))
+        } finally {
+            releaseVariantFetch.countDown()
+        }
+        awaitQueuedRefreshes()
+        // A second confirmation would pick any leaked position at the stop.
+        service.onStartCommand(command("MARK_BOARDED"), 0, 4)
+        awaitQueuedRefreshes()
+        assertNull(ride(service).trackedVehicleId)
+        val refreshState = ReflectionHelpers.getField<Map<String, Any>>(service, "busFeedRefreshByRoute")
+        assertFalse("an obsolete family response must not repopulate its cache", "TXG2" in refreshState)
+    }
+
+    @Test
+    fun aTrackedBusRaisesAnOvershootAlertWithoutPhoneFixes() {
+        assertBusOnlyOvershoot(stalePhoneFix = false)
+    }
+
+    @Test
+    fun aStaleFarAwayPhoneFixDoesNotHideATrackedBusOvershoot() {
+        assertBusOnlyOvershoot(stalePhoneFix = true)
+    }
+
+    @Test
+    fun wrongDirectionAndOffRouteVariantsCannotBeConfirmedAsTheRidersBus() {
+        for ((pathId, longitudeOffset) in listOf(1 to 0.0, 0 to 0.004)) {
+            val trip = threeStopSession() + mapOf(
+                "routeId" to "TXG1", "familyRouteIds" to listOf("TXG2"),
+                "boardingStopId" to 1, "destinationStopId" to 3,
+            )
+            val busStop = stopsOf(trip).first() + mapOf("lon" to 120.6 + longitudeOffset)
+            backend = { path ->
+                when (path) {
+                    "/api/v1/routes/TXG1/realtime/buses" -> "[]"
+                    "/api/v1/routes/TXG2/realtime/buses" -> busFeed("INVALID", busStop, pathId = pathId)
+                    else -> null
+                }
+            }
+            service.onStartCommand(startIntent(trip), 0, 1)
+            fetchLiveData()
+            service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+            awaitQueuedRefreshes()
+            assertTrue(ride(service).hasBoarded)
+            assertNull(ride(service).trackedVehicleId)
+            assertEquals(-1, ride(service).progressStopIndex)
+            service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 3)
+        }
+    }
+
+    private fun assertBusOnlyOvershoot(stalePhoneFix: Boolean) {
+        ShadowSystemClock.advanceBy(10, TimeUnit.MINUTES)
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 2,
+        )
+        var busStop = stopsOf(trip).first()
+        var gpsTime = 1_700_000_000L
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed("TRACKED-001", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        fetchLiveData()
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        refreshAndDeliverAlerts()
+        assertEquals("TRACKED-001", ride(service).trackedVehicleId)
+        assertEquals(0L, ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs"))
+        if (stalePhoneFix) {
+            feedFix(stopIndex = 0, ageMinutes = 5, longitudeOffset = 0.01)
+        }
+
+        busStop = stopsOf(trip)[2]
+        gpsTime += 30
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertFalse(ride(service).hasUsableLocation)
+        assertEquals(1, ride(service).passedDestinationByStops)
+        assertTrue(ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs") > 0L)
+
+        ReflectionHelpers.setField(service, "arrivalDetectedAtMs", System.currentTimeMillis() - 60_000L)
+        refreshAndDeliverAlerts()
+        assertEquals("overshot", AppRuntimeStateStore.loadPausedTripMonitor(service)?.reason)
+        val alert = service.getSystemService(NotificationManager::class.java)
+            .activeNotifications.single { it.id == 6022 }.notification
+        assertEquals("可能坐過站了", alert.extras.getString(Notification.EXTRA_TITLE))
+    }
+
     private fun assertNewerAppStopFeedWins(oldResponse: String?) {
         val initial = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
         val oldFetchStarted = CountDownLatch(1)
@@ -867,6 +1086,10 @@ class RouteTripMonitorServiceTest {
     }
 
     private fun refreshAndDeliverAlerts() {
+        // Run exactly this refresh: advancing Android uptime can otherwise make
+        // an overdue poll race its main-thread alert with another IO snapshot.
+        awaitQueuedRefreshes()
+        ReflectionHelpers.getField<android.os.Handler>(service, "mainHandler").removeCallbacksAndMessages(null)
         fetchLiveData()
         shadowOf(Looper.getMainLooper()).idle()
     }
@@ -884,9 +1107,13 @@ class RouteTripMonitorServiceTest {
     private fun stopFeed(eta: Int, plate: String, stopId: Int = 1) =
         """{"paths":[{"stops":[{"stopid":"$stopId","eta":$eta,"etas":[{"plate":"$plate","eta":$eta}]}]}]}"""
 
-    /** One vehicle at [stop], reporting no direction, so that it counts for either. */
-    private fun busFeed(vehicleId: String, stop: Map<String, Any?>) =
-        """[{"id":"$vehicleId","lat":${stop["lat"]},"lon":${stop["lon"]},"time":1700000000}]"""
+    /** One vehicle at [stop]; direction is unknown unless supplied. */
+    private fun busFeed(
+        vehicleId: String,
+        stop: Map<String, Any?>,
+        pathId: Int? = null,
+        gpsTimeSeconds: Long = 1_700_000_000L,
+    ) = """[{"id":"$vehicleId","direction":$pathId,"lat":${stop["lat"]},"lon":${stop["lon"]},"time":$gpsTimeSeconds}]"""
 
     /** One refresh as the service runs it, after anything it already queued. */
     private fun fetchLiveData() {
