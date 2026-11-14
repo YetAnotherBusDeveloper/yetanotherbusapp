@@ -548,6 +548,61 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun onlyTheQuestionsOwnButtonsAnswerTheQuestion() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        for (answersTheQuestion in listOf(false, true)) {
+            // Bus A calls at the boarding stop and leaves.
+            var busStop = stopsOf(trip).first()
+            var gpsTime = nowSeconds()
+            backend = { path ->
+                if (path.endsWith("/realtime/buses")) {
+                    busFeed("BUS-A", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+                } else {
+                    null
+                }
+            }
+            service.onStartCommand(startIntent(trip), 0, 1)
+            refreshAndDeliverAlerts()
+            busStop = stopsOf(trip)[1]
+            gpsTime += 20
+            ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+            refreshAndDeliverAlerts()
+            val checkId = ride(service).boardingCheckId
+            assertTrue("A's departure must be pending as a question", checkId != 0L)
+            val notifications = service.getSystemService(NotificationManager::class.java)
+
+            if (!answersTheQuestion) {
+                // Not asked yet. The rider is on another bus, one with no
+                // position feed, and says so on the tracking notification.
+                assertTrue(notifications.activeNotifications.none { it.id == 6023 })
+                service.onStartCommand(buttonIntent(notificationId = 6021, title = "我已上車"), 0, 2)
+
+                assertTrue(ride(service).hasBoarded)
+                assertNull("an unseen question's bus is not the rider's", ride(service).trackedVehicleId)
+            } else {
+                // The question is shown 40 s after the departure. The service
+                // reads the JVM wall clock, so the departure is aged instead.
+                ReflectionHelpers.setField(
+                    ReflectionHelpers.getField<Any>(service, "detector"),
+                    "pendingCheckSinceMs",
+                    System.currentTimeMillis() - 45_000L,
+                )
+                refreshAndDeliverAlerts()
+                assertFalse(
+                    "showing the question must not turn the tracking notification's button into an answer",
+                    buttonIntent(notificationId = 6021, title = "我已上車").hasExtra("boarding_check_id"),
+                )
+                service.onStartCommand(buttonIntent(notificationId = 6023, title = "我已上車"), 0, 2)
+
+                assertEquals("yes to the question about A is a ride on A", "BUS-A", ride(service).trackedVehicleId)
+            }
+            service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 3)
+        }
+    }
+
+    @Test
     fun aFailingStopFeedDoesNotSilenceTheVehicleFeed() {
         val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
         backend = { path ->
@@ -1190,6 +1245,17 @@ class RouteTripMonitorServiceTest {
         """{"paths":[{"stops":[{"stopid":"$stopId","eta":$eta,"etas":[{"plate":"$plate","eta":$eta}]}]}]}"""
 
     /** One vehicle at [stop]; direction is unknown unless supplied. */
+    /** What tapping the button called [title] on a posted notification sends the service. */
+    private fun buttonIntent(notificationId: Int, title: String): Intent {
+        val posted = service.getSystemService(NotificationManager::class.java).activeNotifications
+        val buttons = posted.firstOrNull { it.id == notificationId }?.notification?.actions.orEmpty()
+        val button = buttons.firstOrNull { it.title.toString() == title } ?: throw AssertionError(
+            "no \"$title\" on notification $notificationId; posted: " +
+                posted.joinToString { n -> "${n.id}${n.notification.actions.orEmpty().map { it.title }}" },
+        )
+        return shadowOf(button.actionIntent).savedIntent
+    }
+
     /** Vehicles stamp their reports with the same clock the phone runs on. */
     private fun nowSeconds() = System.currentTimeMillis() / 1000
 

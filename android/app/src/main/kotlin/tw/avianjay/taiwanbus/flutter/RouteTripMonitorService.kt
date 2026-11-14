@@ -196,7 +196,7 @@ class RouteTripMonitorService : Service() {
                 }
                 val now = System.currentTimeMillis()
                 synchronized(detectorLock) {
-                    detector?.confirmBoardedByUser(now)
+                    detector?.confirmBoardedByUser(now, answeredBoardingCheckId(intent))
                     latestRide = detector?.snapshot(now) ?: RideSnapshot()
                 }
                 boardingAlertSent = true
@@ -214,7 +214,7 @@ class RouteTripMonitorService : Service() {
                 synchronized(detectorLock) {
                     // Only the bus that was asked about is set aside; the next
                     // one still gets detected and asked about in its turn.
-                    detector?.declineBoarding(now)
+                    detector?.declineBoarding(now, answeredBoardingCheckId(intent))
                     latestRide = detector?.snapshot(now) ?: RideSnapshot()
                 }
                 boardingAlertSent = false
@@ -1732,14 +1732,14 @@ class RouteTripMonitorService : Service() {
                     NotificationCompat.Action.Builder(
                         0,
                         "我已上車",
-                        createMarkBoardedPendingIntent(),
+                        createMarkBoardedPendingIntent(ride.boardingCheckId),
                     ).build(),
                 )
                 .addAction(
                     NotificationCompat.Action.Builder(
                         0,
                         "還沒上車",
-                        createNotBoardedPendingIntent(),
+                        createNotBoardedPendingIntent(ride.boardingCheckId),
                     ).build(),
                 )
                 .build(),
@@ -1997,29 +1997,42 @@ class RouteTripMonitorService : Service() {
         )
     }
 
-    private fun createMarkBoardedPendingIntent(): PendingIntent {
+    /**
+     * "I have boarded". [answeredCheckId] is set only on the buttons of the
+     * boarding question, which answer that question; the same words on the
+     * tracking notification are the rider speaking unprompted, and must not be
+     * read as an answer to a question they may not have been shown.
+     */
+    private fun createMarkBoardedPendingIntent(answeredCheckId: Long = 0L): PendingIntent =
+        createBoardingAnswerPendingIntent(ACTION_MARK_BOARDED, 405, 407, answeredCheckId)
+
+    private fun createNotBoardedPendingIntent(answeredCheckId: Long = 0L): PendingIntent =
+        createBoardingAnswerPendingIntent(ACTION_NOT_BOARDED, 406, 408, answeredCheckId)
+
+    private fun createBoardingAnswerPendingIntent(
+        action: String,
+        unpromptedRequestCode: Int,
+        answerRequestCode: Int,
+        answeredCheckId: Long,
+    ): PendingIntent {
         val intent = Intent(this, RouteTripMonitorService::class.java).apply {
-            action = ACTION_MARK_BOARDED
+            this.action = action
+            if (answeredCheckId != 0L) {
+                putExtra(EXTRA_BOARDING_CHECK_ID, answeredCheckId)
+            }
         }
+        // Extras do not tell two PendingIntents apart, so the answer gets a
+        // request code of its own rather than rewriting the unprompted button.
         return PendingIntent.getService(
             this,
-            405,
+            if (answeredCheckId != 0L) answerRequestCode else unpromptedRequestCode,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
 
-    private fun createNotBoardedPendingIntent(): PendingIntent {
-        val intent = Intent(this, RouteTripMonitorService::class.java).apply {
-            action = ACTION_NOT_BOARDED
-        }
-        return PendingIntent.getService(
-            this,
-            406,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
+    private fun answeredBoardingCheckId(intent: Intent): Long? =
+        intent.getLongExtra(EXTRA_BOARDING_CHECK_ID, 0L).takeIf { it != 0L }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         AppRuntimeStateStore.setAppInForeground(this, false)
@@ -2302,6 +2315,7 @@ class RouteTripMonitorService : Service() {
         private const val EXTRA_SESSION_JSON = "session_json"
         private const val EXTRA_APP_IN_FOREGROUND = "app_in_foreground"
         private const val EXTRA_PAUSE_REASON = "pause_reason"
+        private const val EXTRA_BOARDING_CHECK_ID = "boarding_check_id"
 
         private const val LEGACY_TRACKING_CHANNEL_ID = "trip_monitor_tracking"
         private const val TRACKING_CHANNEL_ID = "trip_monitor_tracking_v2"

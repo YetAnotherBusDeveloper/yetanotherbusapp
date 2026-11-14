@@ -239,14 +239,24 @@ internal class TripRideDetector(
         }
     }
 
-    fun confirmBoardedByUser(nowMs: Long) {
+    /**
+     * The rider says they are on board.
+     *
+     * [answeredCheckId] is the [RideSnapshot.boardingCheckId] of the question
+     * being answered, and null when nothing was asked: "I have boarded" is
+     * always on offer, and a rider who uses it may never have seen a question —
+     * one can be pending, about a bus that just left, before it is ever shown.
+     * That bus is not theirs for having been about to be asked about.
+     */
+    fun confirmBoardedByUser(nowMs: Long, answeredCheckId: Long? = null) {
         val identifiedVehicle = trackedVehicleId.takeIf { boarded }
         // A question that names a bus is about that bus: it was watched coming
-        // up to the stop and leaving it, and "yes" is the rider's answer to
-        // exactly that. Nothing seen afterwards can be tied to the ride as
-        // firmly, however near the stop it is.
+        // up to the stop and leaving it, and "yes" to that very question is the
+        // rider's answer to exactly that. An answer to a question since
+        // replaced by another names nothing.
         val askedAbout = pendingCheckVehicleId.takeIf {
-            pendingCheckSinceMs != 0L && nowMs - pendingCheckSinceMs in 0L..BOARDING_CHECK_MAX_AGE_MS
+            pendingCheckSinceMs != 0L && answeredCheckId == pendingCheckSinceMs &&
+                nowMs - pendingCheckSinceMs in 0L..BOARDING_CHECK_MAX_AGE_MS
         }
         if (!boarded || evidence != BoardingEvidence.USER_CONFIRMED) {
             manualConfirmationAtMs = nowMs
@@ -290,8 +300,17 @@ internal class TripRideDetector(
      * Switching detection off for the rest of the trip instead would leave the
      * rider sitting on their real bus with no boarding alert and no destination
      * reminders, so one repeated question is the better failure.
+     *
+     * [answeredCheckId] is the question being answered, as for
+     * [confirmBoardedByUser]. "Not yet" to a question that has since been
+     * replaced says nothing about the bus the new one is about.
      */
-    fun declineBoarding(nowMs: Long) {
+    fun declineBoarding(nowMs: Long, answeredCheckId: Long? = null) {
+        if (!boarded && answeredCheckId != null && answeredCheckId != pendingCheckSinceMs) {
+            // Still true of the rider's movement so far, and of nothing else.
+            lastDeclineAtMs = nowMs
+            return
+        }
         val answeredAQuestion = pendingCheckSinceMs != 0L
         val rejected = pendingCheckVehicleId ?: trackedVehicleId
         boarded = false
@@ -736,6 +755,9 @@ internal class TripRideDetector(
      * can reach the app afterwards — the feed runs half a minute behind — which
      * is what the two-minute window is for. A bus that pulls in after the
      * rider said they were already on one is the next bus, whenever it is seen.
+     *
+     * Nor is it a bus the app had already watched leave by then. Unprompted,
+     * "I have boarded" points at what is standing at the stop.
      */
     private fun identifyBoardingVehicle(nowMs: Long): String? {
         val confirmedAt = manualConfirmationAtMs ?: return null
@@ -760,7 +782,14 @@ internal class TripRideDetector(
             if (nowMs - latest.receivedAtMs !in 0L..MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS) {
                 return@filter false
             }
-            track.reversed().takeWhile { it.samePath && it.onRoute }.any { sample ->
+            val run = track.reversed().takeWhile { it.samePath && it.onRoute }
+            // A bus already seen pulling away before the rider spoke up is one
+            // the app knew had gone: whether they were on it is what the
+            // boarding question asks, and only an answer to that settles it.
+            val hadLeftBeforeConfirming = run.any { sample ->
+                sample.gpsTimeMs <= confirmedAt && sample.alongMeters - boardingAlong > LEFT_STOP_MARGIN_METERS
+            }
+            !hadLeftBeforeConfirming && run.any { sample ->
                 confirmedAt - sample.gpsTimeMs in 0L..MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS &&
                     abs(sample.alongMeters - boardingAlong) <= AT_STOP_MARGIN_METERS &&
                     line.metersToStop(sample.latitude, sample.longitude, boardingStop) <=

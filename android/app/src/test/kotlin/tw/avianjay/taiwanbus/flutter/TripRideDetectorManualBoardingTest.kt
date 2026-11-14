@@ -71,12 +71,16 @@ class TripRideDetectorManualBoardingTest {
     }
 
     @Test
-    fun aRecentBoundedDepartureCanBeIdentified() {
+    fun aBusStillAtTheStopWhenTheRiderConfirmsIsTheirs() {
+        // Its next report, already made but not yet delivered, shows it moving
+        // off with them on board.
         val detector = newDetector()
-        detector.onBusReports(listOf(report(0, along = 0.0), report(20, along = 200.0)))
-        detector.confirmBoardedByUser(at(20))
+        detector.onBusReports(listOf(report(0, along = 0.0)))
+        detector.confirmBoardedByUser(at(15))
+        assertEquals(BUS, detector.snapshot(at(15)).trackedVehicleId)
 
-        assertEquals(BUS, detector.snapshot(at(20)).trackedVehicleId)
+        detector.onBusReports(listOf(report(40, along = 300.0)))
+        assertEquals(BUS, detector.snapshot(at(40)).trackedVehicleId)
     }
 
     @Test
@@ -118,8 +122,9 @@ class TripRideDetectorManualBoardingTest {
         detector.onBusReports(listOf(report(20, along = 150.0)))
         assertTrue(detector.snapshot(at(20)).boardingCheckId != 0L)
         detector.onBusReports(listOf(report(60, along = 700.0), report(60, along = 0.0, id = "OTHER")))
-        assertTrue(detector.snapshot(at(60)).boardingPromptDue)
-        detector.confirmBoardedByUser(at(70))
+        val question = detector.snapshot(at(60))
+        assertTrue(question.boardingPromptDue)
+        detector.confirmBoardedByUser(at(70), answeredCheckId = question.boardingCheckId)
 
         val ride = detector.snapshot(at(70))
         assertEquals(BUS, ride.trackedVehicleId)
@@ -128,15 +133,78 @@ class TripRideDetectorManualBoardingTest {
     }
 
     @Test
+    fun confirmingUnpromptedDoesNotAdoptABusAboutToBeAskedAbout() {
+        // Bus A leaves and a question about it is pending, but is not shown for
+        // another 40 s. Meanwhile the rider gets on bus B, which has no
+        // position feed, and says so with the button that is always there.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+        detector.snapshot(at(0))
+        detector.onBusReports(listOf(report(20, along = 150.0, id = "BUS-A")))
+        val pending = detector.snapshot(at(20))
+        assertTrue(pending.boardingCheckId != 0L)
+        assertFalse("the rider has not been asked anything yet", pending.boardingPromptDue)
+        detector.confirmBoardedByUser(at(30))
+
+        assertUnidentified(detector.snapshot(at(30)))
+        // A carries on past the rider's destination; the ride is not on it.
+        detector.onBusReports(listOf(report(150, along = 2_000.0, id = "BUS-A")))
+        assertUnidentified(detector.snapshot(at(150)))
+    }
+
+    @Test
+    fun confirmingUnpromptedWhileAQuestionIsShowingIsStillNotAnAnswerToIt() {
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+        detector.snapshot(at(0))
+        detector.onBusReports(listOf(report(20, along = 150.0, id = "BUS-A")))
+        detector.snapshot(at(20))
+        detector.onBusReports(listOf(report(60, along = 700.0, id = "BUS-A")))
+        assertTrue(detector.snapshot(at(60)).boardingPromptDue)
+        detector.confirmBoardedByUser(at(70))
+
+        assertUnidentified(detector.snapshot(at(70)))
+    }
+
+    @Test
+    fun anAnswerToAQuestionSinceReplacedNamesNoBus() {
+        // The notification about bus A is still on screen when bus B leaves and
+        // becomes the pending question; the rider answers the one they can see.
+        for (boarded in listOf(true, false)) {
+            val detector = newDetector()
+            detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+            detector.snapshot(at(0))
+            detector.onBusReports(listOf(report(20, along = 150.0, id = "BUS-A")))
+            val aboutA = detector.snapshot(at(20)).boardingCheckId
+            detector.onBusReports(listOf(report(100, along = 0.0, id = "BUS-B")))
+            detector.snapshot(at(100))
+            detector.onBusReports(listOf(report(120, along = 150.0, id = "BUS-B")))
+            val aboutB = detector.snapshot(at(120)).boardingCheckId
+            assertTrue("B's departure must have replaced A's question", aboutB != 0L && aboutB != aboutA)
+
+            if (boarded) {
+                detector.confirmBoardedByUser(at(125), answeredCheckId = aboutA)
+                assertUnidentified(detector.snapshot(at(125)))
+            } else {
+                detector.declineBoarding(at(125), answeredCheckId = aboutA)
+                val ride = detector.snapshot(at(165))
+                assertEquals("the question about B still stands", aboutB, ride.boardingCheckId)
+                assertTrue(ride.boardingPromptDue)
+            }
+        }
+    }
+
+    @Test
     fun aQuestionThatHasLapsedNamesNoBus() {
         val detector = newDetector()
         detector.onBusReports(listOf(report(0, along = 0.0)))
         detector.snapshot(at(0))
         detector.onBusReports(listOf(report(20, along = 150.0)))
-        assertTrue(detector.snapshot(at(20)).boardingCheckId != 0L)
+        val question = detector.snapshot(at(20)).boardingCheckId
+        assertTrue(question != 0L)
         detector.onBusReports(listOf(report(330, along = 2_400.0)))
         // Not snapshotted in between, so the question was never retired.
-        detector.confirmBoardedByUser(at(330))
+        detector.confirmBoardedByUser(at(330), answeredCheckId = question)
 
         assertUnidentified(detector.snapshot(at(330)))
     }
@@ -255,8 +323,9 @@ class TripRideDetectorManualBoardingTest {
         detector.onBusReports(listOf(report(0, along = 0.0)))
         detector.snapshot(at(0))
         detector.onBusReports(listOf(report(20, along = 150.0), report(20, along = 0.0, id = "OTHER")))
-        assertTrue(detector.snapshot(at(20)).boardingCheckId != 0L)
-        detector.confirmBoardedByUser(at(20))
+        val question = detector.snapshot(at(20)).boardingCheckId
+        assertTrue(question != 0L)
+        detector.confirmBoardedByUser(at(20), answeredCheckId = question)
 
         assertEquals(BUS, detector.snapshot(at(20)).trackedVehicleId)
     }
