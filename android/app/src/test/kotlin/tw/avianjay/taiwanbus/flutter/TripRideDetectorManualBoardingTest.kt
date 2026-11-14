@@ -25,9 +25,11 @@ class TripRideDetectorManualBoardingTest {
         detector.confirmBoardedByUser(at(0))
         assertUnidentified(detector.snapshot(at(0)))
 
+        // The feed runs behind: the fix the rider's bus made at the stop, just
+        // before they confirmed, only reaches the app now.
         detector.onBusReports(listOf(
             report(20, along = 2_500.0, id = "EARLIER"),
-            report(20, along = 0.0),
+            report(-5, along = 0.0).copy(receivedAtMs = at(20)),
         ))
         assertEquals(BUS, detector.snapshot(at(20)).trackedVehicleId)
 
@@ -78,32 +80,106 @@ class TripRideDetectorManualBoardingTest {
     }
 
     @Test
-    fun anIdentifiedDepartureStillHasAnUpperDistanceBound() {
-        for (along in listOf(249.0, 251.0)) {
+    fun aLaterBusCallingAtTheStopIsNotTheConfirmedRide() {
+        // The rider's own bus has no position feed. Whatever pulls in after
+        // they said they were on board is the next bus.
+        for (arrivesAfterSeconds in listOf(1L, 20L, 60L, 110L)) {
+            val detector = newDetector()
+            detector.confirmBoardedByUser(at(0))
+            assertUnidentified(detector.snapshot(at(0)))
+
+            detector.onBusReports(listOf(report(arrivesAfterSeconds, along = 0.0, id = "LATER-BUS")))
+            assertUnidentified(detector.snapshot(at(arrivesAfterSeconds)))
+
+            // It runs on past the rider's destination; the ride is not it.
+            detector.onBusReports(listOf(report(arrivesAfterSeconds + 60, along = 2_000.0, id = "LATER-BUS")))
+            assertUnidentified(detector.snapshot(at(arrivesAfterSeconds + 60)))
+        }
+    }
+
+    @Test
+    fun aLaterBusIsNotTakenEvenAfterTheRidersOwnBusWasSeenLeaving() {
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(-10, along = 0.0)))
+        detector.confirmBoardedByUser(at(0))
+        assertEquals(BUS, detector.snapshot(at(0)).trackedVehicleId)
+
+        detector.onBusReports(listOf(report(60, along = 600.0), report(60, along = 0.0, id = "LATER-BUS")))
+        assertEquals(BUS, detector.snapshot(at(60)).trackedVehicleId)
+    }
+
+    @Test
+    fun answeringTheQuestionAboutANamedBusFollowsThatBus() {
+        // The question comes up 40 s after the bus has left, by which time it
+        // is well down the road; "yes" is still about that bus.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0)))
+        detector.snapshot(at(0))
+        detector.onBusReports(listOf(report(20, along = 150.0)))
+        assertTrue(detector.snapshot(at(20)).boardingCheckId != 0L)
+        detector.onBusReports(listOf(report(60, along = 700.0), report(60, along = 0.0, id = "OTHER")))
+        assertTrue(detector.snapshot(at(60)).boardingPromptDue)
+        detector.confirmBoardedByUser(at(70))
+
+        val ride = detector.snapshot(at(70))
+        assertEquals(BUS, ride.trackedVehicleId)
+        assertEquals(1, ride.progressStopIndex)
+        assertTrue(ride.hasRouteValidProgress)
+    }
+
+    @Test
+    fun aQuestionThatHasLapsedNamesNoBus() {
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0)))
+        detector.snapshot(at(0))
+        detector.onBusReports(listOf(report(20, along = 150.0)))
+        assertTrue(detector.snapshot(at(20)).boardingCheckId != 0L)
+        detector.onBusReports(listOf(report(330, along = 2_400.0)))
+        // Not snapshotted in between, so the question was never retired.
+        detector.confirmBoardedByUser(at(330))
+
+        assertUnidentified(detector.snapshot(at(330)))
+    }
+
+    @Test
+    fun aVehicleBackAfterALongSilenceDidNotJustLeaveTheStop() {
+        for ((silenceSeconds, asked) in listOf(180L to true, 181L to false)) {
             val detector = newDetector()
             detector.onBusReports(listOf(report(0, along = 0.0)))
-            detector.snapshot(at(0))
-            detector.onBusReports(listOf(report(20, along = along)))
-            assertTrue(detector.snapshot(at(20)).boardingCheckId != 0L)
-            detector.confirmBoardedByUser(at(20))
+            assertEquals(0L, detector.snapshot(at(0)).boardingCheckId)
+            detector.onBusReports(listOf(report(silenceSeconds, along = 2_400.0)))
 
-            val expected = BUS.takeIf { along < 250.0 }
             assertEquals(
-                "a pending question cannot bypass the distance bound",
-                expected,
-                detector.snapshot(at(20)).trackedVehicleId,
+                "a bus last seen at the stop $silenceSeconds s ago",
+                asked,
+                detector.snapshot(at(silenceSeconds)).boardingCheckId != 0L,
             )
         }
     }
 
     @Test
-    fun atStopEvidenceExpiresAfterNinetySeconds() {
+    fun aRidePickedBackUpDoesNotAdoptTheBusNowAtTheBoardingStop() {
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(-10, along = 0.0, id = "NEXT-BUS")))
+        detector.resumeConfirmedRide()
+
+        assertUnidentified(detector.snapshot(at(0)))
+        detector.onBusReports(listOf(report(20, along = 100.0, id = "NEXT-BUS")))
+        assertUnidentified(detector.snapshot(at(20)))
+
+        // The rider's own position is what finds their bus again.
+        detector.onBusReports(listOf(report(40, along = 1_400.0)))
+        detector.onUserLocation(RideGeoPoint(latitude(1_500.0), 120.6, at(40), accuracyMeters = 10f))
+        assertEquals(BUS, detector.snapshot(at(40)).trackedVehicleId)
+    }
+
+    @Test
+    fun atStopEvidenceMustBeFromTheNinetySecondsBeforeConfirming() {
         for (seconds in listOf(90L, 91L)) {
             val detector = newDetector()
             detector.onBusReports(listOf(report(0, along = 0.0)))
             detector.snapshot(at(0))
-            detector.onBusReports(listOf(report(seconds, along = 200.0)))
-            detector.snapshot(at(seconds))
+            detector.onBusReports(listOf(report(seconds - 5, along = 100.0)))
             detector.confirmBoardedByUser(at(seconds))
 
             assertEquals(BUS.takeIf { seconds == 90L }, detector.snapshot(at(seconds)).trackedVehicleId)
@@ -125,7 +201,8 @@ class TripRideDetectorManualBoardingTest {
         for (seconds in listOf(120L, 121L)) {
             val detector = newDetector()
             detector.confirmBoardedByUser(at(0))
-            detector.onBusReports(listOf(report(seconds, along = 0.0)))
+            // Made at the stop before the rider confirmed, delivered late.
+            detector.onBusReports(listOf(report(-10, along = 0.0).copy(receivedAtMs = at(seconds))))
             val expected = BUS.takeIf { seconds == 120L }
             assertEquals(expected, detector.snapshot(at(seconds)).trackedVehicleId)
             detector.confirmBoardedByUser(at(seconds + 1))
@@ -182,19 +259,6 @@ class TripRideDetectorManualBoardingTest {
         detector.confirmBoardedByUser(at(20))
 
         assertEquals(BUS, detector.snapshot(at(20)).trackedVehicleId)
-    }
-
-    @Test
-    fun anExpiredDepartureQuestionCannotDisambiguateFreshVehicles() {
-        val detector = newDetector()
-        detector.onBusReports(listOf(report(0, along = 0.0)))
-        detector.snapshot(at(0))
-        detector.onBusReports(listOf(report(20, along = 150.0)))
-        assertTrue(detector.snapshot(at(20)).boardingCheckId != 0L)
-        detector.onBusReports(listOf(report(111, along = 0.0), report(111, along = 0.0, id = "OTHER")))
-        detector.confirmBoardedByUser(at(111))
-
-        assertUnidentified(detector.snapshot(at(111)))
     }
 
     private fun assertUnidentified(ride: RideSnapshot) {

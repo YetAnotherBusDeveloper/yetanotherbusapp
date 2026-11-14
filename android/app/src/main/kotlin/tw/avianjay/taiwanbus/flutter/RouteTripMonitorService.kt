@@ -48,8 +48,10 @@ class RouteTripMonitorService : Service() {
 
     @Volatile
     private var session: TrackingSession? = null
+    @Volatile
     private var appInForeground = true
     private var foregroundStarted = false
+    @Volatile
     private var latestLocation: Location? = null
 
     /**
@@ -309,8 +311,9 @@ class RouteTripMonitorService : Service() {
                         createDetector(parsedSession).also { created ->
                             if (continuesBoardedRide) {
                                 // Choosing where to get off, in answer to "you
-                                // have boarded", is the rider confirming it.
-                                created.confirmBoardedByUser(startedAtMs)
+                                // have boarded", is the rider confirming it —
+                                // but of a ride that began some stops back.
+                                created.resumeConfirmedRide()
                             }
                             detector = created
                             latestRide = RideSnapshot()

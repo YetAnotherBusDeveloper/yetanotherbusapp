@@ -97,7 +97,8 @@ internal class TripRideDetector(
 
     private val userTrack = ArrayDeque<UserSample>()
     private val busTracks = LinkedHashMap<String, ArrayDeque<BusSample>>()
-    private val vehiclesSeenBeforeBoardingStop = HashSet<String>()
+    /** Vehicles last seen short of the boarding stop, with when that report arrived. */
+    private val seenBeforeBoardingStopAt = HashMap<String, Long>()
 
     private val explicitBoardingIndex = indexOfStop(boardingStopId)
     private var anchoredBoardingIndex = -1
@@ -240,6 +241,13 @@ internal class TripRideDetector(
 
     fun confirmBoardedByUser(nowMs: Long) {
         val identifiedVehicle = trackedVehicleId.takeIf { boarded }
+        // A question that names a bus is about that bus: it was watched coming
+        // up to the stop and leaving it, and "yes" is the rider's answer to
+        // exactly that. Nothing seen afterwards can be tied to the ride as
+        // firmly, however near the stop it is.
+        val askedAbout = pendingCheckVehicleId.takeIf {
+            pendingCheckSinceMs != 0L && nowMs - pendingCheckSinceMs in 0L..BOARDING_CHECK_MAX_AGE_MS
+        }
         if (!boarded || evidence != BoardingEvidence.USER_CONFIRMED) {
             manualConfirmationAtMs = nowMs
             manualVehicleAmbiguous = false
@@ -249,7 +257,23 @@ internal class TripRideDetector(
         rejectedAt.clear()
         // Confirming the ride does not confirm a plate. An already identified
         // vehicle remains the ride even if another bus is nearer the stop now.
-        trackedVehicleId = identifiedVehicle ?: identifyBoardingVehicle(nowMs)
+        trackedVehicleId = identifiedVehicle ?: askedAbout ?: identifyBoardingVehicle(nowMs)
+        clearPendingCheck()
+    }
+
+    /**
+     * Takes up a ride the rider confirmed earlier, on a detector built since.
+     *
+     * The confirmation was given some way back along the route, so nothing at
+     * the boarding stop now has anything to do with it: the vehicle stays
+     * unknown until the rider's own position picks it out.
+     */
+    fun resumeConfirmedRide() {
+        boarded = true
+        evidence = BoardingEvidence.USER_CONFIRMED
+        trackedVehicleId = null
+        manualConfirmationAtMs = null
+        manualVehicleAmbiguous = false
         clearPendingCheck()
     }
 
@@ -550,11 +574,14 @@ internal class TripRideDetector(
             }
             val offset = vehicle.alongMeters - boardingAlong
             if (offset <= AT_STOP_MARGIN_METERS) {
-                vehiclesSeenBeforeBoardingStop += vehicle.vehicleId
-            } else if (offset > LEFT_STOP_MARGIN_METERS &&
-                vehiclesSeenBeforeBoardingStop.remove(vehicle.vehicleId)
-            ) {
-                registerDeparture(vehicle.vehicleId, nowMs)
+                seenBeforeBoardingStopAt[vehicle.vehicleId] = vehicle.receivedAtMs
+            } else if (offset > LEFT_STOP_MARGIN_METERS) {
+                val seenAt = seenBeforeBoardingStopAt.remove(vehicle.vehicleId) ?: return@forEach
+                // A vehicle that went quiet short of the stop and turns up past
+                // it much later left long ago; nobody is boarding it now.
+                if (vehicle.receivedAtMs - seenAt <= DEPARTURE_MAX_REPORT_GAP_MS) {
+                    registerDeparture(vehicle.vehicleId, nowMs)
+                }
             }
         }
     }
@@ -699,12 +726,16 @@ internal class TripRideDetector(
     /**
      * Associates a manual confirmation with a vehicle, not just a route.
      *
-     * The bus must have a recent, unbroken run on this direction and route
-     * containing a fix physically at the boarding stop, and still be at most
-     * 250 m ahead. Projection alone would clamp a bus before the first stop to
-     * zero progress, or put a bus on a parallel street level with the stop.
-     * Identification may arrive after confirmation, but only for two minutes:
-     * otherwise a later bus could be mistaken for the one already ridden.
+     * The bus must have an unbroken run on this direction and route containing
+     * a fix physically at the boarding stop, and still be at most 250 m ahead.
+     * Projection alone would clamp a bus before the first stop to zero
+     * progress, or put a bus on a parallel street level with the stop.
+     *
+     * That fix must have been made in the minute and a half up to the moment
+     * the rider confirmed, by the vehicle's own clock. The report carrying it
+     * can reach the app afterwards — the feed runs half a minute behind — which
+     * is what the two-minute window is for. A bus that pulls in after the
+     * rider said they were already on one is the next bus, whenever it is seen.
      */
     private fun identifyBoardingVehicle(nowMs: Long): String? {
         val confirmedAt = manualConfirmationAtMs ?: return null
@@ -730,16 +761,12 @@ internal class TripRideDetector(
                 return@filter false
             }
             track.reversed().takeWhile { it.samePath && it.onRoute }.any { sample ->
-                nowMs - sample.receivedAtMs in 0L..MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS &&
+                confirmedAt - sample.gpsTimeMs in 0L..MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS &&
                     abs(sample.alongMeters - boardingAlong) <= AT_STOP_MARGIN_METERS &&
                     line.metersToStop(sample.latitude, sample.longitude, boardingStop) <=
                     MANUAL_AT_STOP_RADIUS_METERS
             }
         }
-        val namedDeparture = pendingCheckVehicleId.takeIf {
-            nowMs - pendingCheckSinceMs in 0L..MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS
-        }
-        candidates.firstOrNull { it.vehicleId == namedDeparture }?.let { return it.vehicleId }
         if (candidates.size > 1) {
             // One candidate later leaving the distance bound does not prove
             // that the rider took the other one. A usable phone fix can still
@@ -755,7 +782,7 @@ internal class TripRideDetector(
             if (nowMs - last.receivedAtMs > BUS_REPORT_STALE_MS) {
                 return@mapNotNull null
             }
-            LiveVehicle(vehicleId, last.alongMeters, last.samePath, last.onRoute)
+            LiveVehicle(vehicleId, last.alongMeters, last.samePath, last.onRoute, last.receivedAtMs)
         }
     }
 
@@ -796,6 +823,7 @@ internal class TripRideDetector(
         }
         busTracks.entries.removeAll { it.value.isEmpty() }
         rejectedAt.entries.removeAll { nowMs - it.value > REJECTED_VEHICLE_TTL_MS }
+        seenBeforeBoardingStopAt.keys.retainAll(busTracks.keys)
     }
 
     private fun indexOfStop(stopId: Int?): Int {
@@ -826,6 +854,7 @@ internal class TripRideDetector(
         val alongMeters: Double,
         val samePath: Boolean,
         val onRoute: Boolean,
+        val receivedAtMs: Long,
     )
 
     private data class CoMovementPair(
@@ -872,6 +901,7 @@ internal class TripRideDetector(
         const val ON_ROUTE_SEGMENT_SHARE = 0.6
         const val AT_STOP_MARGIN_METERS = 40.0
         const val LEFT_STOP_MARGIN_METERS = 120.0
+        const val DEPARTURE_MAX_REPORT_GAP_MS = 180_000L
         const val MANUAL_AT_STOP_RADIUS_METERS = 80.0
         const val MANUAL_VEHICLE_MAX_AHEAD_METERS = 250.0
         const val MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS = 90_000L

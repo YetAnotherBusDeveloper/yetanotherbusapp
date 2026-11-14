@@ -403,13 +403,14 @@ class RouteTripMonitorServiceTest {
 
     @Test
     fun boardingWithoutADestinationAsksForOneAndPicksTheRideBackUp() {
-        val withBoardingStop = threeStopSession() + mapOf(
+        val route = threeStopSession() + mapOf("routeId" to "TXG1")
+        val withBoardingStop = route + mapOf(
             "boardingStopId" to 1,
             "boardingStopName" to "一站",
         )
         // With and without a boarding stop chosen: both used to be reported as
         // "still waiting" however the ride had been confirmed.
-        for (waiting in listOf(withBoardingStop, threeStopSession())) {
+        for (waiting in listOf(withBoardingStop, route)) {
             service.onStartCommand(startIntent(waiting), 0, 1)
             service.onStartCommand(command("MARK_BOARDED"), 0, 2)
             assertTrue(ride(service).hasBoarded)
@@ -422,7 +423,17 @@ class RouteTripMonitorServiceTest {
             assertNotNull("the rider must be asked where they get off", prompt)
             assertEquals("已偵測上車", prompt.extras.getString(Notification.EXTRA_TITLE))
 
-            // The rider answers by choosing a stop.
+            // The rider answers by choosing a stop. By now they are stops away,
+            // and the bus that called at the boarding stop half a minute ago
+            // is someone else's.
+            val calledAt = nowSeconds() - 30
+            backend = { path ->
+                if (path.endsWith("/realtime/buses")) {
+                    busFeed("NEXT-BUS", stopsOf(waiting).first(), pathId = 0, gpsTimeSeconds = calledAt)
+                } else {
+                    null
+                }
+            }
             service.onStartCommand(
                 startIntent(waiting + mapOf("destinationStopId" to 3, "destinationStopName" to "三站")),
                 0,
@@ -432,6 +443,14 @@ class RouteTripMonitorServiceTest {
             assertTrue("choosing a destination continues the same ride", ride(service).hasBoarded)
             assertEquals(BoardingEvidence.USER_CONFIRMED, ride(service).evidence)
             assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+
+            fetchLiveData()
+            assertTrue(ride(service).hasBoarded)
+            assertNull(
+                "a bus at the boarding stop now is not the one boarded back then",
+                ride(service).trackedVehicleId,
+            )
+            backend = { null }
 
             service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 4)
         }
@@ -800,7 +819,7 @@ class RouteTripMonitorServiceTest {
             "destinationStopId" to 3,
         )
         var busStop = stopsOf(trip).first()
-        var gpsTime = 1_700_000_000L
+        var gpsTime = nowSeconds()
         backend = { path ->
             when (path) {
                 "/api/v1/routes/TXG1/realtime/buses" -> "[]"
@@ -956,13 +975,16 @@ class RouteTripMonitorServiceTest {
             "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 4, "stops" to stops,
         )
         var actualStop: Map<String, Any?>? = null
-        var gpsTime = 1_700_000_000L
+        var gpsTime = nowSeconds()
+        var actualGpsTime = gpsTime
         backend = { path ->
             if (path.endsWith("/realtime/buses")) {
                 val reports = org.json.JSONArray(busFeed("EARLIER", stops[5], pathId = 0, gpsTimeSeconds = gpsTime))
                 actualStop?.let { stop ->
-                    reports.put(org.json.JSONArray(busFeed("ACTUAL", stop, pathId = 0, gpsTimeSeconds = gpsTime))
-                        .getJSONObject(0))
+                    reports.put(
+                        org.json.JSONArray(busFeed("ACTUAL", stop, pathId = 0, gpsTimeSeconds = actualGpsTime))
+                            .getJSONObject(0),
+                    )
                 }
                 reports.toString()
             } else {
@@ -980,6 +1002,8 @@ class RouteTripMonitorServiceTest {
         assertEquals(0L, ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs"))
         assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
 
+        // The feed catches up half a minute later, with the fix the rider's
+        // bus made at the stop just before they confirmed.
         actualStop = stops.first()
         gpsTime += 30
         ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
@@ -989,6 +1013,7 @@ class RouteTripMonitorServiceTest {
 
         actualStop = stops[1]
         gpsTime += 30
+        actualGpsTime = gpsTime
         ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
         refreshAndDeliverAlerts()
         assertEquals("ACTUAL", ride(service).trackedVehicleId)
@@ -1033,7 +1058,7 @@ class RouteTripMonitorServiceTest {
             "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 2,
         )
         var busStop = stopsOf(trip).first()
-        var gpsTime = 1_700_000_000L
+        var gpsTime = nowSeconds()
         backend = { path ->
             if (path.endsWith("/realtime/buses")) {
                 busFeed("TRACKED-001", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
@@ -1165,11 +1190,14 @@ class RouteTripMonitorServiceTest {
         """{"paths":[{"stops":[{"stopid":"$stopId","eta":$eta,"etas":[{"plate":"$plate","eta":$eta}]}]}]}"""
 
     /** One vehicle at [stop]; direction is unknown unless supplied. */
+    /** Vehicles stamp their reports with the same clock the phone runs on. */
+    private fun nowSeconds() = System.currentTimeMillis() / 1000
+
     private fun busFeed(
         vehicleId: String,
         stop: Map<String, Any?>,
         pathId: Int? = null,
-        gpsTimeSeconds: Long = 1_700_000_000L,
+        gpsTimeSeconds: Long = nowSeconds(),
     ) = """[{"id":"$vehicleId","direction":$pathId,"lat":${stop["lat"]},"lon":${stop["lon"]},"time":$gpsTimeSeconds}]"""
 
     /** One refresh as the service runs it, after anything it already queued. */
