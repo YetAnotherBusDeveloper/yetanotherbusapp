@@ -4959,6 +4959,15 @@ class BusRepository {
     return (normalized == null || normalized.isEmpty) ? null : normalized;
   }
 
+  /// Parses a stop id into the `int` this app keys stops by.
+  ///
+  /// Stop ids are 64-bit in the feeds (高雄's look like `100100128221`), so
+  /// this keeps the full value rather than narrowing it, and every Dart-side
+  /// map is keyed with the same result. The native side folds whatever it is
+  /// given into a positive 32-bit key (`foldStopId` in StopIdCodec.kt); the two
+  /// never need to agree on the same number, only to be self-consistent.
+  ///
+  /// Some providers use non-numeric ids (`101-11009`); those hash.
   int _parseStopId(Object? raw) {
     if (raw is num) {
       return raw.toInt();

@@ -116,6 +116,7 @@ internal fun parseTripMonitorLiveStop(stop: JSONObject): LiveStopState {
         message = text(stop, "message"),
         vehicleIds = (buses + etas.mapNotNull { it.vehicleId }).distinct(),
         etaEntries = etas,
+        busesAtStop = buses,
     )
 }
 
@@ -131,6 +132,7 @@ private fun mergeStops(stops: List<LiveStopState>): LiveStopState {
         message = if (earliest == null) stops.firstNotNullOfOrNull { it.message } else null,
         vehicleIds = (entries.mapNotNull { it.vehicleId } + stops.flatMap { it.vehicleIds }).distinct(),
         etaEntries = entries,
+        busesAtStop = stops.flatMap { it.busesAtStop }.distinct(),
     )
 }
 
@@ -139,15 +141,7 @@ private fun JSONArray?.objects(): List<JSONObject> =
 
 private fun integer(raw: Any?): Int? = if (raw is Number) raw.toInt() else raw?.toString()?.trim()?.toIntOrNull()
 
-internal fun stopId(raw: Any?): Int {
-    if (raw is Number) return raw.toInt()
-    val value = raw?.takeUnless { it == JSONObject.NULL }?.toString()?.trim().orEmpty()
-    if (value.isEmpty()) return 0
-    value.toIntOrNull()?.let { return it }
-    var hash = 17
-    for (char in value) hash = (hash * 31 + char.code) and 0x7fffffff
-    return hash
-}
+internal fun stopId(raw: Any?): Int = foldStopId(raw)
 
 private fun text(json: JSONObject, key: String): String? = json.opt(key)
     ?.takeUnless { it == JSONObject.NULL }?.toString()?.trim()

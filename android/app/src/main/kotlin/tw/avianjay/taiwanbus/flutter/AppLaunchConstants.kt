@@ -26,9 +26,9 @@ object AppLaunchConstants {
         routeKey: Int,
         routeId: String? = null,
         pathId: Int? = null,
-        stopId: Int? = null,
+        stopId: Long? = null,
         destinationPathId: Int? = null,
-        destinationStopId: Int? = null,
+        destinationStopId: Long? = null,
     ): Intent {
         return Intent(context, MainActivity::class.java).apply {
             putExtra(EXTRA_TARGET, TARGET_ROUTE_DETAIL)
@@ -100,9 +100,12 @@ object AppLaunchConstants {
                 if (intent.hasExtra(EXTRA_PATH_ID)) {
                     payload["pathId"] = intent.getIntExtra(EXTRA_PATH_ID, 0)
                 }
-                if (intent.hasExtra(EXTRA_STOP_ID)) {
-                    payload["stopId"] = intent.getIntExtra(EXTRA_STOP_ID, 0)
-                }
+                // Stop ids are sent at full width, because Dart keys stops by
+                // the raw feed id: 高雄's exceed Int, and narrowing them here
+                // would name a different stop than the app's models hold. The
+                // native-only fold (`foldStopId`) is for joining the live
+                // feeds, not for identifying a stop to Flutter.
+                stopIdExtra(intent, EXTRA_STOP_ID)?.let { payload["stopId"] = it }
                 val destinationPathId = intent.getIntExtra(
                     EXTRA_DESTINATION_PATH_ID,
                     Int.MIN_VALUE,
@@ -110,13 +113,8 @@ object AppLaunchConstants {
                 if (destinationPathId != Int.MIN_VALUE) {
                     payload["destinationPathId"] = destinationPathId
                 }
-                val destinationStopId = intent.getIntExtra(
-                    EXTRA_DESTINATION_STOP_ID,
-                    Int.MIN_VALUE,
-                )
-                if (destinationStopId != Int.MIN_VALUE) {
-                    payload["destinationStopId"] = destinationStopId
-                }
+                stopIdExtra(intent, EXTRA_DESTINATION_STOP_ID)
+                    ?.let { payload["destinationStopId"] = it }
                 payload
             }
 
@@ -143,6 +141,19 @@ object AppLaunchConstants {
 
             else -> null
         }
+    }
+
+    /**
+     * Reads a stop id extra as a `Long` whichever width it was stored at.
+     *
+     * New intents store a `Long`. Shortcuts pinned to the home screen before
+     * that keep the `Int` they were created with for as long as they exist, and
+     * `getLongExtra` answers its default for an extra of another type — which
+     * would quietly open those shortcuts with no stop selected.
+     */
+    @Suppress("DEPRECATION")
+    private fun stopIdExtra(intent: Intent, key: String): Long? {
+        return (intent.extras?.get(key) as? Number)?.toLong()
     }
 
     private fun extractAuthCallbackPayload(uri: android.net.Uri?): Map<String, Any?>? {

@@ -390,7 +390,8 @@ object FavoriteGroupWidgetSupport {
         )
     }
 
-    private fun createItemPendingIntent(
+    /** The tap intent for one widget row. Internal so a test can read it back. */
+    internal fun createItemPendingIntent(
         context: Context,
         item: FavoriteWidgetItem,
     ): PendingIntent {
@@ -409,9 +410,12 @@ object FavoriteGroupWidgetSupport {
                 routeKey = item.routeKey,
                 routeId = item.routeId,
                 pathId = item.pathId.takeIf { item.type == "boarding" },
-                stopId = item.stopId.takeIf { item.type == "boarding" },
+                // The full-width id, not the folded one: Flutter compares this
+                // against the ids its own stop models carry, and a folded
+                // 高雄 id matches nothing there.
+                stopId = item.launchStopId.takeIf { item.type == "boarding" },
                 destinationPathId = item.destinationPathId,
-                destinationStopId = item.destinationStopId,
+                destinationStopId = item.launchDestinationStopId,
             ).apply {
                 data = Uri.parse(
                     "yabus://route/${item.provider}/${item.routeKey}/${Uri.encode(item.routeId.orEmpty())}",
@@ -434,9 +438,14 @@ object FavoriteGroupWidgetSupport {
         val raw = runCatching {
             preferences.getString(FAVORITE_GROUPS_KEY, null)
                 ?: preferences.getString(FAVORITE_GROUPS_FALLBACK_KEY, null)
-        }.getOrNull() ?: return emptyMap()
+        }.getOrNull()
+        return parseFavoriteGroups(raw)
+    }
+
+    /** Reads the favourites Dart saved. Internal so a test can feed it a config. */
+    internal fun parseFavoriteGroups(raw: String?): Map<String, List<FavoriteWidgetItem>> {
         val root = try {
-            JSONObject(raw)
+            JSONObject(raw ?: return emptyMap())
         } catch (_: Exception) {
             return emptyMap()
         }
@@ -449,7 +458,13 @@ object FavoriteGroupWidgetSupport {
                 val item = groupArray.optJSONObject(index) ?: continue
                 val type = item.optString("type", "boarding").trim().ifEmpty { "boarding" }
                 val routeKey = item.optInt("routeKey", 0)
-                val stopId = item.optInt("stopId", 0)
+                // The config is written by Dart with the id as Dart holds it,
+                // which exceeds Int for 高雄. It is needed twice, as two
+                // different numbers: folded the way the live feed is, for the
+                // ETA lookup; and at full width, for the tap that launches
+                // back into Flutter.
+                val dartStopId = item.opt("stopId")
+                val stopId = foldStopId(dartStopId)
                 val routeId = item.optString("routeId", "").trim().takeIf { it.isNotEmpty() }
                 val stationId = item.optString("stationId", "").trim()
                 val valid = when (type) {
@@ -461,19 +476,15 @@ object FavoriteGroupWidgetSupport {
                 if (!valid) {
                     continue
                 }
-                val destinationStopId = item.optInt("destinationStopId", 0)
-                    .takeIf { it > 0 }
-                val destinationPathId = if (destinationStopId == null) {
-                    null
-                } else {
-                    item.optInt("destinationPathId", item.optInt("pathId", 0))
-                }
+                val dartDestinationStopId = item.opt("destinationStopId")
+                val hasDestination = foldStopId(dartDestinationStopId) > 0
                 groupItems += FavoriteWidgetItem(
                     type = type,
                     provider = item.optString("provider", "twn"),
                     routeKey = routeKey,
                     pathId = item.optInt("pathId", 0),
                     stopId = stopId,
+                    launchStopId = launchStopId(dartStopId).takeIf { stopId > 0 },
                     routeId = routeId,
                     routeName = item.optString("routeName", ""),
                     routeDescription = item.optString("routeDescription", "")
@@ -482,8 +493,13 @@ object FavoriteGroupWidgetSupport {
                     stopName = item.optString("stopName", ""),
                     stationId = stationId,
                     stationName = item.optString("stationName", ""),
-                    destinationPathId = destinationPathId,
-                    destinationStopId = destinationStopId,
+                    destinationPathId = if (hasDestination) {
+                        item.optInt("destinationPathId", item.optInt("pathId", 0))
+                    } else {
+                        null
+                    },
+                    launchDestinationStopId = launchStopId(dartDestinationStopId)
+                        .takeIf { hasDestination },
                     destinationStopName = item.optString("destinationStopName", "")
                         .trim()
                         .takeIf { it.isNotEmpty() },
@@ -690,21 +706,7 @@ object FavoriteGroupWidgetSupport {
         return result
     }
 
-    private fun parseStopId(raw: Any?): Int {
-        if (raw is Number) {
-            return raw.toInt()
-        }
-        val text = raw?.toString()?.trim().orEmpty()
-        val parsed = text.toIntOrNull()
-        if (parsed != null) {
-            return parsed
-        }
-        var hash = 17
-        for (char in text) {
-            hash = (hash * 31 + char.code) and 0x7fffffff
-        }
-        return hash
-    }
+    private fun parseStopId(raw: Any?): Int = foldStopId(raw)
 
     private fun toIntOrNull(raw: Any?): Int? {
         return when (raw) {
@@ -807,7 +809,10 @@ data class FavoriteWidgetItem(
     val provider: String,
     val routeKey: Int,
     val pathId: Int,
+    /** Folded, as the live feeds are: only usable for looking up ETAs. */
     val stopId: Int,
+    /** Full-width, as Flutter holds it: what a tap is launched with. */
+    val launchStopId: Long?,
     val routeId: String?,
     val routeName: String,
     val routeDescription: String?,
@@ -815,7 +820,7 @@ data class FavoriteWidgetItem(
     val stationId: String,
     val stationName: String,
     val destinationPathId: Int?,
-    val destinationStopId: Int?,
+    val launchDestinationStopId: Long?,
     val destinationStopName: String?,
 ) {
     val identity: String
