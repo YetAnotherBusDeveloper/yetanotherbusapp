@@ -700,6 +700,38 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun twoBusesTheStopFeedPlacesAtTheStopLeaveItsRolloverUnnamed() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        fun atStop(vararg plates: String) = """{"paths":[{"stops":[{"stopid":"1","eta":0,"buses":[""" +
+            plates.joinToString(",") { """{"id":"$it"}""" } + """]}]}]}"""
+        // Only A at the stop; then A and B; then the ETA rolls over.
+        var stopFeed = atStop("BUS-A")
+        backend = { path -> if (path.endsWith("/realtime/buses")) "[]" else stopFeed }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        stopFeed = atStop("BUS-A", "BUS-B")
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        stopFeed = stopFeed(eta = 600, plate = "CCC-003")
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertTrue(ride(service).boardingCheckId != 0L)
+
+        ReflectionHelpers.setField(
+            ReflectionHelpers.getField<Any>(service, "detector"),
+            "pendingCheckSinceMs",
+            System.currentTimeMillis() - 45_000L,
+        )
+        refreshAndDeliverAlerts()
+        service.onStartCommand(buttonIntent(notificationId = 6023, title = "我已上車"), 0, 2)
+
+        assertTrue(ride(service).hasBoarded)
+        assertNull("either of the two may be the bus that left", ride(service).trackedVehicleId)
+    }
+
+    @Test
     fun aFailingStopFeedDoesNotSilenceTheVehicleFeed() {
         val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
         backend = { path ->

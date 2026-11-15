@@ -130,7 +130,8 @@ internal class TripRideDetector(
     private var declinedRideAtMs = 0L
 
     private var etaArrivingAtMs = 0L
-    private var etaArrivingVehicleId: String? = null
+    /** Every vehicle the stop feed has placed at the stop since the ETA last reached zero. */
+    private val etaArrivingVehicles = HashSet<String>()
 
     /**
      * The pending "did you get on?" question: its id, and every bus that has
@@ -234,19 +235,20 @@ internal class TripRideDetector(
         etaSeconds: Int?,
         arriving: Boolean,
         nowMs: Long,
-        arrivingVehicleId: String? = null,
+        arrivingVehicleIds: Collection<String> = emptyList(),
     ) {
         if (arriving || (etaSeconds != null && etaSeconds <= ETA_ARRIVING_SECONDS)) {
             if (etaArrivingAtMs == 0L || nowMs - etaArrivingAtMs > ETA_ROLLOVER_WINDOW_MS) {
-                etaArrivingVehicleId = null
+                etaArrivingVehicles.clear()
             }
             etaArrivingAtMs = nowMs
             // Where the stop feed says which bus is standing there, the
             // rollover that follows is that bus leaving — the one thing that
-            // ties an ETA departure to a vehicle.
-            if (arrivingVehicleId != null) {
-                etaArrivingVehicleId = arrivingVehicleId
-            }
+            // ties an ETA departure to a vehicle. Only while it has been the
+            // one bus there throughout: once a second has been at the stop,
+            // together with it or after it, the rollover is either of them
+            // leaving, and may not be the first of them to have left.
+            etaArrivingVehicles += arrivingVehicleIds
             return
         }
         // Once the estimate reaches zero it either jumps to the next bus or
@@ -255,9 +257,9 @@ internal class TripRideDetector(
             nowMs - etaArrivingAtMs <= ETA_ROLLOVER_WINDOW_MS &&
             (etaSeconds == null || etaSeconds >= ETA_ROLLOVER_SECONDS)
         if (rolledOver) {
-            val departed = etaArrivingVehicleId
+            val departed = etaArrivingVehicles.singleOrNull()
             etaArrivingAtMs = 0L
-            etaArrivingVehicleId = null
+            etaArrivingVehicles.clear()
             registerDeparture(vehicleId = departed, nowMs = nowMs, byEta = true)
         }
     }

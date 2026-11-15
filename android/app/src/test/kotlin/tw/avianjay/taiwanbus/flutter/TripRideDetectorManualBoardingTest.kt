@@ -557,14 +557,14 @@ class TripRideDetectorManualBoardingTest {
         fun answer(atStop: String?, aSecondRollover: Boolean = false): RideSnapshot {
             val detector = newDetector()
             detector.onBusReports(listOf(report(0, along = 0.0)))
-            detector.onBoardingStopEta(0, arriving = true, nowMs = at(0), arrivingVehicleId = atStop)
+            detector.onBoardingStopEta(0, arriving = true, nowMs = at(0), arrivingVehicleIds = listOfNotNull(atStop))
             detector.snapshot(at(0))
             detector.onBusReports(listOf(report(20, along = 150.0)))
             val asked = detector.snapshot(at(20)).boardingCheckId
             assertTrue(asked != 0L)
             detector.onBoardingStopEta(600, arriving = false, nowMs = at(50))
             if (aSecondRollover) {
-                detector.onBoardingStopEta(0, arriving = true, nowMs = at(60), arrivingVehicleId = atStop)
+                detector.onBoardingStopEta(0, arriving = true, nowMs = at(60), arrivingVehicleIds = listOfNotNull(atStop))
                 detector.onBoardingStopEta(600, arriving = false, nowMs = at(80))
             }
             detector.onBusReports(listOf(report(80, along = 900.0)))
@@ -581,6 +581,45 @@ class TripRideDetectorManualBoardingTest {
         // It named none. The rider may have boarded a B the app never saw.
         assertUnidentified(answer(atStop = null))
         assertUnidentified(answer(atStop = null, aSecondRollover = true))
+    }
+
+    @Test
+    fun aPlateNoLongerAloneAtTheStopDoesNotNameTheRollover() {
+        // No phone fix and no position feed. The stop feed places A at the
+        // stop, then [later], and then the ETA rolls over.
+        fun answer(later: List<String>): RideSnapshot {
+            val detector = newDetector()
+            detector.onBoardingStopEta(0, arriving = true, nowMs = at(0), arrivingVehicleIds = listOf("BUS-A"))
+            detector.onBoardingStopEta(0, arriving = true, nowMs = at(20), arrivingVehicleIds = later)
+            detector.onBoardingStopEta(600, arriving = false, nowMs = at(40))
+            val asked = detector.snapshot(at(85))
+            assertTrue(asked.boardingPromptDue)
+            detector.confirmBoardedByUser(at(90), answeredCheckId = asked.boardingCheckId)
+            return detector.snapshot(at(90))
+        }
+        // A and B together, then one of them leaves: the rider may be on B.
+        assertUnidentified(answer(listOf("BUS-A", "BUS-B")))
+        // B alone: A went unreported, and the rider may be on A.
+        assertUnidentified(answer(listOf("BUS-B")))
+        // Still A, or an update that carries no plate at all.
+        assertEquals("BUS-A", answer(listOf("BUS-A")).trackedVehicleId)
+        assertEquals("BUS-A", answer(emptyList()).trackedVehicleId)
+    }
+
+    @Test
+    fun theNextArrivalStartsWithNoPlatesFromTheLast() {
+        val detector = newDetector()
+        detector.onBoardingStopEta(0, arriving = true, nowMs = at(0), arrivingVehicleIds = listOf("BUS-A"))
+        detector.onBoardingStopEta(600, arriving = false, nowMs = at(20))
+        val first = detector.snapshot(at(65))
+        detector.declineBoarding(at(70), answeredCheckId = first.boardingCheckId)
+        detector.onBoardingStopEta(0, arriving = true, nowMs = at(200), arrivingVehicleIds = listOf("BUS-B"))
+        detector.onBoardingStopEta(600, arriving = false, nowMs = at(220))
+        val second = detector.snapshot(at(265))
+        assertTrue(second.boardingPromptDue)
+        detector.confirmBoardedByUser(at(270), answeredCheckId = second.boardingCheckId)
+
+        assertEquals("BUS-B", detector.snapshot(at(270)).trackedVehicleId)
     }
 
     @Test
