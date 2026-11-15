@@ -603,6 +603,63 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun theAnswerAfterTwoBusesLeftCloseTogetherFollowsNeither() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 2,
+        )
+        val stops = stopsOf(trip)
+        // Both stand at the boarding stop; A leaves, then B right behind it.
+        // The service reads the JVM wall clock, which does not move with the
+        // test's, so the reports are stamped in the minute leading up to now:
+        // a vehicle's clock must never run ahead of the phone's.
+        var busA = stops[0]
+        var busB = stops[0]
+        var gpsTime = nowSeconds() - 60
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeeds(
+                    busFeed("BUS-A", busA, pathId = 0, gpsTimeSeconds = gpsTime),
+                    busFeed("BUS-B", busB, pathId = 0, gpsTimeSeconds = gpsTime),
+                )
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        busA = stops[1]
+        gpsTime += 20
+        ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        val asked = ride(service).boardingCheckId
+        assertTrue("A leaving must raise the question", asked != 0L)
+        busA = stops[2]
+        busB = stops[1]
+        gpsTime += 20
+        ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertEquals("B leaving right behind is part of the same question", asked, ride(service).boardingCheckId)
+
+        // The question is shown 40 s after the first departure. The service
+        // reads the JVM wall clock, so that is aged instead of waited for.
+        ReflectionHelpers.setField(
+            ReflectionHelpers.getField<Any>(service, "detector"),
+            "pendingCheckSinceMs",
+            System.currentTimeMillis() - 45_000L,
+        )
+        refreshAndDeliverAlerts()
+        service.onStartCommand(buttonIntent(notificationId = 6023, title = "我已上車"), 0, 2)
+        refreshAndDeliverAlerts()
+
+        // The rider is on B. A, a stop past their destination, is not their bus.
+        assertTrue(ride(service).hasBoarded)
+        assertNull("the answer is as true of either bus", ride(service).trackedVehicleId)
+        assertNull(ride(service).passedDestinationByStops)
+        assertEquals(0L, ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs"))
+        assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+    }
+
+    @Test
     fun aFailingStopFeedDoesNotSilenceTheVehicleFeed() {
         val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
         backend = { path ->
@@ -945,10 +1002,17 @@ class RouteTripMonitorServiceTest {
         val trip = threeStopSession() + mapOf(
             "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
         )
+        // The variant's bus is at the stop before the rider confirms; the app
+        // only hears of it once the variant is known.
+        val reportedAt = nowSeconds()
         backend = { path ->
             if (path.endsWith("/realtime/buses")) {
                 requests += path
-                if (path.contains("/TXG1/")) "[]" else busFeed("VARIANT-001", stopsOf(trip).first())
+                if (path.contains("/TXG1/")) {
+                    "[]"
+                } else {
+                    busFeed("VARIANT-001", stopsOf(trip).first(), gpsTimeSeconds = reportedAt)
+                }
             } else {
                 null
             }
@@ -1255,6 +1319,10 @@ class RouteTripMonitorServiceTest {
         )
         return shadowOf(button.actionIntent).savedIntent
     }
+
+    /** Several vehicles in one response. */
+    private fun busFeeds(vararg feeds: String): String =
+        feeds.joinToString(prefix = "[", postfix = "]", separator = ",") { it.removeSurrounding("[", "]") }
 
     /** Vehicles stamp their reports with the same clock the phone runs on. */
     private fun nowSeconds() = System.currentTimeMillis() / 1000

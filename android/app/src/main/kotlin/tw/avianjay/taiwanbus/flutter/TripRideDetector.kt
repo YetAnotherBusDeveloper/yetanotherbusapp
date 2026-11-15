@@ -116,22 +116,28 @@ internal class TripRideDetector(
      * of that answer. The answer is about one bus, not about the trip: only the
      * vehicle it named is set aside, and only for [REJECTED_VEHICLE_TTL_MS], so
      * the next bus both raises the question and gets detected as normal. See
-     * [declineBoarding].
+     * [declineBoarding]. A later "I have boarded" leaves these standing: it is
+     * said of some other bus, and they are how that bus is told from these.
      */
     private val rejectedAt = HashMap<String, Long>()
     private var lastDeclineAtMs = 0L
 
     /**
-     * The departure behind the last "not yet" answer: when it was registered,
-     * and whether the bus it belonged to is still unknown because only the ETA
-     * had reported it.
+     * The departures the last "not yet" answered, kept for as long as the other
+     * feed may still report them; and when a detected ride was last turned down.
      */
-    private var declinedDepartureAtMs = 0L
-    private var declinedDepartureUnattributed = false
+    private val declinedDepartures = ArrayList<Departure>()
+    private var declinedRideAtMs = 0L
 
     private var etaArrivingAtMs = 0L
+
+    /**
+     * The pending "did you get on?" question: its id, and every bus that has
+     * left the boarding stop while it has stood. The question says only that a
+     * bus has just left, so it is about all of them.
+     */
     private var pendingCheckSinceMs = 0L
-    private var pendingCheckVehicleId: String? = null
+    private val pendingDepartures = ArrayList<Departure>()
     private var pendingCheckAnchor: UserSample? = null
 
     private val boardingIndex: Int
@@ -246,29 +252,76 @@ internal class TripRideDetector(
      * being answered, and null when nothing was asked: "I have boarded" is
      * always on offer, and a rider who uses it may never have seen a question —
      * one can be pending, about a bus that just left, before it is ever shown.
-     * That bus is not theirs for having been about to be asked about.
+     *
+     * Either way this confirms the ride, not a plate. A vehicle is named only
+     * when the feeds leave one bus the rider can be on: in answer to the
+     * question, the one bus that left while it stood ([busTheQuestionIsAbout]);
+     * unprompted, the one bus standing at the stop ([identifyBoardingVehicle]).
+     * Following the wrong bus sounds the destination reminders for a journey
+     * the rider is not making, so anything less leaves the vehicle unknown
+     * until the rider's own position picks it out.
      */
     fun confirmBoardedByUser(nowMs: Long, answeredCheckId: Long? = null) {
+        noteDepartures(nowMs)
         val identifiedVehicle = trackedVehicleId.takeIf { boarded }
-        // A question that names a bus is about that bus: it was watched coming
-        // up to the stop and leaving it, and "yes" to that very question is the
-        // rider's answer to exactly that. An answer to a question since
-        // replaced by another names nothing.
-        val askedAbout = pendingCheckVehicleId.takeIf {
-            pendingCheckSinceMs != 0L && answeredCheckId == pendingCheckSinceMs &&
-                nowMs - pendingCheckSinceMs in 0L..BOARDING_CHECK_MAX_AGE_MS
+        // An answer to a question since replaced by another names nothing.
+        val askedAbout = if (answeredCheckId != null && answeredCheckId == pendingCheckSinceMs) {
+            busTheQuestionIsAbout(nowMs)
+        } else {
+            null
         }
         if (!boarded || evidence != BoardingEvidence.USER_CONFIRMED) {
-            manualConfirmationAtMs = nowMs
-            manualVehicleAmbiguous = false
+            // Only unprompted is "I have boarded" read against what is standing
+            // at the stop; an answer names a bus through its question or not
+            // at all.
+            manualConfirmationAtMs = nowMs.takeIf { answeredCheckId == null }
+            // And not even unprompted while a bus that has left is still to be
+            // answered for: the rider may be on that one, and has not said.
+            manualVehicleAmbiguous = departuresTheQuestionCovers(nowMs).isNotEmpty()
         }
         boarded = true
         evidence = BoardingEvidence.USER_CONFIRMED
-        rejectedAt.clear()
-        // Confirming the ride does not confirm a plate. An already identified
-        // vehicle remains the ride even if another bus is nearer the stop now.
+        // An already identified vehicle remains the ride even if another bus
+        // is nearer the stop now.
         trackedVehicleId = identifiedVehicle ?: askedAbout ?: identifyBoardingVehicle(nowMs)
         clearPendingCheck()
+    }
+
+    /**
+     * Counts the buses that have left the boarding stop according to the
+     * reports received so far. What an answer means depends on that count, and
+     * it must not depend on whether a snapshot happened to be taken between
+     * the last report coming in and the rider answering.
+     */
+    private fun noteDepartures(nowMs: Long) {
+        val boardingStop = boardingIndex
+        if (boardingStop >= 0) {
+            trackDepartures(liveVehicles(nowMs), line.alongOfStop(boardingStop), nowMs)
+        }
+    }
+
+    /** The buses that have left the boarding stop while the pending question has stood. */
+    private fun departuresTheQuestionCovers(nowMs: Long): List<Departure> =
+        pendingDepartures.filter { nowMs - it.atMs in 0L..BOARDING_CHECK_MAX_AGE_MS }
+
+    /**
+     * The one bus a "yes" to the pending question can mean; null when that
+     * cannot be told.
+     *
+     * The question does not name a bus — riders do not know plates — only says
+     * that one has just left. So the answer names a vehicle when exactly one
+     * has left while the question stood, the position feed named it, and no
+     * other bus is at the stop for the rider to have boarded since. Two that
+     * left close together, or one that left as another pulled in, leave "yes"
+     * true of either.
+     */
+    private fun busTheQuestionIsAbout(nowMs: Long): String? {
+        val vehicleId = departuresTheQuestionCovers(nowMs).singleOrNull()?.vehicleId ?: return null
+        val boardingStop = boardingIndex
+        if (boardingStop < 0 || anotherBusIsBoardable(nowMs, line.alongOfStop(boardingStop), vehicleId)) {
+            return null
+        }
+        return vehicleId
     }
 
     /**
@@ -290,12 +343,13 @@ internal class TripRideDetector(
     /**
      * The user says they are not on the bus the app thinks they are on.
      *
-     * The answer is about one bus, not about the trip, so only what was just
-     * asserted is set aside: the vehicle of the pending question if there is
-     * one, else the vehicle the detected ride named, for
-     * [REJECTED_VEHICLE_TTL_MS]; and the rider's own movement up to this
-     * moment, which no longer counts as evidence of a ride. The next bus raises
-     * its own question and is detected exactly as this one was.
+     * The answer is about the buses that have gone, not about the trip, so only
+     * what was just asserted is set aside: every bus that left while the
+     * pending question stood — a rider still waiting is on none of them — else
+     * the vehicle the detected ride named, for [REJECTED_VEHICLE_TTL_MS]; and
+     * the rider's own movement up to this moment, which no longer counts as
+     * evidence of a ride. The next bus raises its own question and is detected
+     * exactly as these were.
      *
      * Switching detection off for the rest of the trip instead would leave the
      * rider sitting on their real bus with no boarding alert and no destination
@@ -303,27 +357,31 @@ internal class TripRideDetector(
      *
      * [answeredCheckId] is the question being answered, as for
      * [confirmBoardedByUser]. "Not yet" to a question that has since been
-     * replaced says nothing about the bus the new one is about.
+     * replaced says nothing about the buses the new one is about.
      */
     fun declineBoarding(nowMs: Long, answeredCheckId: Long? = null) {
+        noteDepartures(nowMs)
         if (!boarded && answeredCheckId != null && answeredCheckId != pendingCheckSinceMs) {
             // Still true of the rider's movement so far, and of nothing else.
             lastDeclineAtMs = nowMs
             return
         }
-        val answeredAQuestion = pendingCheckSinceMs != 0L
-        val rejected = pendingCheckVehicleId ?: trackedVehicleId
+        val askedAbout = pendingDepartures.toList()
+        val rejected = if (askedAbout.isEmpty()) {
+            listOfNotNull(trackedVehicleId)
+        } else {
+            askedAbout.mapNotNull { it.vehicleId }
+        }
         boarded = false
         evidence = BoardingEvidence.NONE
         trackedVehicleId = null
         manualConfirmationAtMs = null
         manualVehicleAmbiguous = false
         lastDeclineAtMs = nowMs
-        declinedDepartureAtMs = if (answeredAQuestion) pendingCheckSinceMs else nowMs
-        declinedDepartureUnattributed = answeredAQuestion && rejected == null
-        if (rejected != null) {
-            rejectedAt[rejected] = nowMs
-        }
+        declinedDepartures.clear()
+        declinedDepartures += askedAbout
+        declinedRideAtMs = if (askedAbout.isEmpty()) nowMs else 0L
+        rejected.forEach { rejectedAt[it] = nowMs }
         clearPendingCheck()
     }
 
@@ -605,6 +663,16 @@ internal class TripRideDetector(
         }
     }
 
+    /**
+     * Counts a bus leaving the boarding stop, which is what the question is
+     * asked about.
+     *
+     * One departure can reach the app twice, up to a minute and a half apart:
+     * from the position feed, which names the vehicle, and from the ETA rolling
+     * over, which does not. Two reports are taken for one departure only when
+     * they can be: one from each feed, or the same vehicle again. Two different
+     * vehicles are two buses however close together they leave.
+     */
     private fun registerDeparture(vehicleId: String?, nowMs: Long) {
         if (boarded) {
             return
@@ -615,28 +683,7 @@ internal class TripRideDetector(
             // every other vehicle is untouched.
             return
         }
-        if (declinedDepartureAtMs != 0L && nowMs - declinedDepartureAtMs < DEPARTURE_DEDUPE_MS) {
-            // One departure reaches the app twice — from the position feed and
-            // from the ETA rolling over — up to a minute and a half apart, and
-            // this one has already been answered. The window runs from the
-            // departure, not from the answer: a rider may take minutes to
-            // reply, and what leaves the stop after that is the next bus.
-            if (vehicleId == null) {
-                return
-            }
-            if (declinedDepartureUnattributed) {
-                // The question came from the ETA alone, so the answer had no
-                // vehicle to be held against. This is that bus, now named.
-                declinedDepartureUnattributed = false
-                rejectedAt[vehicleId] = lastDeclineAtMs
-                return
-            }
-            // A different vehicle this close behind is a second bus, and gets
-            // a question of its own.
-        }
-        if (pendingCheckSinceMs != 0L && nowMs - pendingCheckSinceMs < DEPARTURE_DEDUPE_MS) {
-            // The position feed and the ETA rollover both report the same bus.
-            pendingCheckVehicleId = pendingCheckVehicleId ?: vehicleId
+        if (answeredByTheLastDecline(vehicleId, nowMs)) {
             return
         }
         val boardingStop = boardingIndex
@@ -648,12 +695,73 @@ internal class TripRideDetector(
                 line.metersToStop(sample.latitude, sample.longitude, boardingStop) <=
                 BOARDING_STOP_RADIUS_METERS
         }
+        if (pendingCheckSinceMs != 0L) {
+            if (coveredByThePendingQuestion(vehicleId, nowMs)) {
+                return
+            }
+            // Another bus has left with the question unanswered. It joins what
+            // the question is about rather than taking it over: the rider may
+            // be on either, and "yes" will not say which.
+            pendingDepartures.removeAll { nowMs - it.atMs > BOARDING_CHECK_MAX_AGE_MS }
+            pendingDepartures += Departure(nowMs, vehicleId, reportedByEta = vehicleId == null)
+            if (userWasAtStop && nowMs - pendingCheckSinceMs >= DEPARTURE_DEDUPE_MS) {
+                // Long enough after the last time of asking to ask afresh.
+                pendingCheckSinceMs = nowMs
+                pendingCheckAnchor = recentUser.lastOrNull()
+            }
+            return
+        }
         if (!userWasAtStop) {
             return
         }
         pendingCheckSinceMs = nowMs
-        pendingCheckVehicleId = vehicleId
+        pendingDepartures.clear()
+        pendingDepartures += Departure(nowMs, vehicleId, reportedByEta = vehicleId == null)
         pendingCheckAnchor = recentUser.lastOrNull()
+    }
+
+    /**
+     * Whether this report is of a departure the rider's last "not yet" already
+     * covered, reaching the app a second time.
+     */
+    private fun answeredByTheLastDecline(vehicleId: String?, nowMs: Long): Boolean {
+        // The window runs from the departure, not from the answer: a rider may
+        // take minutes to reply, and what leaves the stop after that is the
+        // next bus.
+        declinedDepartures.removeAll { nowMs - it.atMs >= DEPARTURE_DEDUPE_MS }
+        if (vehicleId == null) {
+            // The ETA catching up with what the rider has just answered for.
+            return declinedDepartures.isNotEmpty() ||
+                (declinedRideAtMs != 0L && nowMs - declinedRideAtMs < DEPARTURE_DEDUPE_MS)
+        }
+        // The question came from the ETA alone, so the answer had no vehicle to
+        // be held against. This is that bus, now named. Any other vehicle this
+        // close behind is a second bus, and gets a question of its own.
+        val unnamed = declinedDepartures.firstOrNull { it.vehicleId == null } ?: return false
+        unnamed.vehicleId = vehicleId
+        rejectedAt[vehicleId] = lastDeclineAtMs
+        return true
+    }
+
+    /**
+     * Whether this report is the other feed's account, or a repeat, of a
+     * departure the pending question already covers.
+     */
+    private fun coveredByThePendingQuestion(vehicleId: String?, nowMs: Long): Boolean {
+        if (vehicleId != null && pendingDepartures.any { it.vehicleId == vehicleId }) {
+            return true
+        }
+        val recent = pendingDepartures.filter { nowMs - it.atMs < DEPARTURE_DEDUPE_MS }
+        if (vehicleId == null) {
+            // The ETA's account of a bus the position feed has reported.
+            val unreported = recent.firstOrNull { !it.reportedByEta } ?: return false
+            unreported.reportedByEta = true
+            return true
+        }
+        // The position feed naming a bus only the ETA had reported.
+        val unnamed = recent.firstOrNull { it.vehicleId == null } ?: return false
+        unnamed.vehicleId = vehicleId
+        return true
     }
 
     private fun resolveBoardingPromptDue(
@@ -700,7 +808,7 @@ internal class TripRideDetector(
 
     private fun clearPendingCheck() {
         pendingCheckSinceMs = 0L
-        pendingCheckVehicleId = null
+        pendingDepartures.clear()
         pendingCheckAnchor = null
     }
 
@@ -743,7 +851,8 @@ internal class TripRideDetector(
     }
 
     /**
-     * Associates a manual confirmation with a vehicle, not just a route.
+     * Associates an unprompted "I have boarded" with a vehicle, not just a
+     * route.
      *
      * The bus must have an unbroken run on this direction and route containing
      * a fix physically at the boarding stop, and still be at most 250 m ahead.
@@ -756,8 +865,11 @@ internal class TripRideDetector(
      * is what the two-minute window is for. A bus that pulls in after the
      * rider said they were already on one is the next bus, whenever it is seen.
      *
-     * Nor is it a bus the app had already watched leave by then. Unprompted,
-     * "I have boarded" points at what is standing at the stop.
+     * Nor is it a bus the app had already watched leave by then: whether the
+     * rider was on that one is what the boarding question asks.
+     *
+     * And it must be the only bus there. With another at the stop, just gone
+     * from it, or near enough to have pulled in, the rider can be on either.
      */
     private fun identifyBoardingVehicle(nowMs: Long): String? {
         val confirmedAt = manualConfirmationAtMs ?: return null
@@ -796,13 +908,37 @@ internal class TripRideDetector(
                     MANUAL_AT_STOP_RADIUS_METERS
             }
         }
-        if (candidates.size > 1) {
-            // One candidate later leaving the distance bound does not prove
-            // that the rider took the other one. A usable phone fix can still
-            // identify the ride through resolveTrackedVehicle().
+        val candidate = candidates.singleOrNull()
+        if (candidates.size > 1 ||
+            (candidate != null && anotherBusIsBoardable(confirmedAt, boardingAlong, candidate.vehicleId))
+        ) {
+            // Which of them the rider took is not something a later report
+            // settles: one leaving the distance bound first proves nothing. A
+            // usable phone fix can still identify the ride through
+            // resolveTrackedVehicle().
             manualVehicleAmbiguous = true
+            return null
         }
-        return candidates.singleOrNull()?.vehicleId
+        return candidate?.vehicleId
+    }
+
+    /**
+     * Whether the feeds place a vehicle other than [except] where the rider
+     * could have boarded it around [atMs]: at the boarding stop, just pulling
+     * away from it, or near enough short of it to have pulled in since — a
+     * report is half a minute old by the time it arrives. A bus the rider has
+     * turned down is not one of them.
+     */
+    private fun anotherBusIsBoardable(atMs: Long, boardingAlong: Double, except: String): Boolean {
+        return busTracks.any { (vehicleId, track) ->
+            if (vehicleId == except || isRejected(vehicleId, atMs)) {
+                return@any false
+            }
+            val last = track.lastOrNull { it.gpsTimeMs <= atMs } ?: return@any false
+            last.samePath && last.onRoute &&
+                atMs - last.receivedAtMs <= BUS_REPORT_STALE_MS &&
+                last.alongMeters - boardingAlong in -BOARDABLE_APPROACH_METERS..MANUAL_VEHICLE_MAX_AHEAD_METERS
+        }
     }
 
     private fun liveVehicles(nowMs: Long): List<LiveVehicle> {
@@ -878,6 +1014,16 @@ internal class TripRideDetector(
         val onRoute: Boolean,
     )
 
+    /**
+     * One bus leaving the boarding stop. [vehicleId] is set once the position
+     * feed has reported it, [reportedByEta] once the ETA rolling over has.
+     */
+    private class Departure(
+        val atMs: Long,
+        var vehicleId: String?,
+        var reportedByEta: Boolean,
+    )
+
     private data class LiveVehicle(
         val vehicleId: String,
         val alongMeters: Double,
@@ -935,6 +1081,7 @@ internal class TripRideDetector(
         const val MANUAL_VEHICLE_MAX_AHEAD_METERS = 250.0
         const val MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS = 90_000L
         const val MANUAL_IDENTIFICATION_WINDOW_MS = 120_000L
+        const val BOARDABLE_APPROACH_METERS = 300.0
 
         const val ETA_ARRIVING_SECONDS = 30
         const val ETA_ROLLOVER_SECONDS = 240
