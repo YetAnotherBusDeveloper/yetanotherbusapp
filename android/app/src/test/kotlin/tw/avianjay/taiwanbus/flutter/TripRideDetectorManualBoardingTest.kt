@@ -551,28 +551,104 @@ class TripRideDetectorManualBoardingTest {
     }
 
     @Test
-    fun theEtaCatchingUpWithABusAlreadySeenLeavingIsNotASecondBus() {
-        for (aSecondBusLeaves in listOf(false, true)) {
+    fun aRolloverBesideABusSeenLeavingIsThatBusOnlyWhenTheFeedSaysSo() {
+        // A is seen at the stop and leaving. Within the minute the ETA rolls
+        // over. [atStop] is the bus the stop feed placed there, if it said.
+        fun answer(atStop: String?, aSecondRollover: Boolean = false): RideSnapshot {
             val detector = newDetector()
             detector.onBusReports(listOf(report(0, along = 0.0)))
-            detector.onBoardingStopEta(etaSeconds = 0, arriving = true, nowMs = at(0))
+            detector.onBoardingStopEta(0, arriving = true, nowMs = at(0), arrivingVehicleId = atStop)
             detector.snapshot(at(0))
             detector.onBusReports(listOf(report(20, along = 150.0)))
             val asked = detector.snapshot(at(20)).boardingCheckId
             assertTrue(asked != 0L)
-            // Half a minute on the ETA rolls over to the next bus: the same
-            // departure, from the other feed.
-            detector.onBoardingStopEta(etaSeconds = 600, arriving = false, nowMs = at(50))
-            if (aSecondBusLeaves) {
-                // Then it does so again. That bus has no position feed, and the
-                // rider may be on it.
-                detector.onBoardingStopEta(etaSeconds = 0, arriving = true, nowMs = at(60))
-                detector.onBoardingStopEta(etaSeconds = 600, arriving = false, nowMs = at(80))
+            detector.onBoardingStopEta(600, arriving = false, nowMs = at(50))
+            if (aSecondRollover) {
+                detector.onBoardingStopEta(0, arriving = true, nowMs = at(60), arrivingVehicleId = atStop)
+                detector.onBoardingStopEta(600, arriving = false, nowMs = at(80))
             }
+            detector.onBusReports(listOf(report(80, along = 900.0)))
+            val ride = detector.snapshot(at(84))
+            assertEquals("the rollover is not asked about separately", asked, ride.boardingCheckId)
             detector.confirmBoardedByUser(at(85), answeredCheckId = asked)
+            return detector.snapshot(at(85))
+        }
+        // The feed named the bus at the stop: the rollover is A leaving.
+        assertEquals(BUS, answer(atStop = BUS).trackedVehicleId)
+        assertEquals(BUS, answer(atStop = BUS, aSecondRollover = true).trackedVehicleId)
+        // It named another: B, with no position feed, left as well.
+        assertUnidentified(answer(atStop = "BUS-B"))
+        // It named none. The rider may have boarded a B the app never saw.
+        assertUnidentified(answer(atStop = null))
+        assertUnidentified(answer(atStop = null, aSecondRollover = true))
+    }
 
-            val ride = detector.snapshot(at(85))
-            if (aSecondBusLeaves) assertUnidentified(ride) else assertEquals(BUS, ride.trackedVehicleId)
+    @Test
+    fun aBusSeenLeavingBesideAnUnnamedRolloverIsNotNamedByTheAnswer() {
+        // The other order: the rollover first, then the position feed.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0)))
+        detector.onBoardingStopEta(0, arriving = true, nowMs = at(0))
+        detector.snapshot(at(0))
+        detector.onBoardingStopEta(600, arriving = false, nowMs = at(15))
+        val asked = detector.snapshot(at(15)).boardingCheckId
+        assertTrue(asked != 0L)
+        detector.onBusReports(listOf(report(10, along = 150.0).copy(receivedAtMs = at(30))))
+        detector.snapshot(at(30))
+        detector.onBusReports(listOf(report(60, along = 800.0)))
+        assertEquals(asked, detector.snapshot(at(60)).boardingCheckId)
+        detector.confirmBoardedByUser(at(65), answeredCheckId = asked)
+
+        assertUnidentified(detector.snapshot(at(65)))
+    }
+
+    @Test
+    fun eachDeclinedBusIsCaughtUpWithByTheEtaOnce() {
+        // Two buses with no position feed, a "not yet" between them.
+        val etaOnly = newDetector()
+        etaOnly.onBoardingStopEta(0, arriving = true, nowMs = at(0))
+        etaOnly.onBoardingStopEta(600, arriving = false, nowMs = at(30))
+        val first = etaOnly.snapshot(at(75))
+        assertTrue(first.boardingPromptDue)
+        etaOnly.declineBoarding(at(80), answeredCheckId = first.boardingCheckId)
+        etaOnly.onBoardingStopEta(0, arriving = true, nowMs = at(90))
+        etaOnly.onBoardingStopEta(600, arriving = false, nowMs = at(110))
+        assertTrue("the second bus is asked about", etaOnly.snapshot(at(110)).boardingCheckId != 0L)
+
+        // A bus seen leaving and declined: its rollover is swallowed, the next is not.
+        val seen = newDetector()
+        seen.onBusReports(listOf(report(0, along = 0.0)))
+        seen.onBoardingStopEta(0, arriving = true, nowMs = at(0))
+        seen.snapshot(at(0))
+        seen.onBusReports(listOf(report(20, along = 150.0)))
+        val asked = seen.snapshot(at(20)).boardingCheckId
+        seen.onBusReports(listOf(report(60, along = 700.0)))
+        assertTrue(seen.snapshot(at(60)).boardingPromptDue)
+        seen.declineBoarding(at(65), answeredCheckId = asked)
+        seen.onBoardingStopEta(600, arriving = false, nowMs = at(70))
+        assertEquals("A's own rollover", 0L, seen.snapshot(at(70)).boardingCheckId)
+        seen.onBoardingStopEta(0, arriving = true, nowMs = at(80))
+        seen.onBoardingStopEta(600, arriving = false, nowMs = at(100))
+        assertTrue("the next bus's rollover", seen.snapshot(at(100)).boardingCheckId != 0L)
+    }
+
+    @Test
+    fun aBusStillAtTheStopAfterADeclinedRolloverIsTheNextBus() {
+        for (stillThereAfterwards in listOf(false, true)) {
+            val detector = newDetector()
+            detector.onBoardingStopEta(0, arriving = true, nowMs = at(0))
+            detector.onBoardingStopEta(600, arriving = false, nowMs = at(30))
+            val first = detector.snapshot(at(75))
+            assertTrue(first.boardingPromptDue)
+            detector.declineBoarding(at(80), answeredCheckId = first.boardingCheckId)
+            // The position feed, late: at the stop either before the rollover
+            // (the same bus) or after it (the one behind).
+            val atStopAt = if (stillThereAfterwards) 60L else 10L
+            detector.onBusReports(listOf(report(atStopAt, along = 0.0).copy(receivedAtMs = at(85))))
+            detector.snapshot(at(85))
+            detector.onBusReports(listOf(report(95, along = 150.0)))
+
+            assertEquals(stillThereAfterwards, detector.snapshot(at(100)).boardingCheckId != 0L)
         }
     }
 

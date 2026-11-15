@@ -660,6 +660,46 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun theBusTheStopFeedPlacesAtTheStopIsTheOneItsRolloverReports() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        // A stands at the boarding stop, by both feeds; then it leaves, by both.
+        var busStop = stopsOf(trip).first()
+        var gpsTime = nowSeconds() - 60
+        var stopFeed = stopFeed(eta = 0, plate = "BUS-A")
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed("BUS-A", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+            } else {
+                stopFeed
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        busStop = stopsOf(trip)[1]
+        gpsTime += 20
+        stopFeed = stopFeed(eta = 600, plate = "BBB-002")
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertTrue(ride(service).boardingCheckId != 0L)
+
+        ReflectionHelpers.setField(
+            ReflectionHelpers.getField<Any>(service, "detector"),
+            "pendingCheckSinceMs",
+            System.currentTimeMillis() - 45_000L,
+        )
+        refreshAndDeliverAlerts()
+        service.onStartCommand(buttonIntent(notificationId = 6023, title = "我已上車"), 0, 2)
+
+        assertEquals(
+            "the rollover was tied to A by its plate, so it is no second bus",
+            "BUS-A",
+            ride(service).trackedVehicleId,
+        )
+    }
+
+    @Test
     fun aFailingStopFeedDoesNotSilenceTheVehicleFeed() {
         val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
         backend = { path ->

@@ -878,12 +878,18 @@ class RouteTripMonitorService : Service() {
             liveStop.busesAtStop.isNotEmpty() ||
             liveStop.message?.contains("進站") == true ||
             liveStop.message?.contains("到站") == true
+        // Which bus that is, where the feed leaves no doubt: its leaving is
+        // what the ETA rolling over will report next.
+        val atStop = liveStop.busesAtStop.ifEmpty {
+            liveStop.etaEntries.filter { (it.seconds ?: 1) <= 0 }.mapNotNull { it.vehicleId }
+        }.mapNotNull(::normalizeVehicleId).distinct().singleOrNull()
         val now = System.currentTimeMillis()
         synchronized(detectorLock) {
             target.onBoardingStopEta(
                 etaSeconds = liveStop.seconds ?: etaEntry?.seconds,
                 arriving = arriving,
                 nowMs = now,
+                arrivingVehicleId = atStop.takeIf { arriving },
             )
         }
     }
