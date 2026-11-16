@@ -565,6 +565,31 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun aRideWithNoBoardingStopStaysPausedUntilItsDestinationIsChosen() {
+        val route = threeStopSession() + mapOf("routeId" to "TXG1")
+        service.onStartCommand(startIntent(route), 0, 1)
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        assertEquals("boarded_no_destination", awaitPause().reason)
+
+        // The route screen, opened from the prompt or getting a fix at last,
+        // fills in the stop nearest the rider and sends the trip again.
+        val nearestFilledIn = route + mapOf("boardingStopId" to 2, "boardingStopName" to "二站")
+        service.onStartCommand(startIntent(nearestFilledIn), 0, 3)
+        assertNull("that is the paused ride still, not a new wait at the second stop", detectorOrNull())
+        assertNotNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+
+        service.onStartCommand(
+            startIntent(nearestFilledIn + mapOf("destinationStopId" to 3, "destinationStopName" to "三站")),
+            0,
+            4,
+        )
+        assertTrue("choosing a destination continues the ride", ride(service).hasBoarded)
+        assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service))
+    }
+
+    private fun detectorOrNull(): Any? = ReflectionHelpers.getField(service, "detector")
+
+    @Test
     fun onlyTheRidePausedForADestinationIsPickedBackUp() {
         val waiting = threeStopSession() + mapOf("boardingStopId" to 1)
         val withDestination = waiting + mapOf("destinationStopId" to 3)

@@ -2,6 +2,9 @@ package tw.avianjay.taiwanbus.flutter
 
 import android.content.Context
 
+/** On board with nowhere to get off: the monitor pauses and asks the rider to choose a stop. */
+internal const val PAUSE_REASON_BOARDED_NO_DESTINATION = "boarded_no_destination"
+
 object AppRuntimeStateStore {
     private const val PREFERENCES_NAME = "app_runtime_state"
     private const val KEY_APP_IN_FOREGROUND = "app_in_foreground"
@@ -114,13 +117,26 @@ data class TripMonitorPauseState(
     /** The bus the paused ride was identified as being on; null when it was not. */
     val rideVehicleId: String? = null,
 ) {
+    /**
+     * Whether [session] is the trip that was paused.
+     *
+     * A ride paused to ask for a destination, with no boarding stop chosen, is
+     * that ride whichever boarding stop the session names. The route screen
+     * fills in the stop nearest the rider when none is chosen, and that moves
+     * down the route as the bus does; read as another trip, it would start
+     * the monitor afresh, waiting at a stop the rider is riding past, and the
+     * ride could no longer be picked up when they choose where to get off.
+     */
     fun matches(session: TrackingSession): Boolean {
         return provider == session.provider &&
             routeKey == session.routeKey &&
             pathId == session.pathId &&
-            boardingStopId == session.boardingStopId &&
+            (boardingStopId == session.boardingStopId || awaitsADestinationFromAnyStop) &&
             destinationStopId == session.destinationStopId
     }
+
+    private val awaitsADestinationFromAnyStop: Boolean
+        get() = reason == PAUSE_REASON_BOARDED_NO_DESTINATION && boardingStopId == null
 
     fun toMap(): Map<String, Any?> {
         return mapOf(

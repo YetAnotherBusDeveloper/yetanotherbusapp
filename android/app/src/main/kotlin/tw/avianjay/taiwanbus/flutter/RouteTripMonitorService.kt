@@ -2460,7 +2460,6 @@ class RouteTripMonitorService : Service() {
         private const val PAUSE_REASON_USER = "user"
         private const val PAUSE_REASON_ARRIVED = "arrived"
         private const val PAUSE_REASON_OVERSHOT = "overshot"
-        private const val PAUSE_REASON_BOARDED_NO_DESTINATION = "boarded_no_destination"
         // Bare values like 13:45 are often scheduled clock times from ETA messages,
         // so only explicitly wrapped strings should render as a countdown chronometer.
         private val SHORT_CRITICAL_COUNTDOWN_REGEX = Regex("^\\(([0-9]{2}):([0-9]{2})\\)$")
