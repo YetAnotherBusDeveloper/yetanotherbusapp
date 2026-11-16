@@ -50,9 +50,25 @@ internal class RideRouteLine(private val stops: List<TrackingStop>) {
     /**
      * Projects a fix onto the polyline.
      *
-     * [hintMeters] disambiguates routes that run along the same street twice
-     * (loops, out-and-back sections): among the segments about as close as the
-     * closest one, the one nearest the previous along-route position wins.
+     * A route can come within a few metres of itself — a loop, a street used
+     * out and back, the two legs of a hairpin — so the segment nearest a fix
+     * is not always the one being travelled. [hintMeters], the previous
+     * along-route position, settles it among the segments about as close as
+     * the closest one. Each is costed by how far the fix is from it, plus a
+     * share of how far along the route it would mean the fix had moved; and
+     * moving back along the route costs four times as much as moving on, since
+     * neither a bus nor its rider does that for long.
+     *
+     * Choosing simply the segment nearest the previous position held a
+     * vehicle on the outbound leg of a hairpin once it had turned: the
+     * outbound leg, 40 m away, was nearer where it had been than the leg it
+     * was now exactly on, and each fix after that put it further back. Two
+     * passes along the very same street, where distance says nothing, are
+     * still told apart by which of them continues the journey.
+     *
+     * The distance returned is the one to the segment chosen, which is also
+     * the segment [RideProjection.segmentIndex] names: callers hold the two
+     * against each other.
      */
     fun project(latitude: Double, longitude: Double, hintMeters: Double?): RideProjection {
         val segmentCount = stops.size - 1
@@ -82,15 +98,24 @@ internal class RideRouteLine(private val stops: List<TrackingStop>) {
         }
         var chosen = closest
         if (hintMeters != null) {
+            var lowestCost = Double.MAX_VALUE
             for (index in 0 until segmentCount) {
-                if (distances[index] <= distances[closest] + HINT_SLACK_METERS &&
-                    abs(alongs[index] - hintMeters) < abs(alongs[chosen] - hintMeters)
-                ) {
+                if (distances[index] > distances[closest] + HINT_SLACK_METERS) {
+                    continue
+                }
+                val moved = alongs[index] - hintMeters
+                val cost = distances[index] + if (moved >= 0.0) {
+                    FORWARD_COST_PER_METER * moved
+                } else {
+                    BACKWARD_COST_PER_METER * -moved
+                }
+                if (cost < lowestCost) {
+                    lowestCost = cost
                     chosen = index
                 }
             }
         }
-        return RideProjection(alongs[chosen], distances[closest], chosen)
+        return RideProjection(alongs[chosen], distances[chosen], chosen)
     }
 
     fun nearestStopIndex(alongMeters: Double): Int {
@@ -122,6 +147,15 @@ internal class RideRouteLine(private val stops: List<TrackingStop>) {
     private companion object {
         const val EARTH_RADIUS_METERS = 6_371_000.0
         const val HINT_SLACK_METERS = 60.0
+
+        /**
+         * What a metre of travel along the route weighs against a metre of
+         * distance from it. Small, so that a fix lying on one leg is not
+         * placed on another 40 m off; not nothing, so that the same street
+         * used twice a kilometre apart is not decided by a few metres of noise.
+         */
+        const val FORWARD_COST_PER_METER = 0.05
+        const val BACKWARD_COST_PER_METER = 0.2
         const val STOP_REACHED_TOLERANCE_METERS = 25.0
     }
 }
