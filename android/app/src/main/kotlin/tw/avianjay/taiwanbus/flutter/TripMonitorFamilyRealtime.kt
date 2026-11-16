@@ -12,9 +12,27 @@ import org.json.JSONObject
 internal class TripMonitorFamilyRealtime(
     private val fetchJson: (String) -> JSONObject?,
 ) {
-    private val cachedTopologies = mutableMapOf<String, JSONObject>()
+    // Read and filled from the service's fetch threads, more than one at a time.
+    private val cachedTopologies = java.util.concurrent.ConcurrentHashMap<String, JSONObject>()
 
-    // Called only on the service's single IO executor.
+    /**
+     * The stops of [session]'s path that [routeId], another route of the
+     * family, also calls at in that direction — matched as the live feed's
+     * stops are, by id or by name and place. Null when its stops could not be
+     * fetched.
+     */
+    fun stopsServedBy(session: TrackingSession, routeId: String): Set<Int>? {
+        val topology = topologyOf(routeId) ?: return null
+        val variantStops = stopsForDirection(topology, session.pathId)
+        return session.stops
+            .filter { selected -> variantStops.any { sameSide(selected, it) } }
+            .map { it.stopId }
+            .toSet()
+    }
+
+    private fun topologyOf(routeId: String): JSONObject? = cachedTopologies[routeId]
+        ?: fetchJson("routes/${encode(routeId)}/stops")?.also { cachedTopologies[routeId] = it }
+
     fun fetch(session: TrackingSession): Map<Int, LiveStopState> {
         val ids = session.realtimeRouteIds
         if (ids.isEmpty()) return emptyMap()
@@ -37,9 +55,7 @@ internal class TripMonitorFamilyRealtime(
             val snapshot = snapshots[id] ?: continue
             val variantLive = liveStops(snapshot, session.pathId)
             if (variantLive.isEmpty()) continue
-            val topology = cachedTopologies[id]
-                ?: fetchJson("routes/${encode(id)}/stops")?.also { cachedTopologies[id] = it }
-                ?: continue
+            val topology = topologyOf(id) ?: continue
             val variantStops = stopsForDirection(topology, session.pathId)
             for (selected in session.stops) {
                 val shared = variantStops.filter { sameSide(selected, it) }

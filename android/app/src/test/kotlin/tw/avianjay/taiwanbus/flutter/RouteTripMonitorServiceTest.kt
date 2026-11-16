@@ -1525,6 +1525,7 @@ class RouteTripMonitorServiceTest {
                 "/api/v1/routes/TXG1/realtime/buses" -> "[]"
                 "/api/v1/routes/TXG2/realtime/buses" ->
                     busFeed("VARIANT-001", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+                "/api/v1/routes/TXG2/stops" -> variantTopology(trip, 0, 1, 2)
                 else -> null
             }
         }
@@ -1546,6 +1547,208 @@ class RouteTripMonitorServiceTest {
         val alert = service.getSystemService(NotificationManager::class.java)
             .activeNotifications.single { it.id == 6022 }.notification
         assertEquals("準備下車", alert.extras.getString(Notification.EXTRA_TITLE))
+    }
+
+    @Test
+    fun aVariantsBusIsNotFollowedToAStopItsRouteNeverCallsAt() {
+        rideAVariantToItsTerminalPlatform(variantServesTheDestination = false)
+    }
+
+    @Test
+    fun aVariantsBusThatCallsAtTheDestinationArrivesAtIt() {
+        rideAVariantToItsTerminalPlatform(variantServesTheDestination = true)
+    }
+
+    /**
+     * The variant shares the first two stops and then runs to a platform
+     * seventy metres from this route's last stop — its own, or, when
+     * [variantServesTheDestination], one the feeds treat as the same stop.
+     */
+    private fun rideAVariantToItsTerminalPlatform(variantServesTheDestination: Boolean) {
+        run {
+            val trip = threeStopSession() + mapOf(
+                "routeId" to "TXG1",
+                "familyRouteIds" to listOf("TXG1", "TXG2"),
+                "boardingStopId" to 1,
+                "destinationStopId" to 3,
+            )
+            var position = stopsOf(trip).first()
+            // Every report is made before now, by the clock the phone runs on.
+            var gpsTime = nowSeconds() - 85
+            backend = { path ->
+                when (path) {
+                    "/api/v1/routes/TXG1/realtime/buses" -> "[]"
+                    "/api/v1/routes/TXG2/realtime/buses" ->
+                        busFeed("VARIANT-001", position, pathId = 0, gpsTimeSeconds = gpsTime)
+                    "/api/v1/routes/TXG2/stops" ->
+                        if (variantServesTheDestination) variantTopology(trip, 0, 1, 2) else variantTopology(trip, 0, 1)
+                    else -> null
+                }
+            }
+            service.onStartCommand(startIntent(trip), 0, 1)
+            fetchLiveData()
+            service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+            refreshAndDeliverAlerts()
+            assertEquals("VARIANT-001", ride(service).trackedVehicleId)
+
+            position = stopsOf(trip)[1]
+            gpsTime += 40
+            ShadowSystemClock.advanceBy(40, TimeUnit.SECONDS)
+            refreshAndDeliverAlerts()
+            assertEquals("on the stretch the two routes share it is the ride's progress", 1, ride(service).remainingStops)
+
+            // On to its terminal platform, beside this route's last stop.
+            val last = stopsOf(trip)[2]
+            position = last + mapOf("lon" to (last["lon"] as Double) + 0.0007)
+            gpsTime += 40
+            ShadowSystemClock.advanceBy(40, TimeUnit.SECONDS)
+            refreshAndDeliverAlerts()
+
+            val arrivedAt = ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs")
+            if (variantServesTheDestination) {
+                assertEquals(0, ride(service).remainingStops)
+                assertTrue("a bus that calls at the destination arrives at it", arrivedAt > 0L)
+            } else {
+                assertEquals("VARIANT-001", ride(service).trackedVehicleId)
+                assertFalse(ride(service).hasRouteValidProgress)
+                assertTrue("that platform is not the rider's stop", ride(service).remainingStops != 0)
+                assertEquals("so nothing has arrived anywhere", 0L, arrivedAt)
+            }
+        }
+    }
+
+    @Test
+    fun aVariantWhoseStopsCannotBeFetchedLendsNoVehicles() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "familyRouteIds" to listOf("TXG1", "TXG2"), "boardingStopId" to 1,
+        )
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        backend = { path ->
+            requests += path
+            when (path) {
+                "/api/v1/routes/TXG1/realtime/buses" -> "[]"
+                "/api/v1/routes/TXG2/realtime/buses" -> busFeed("VARIANT-001", stopsOf(trip).first(), pathId = 0)
+                else -> null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        fetchLiveData()
+        assertNull("where its route runs is not known", ride(service).nextBusVehicleId)
+
+        // And the endpoint is left alone for a while, like any that failed.
+        val before = requests.count { it.contains("/TXG2/") }
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        fetchLiveData()
+        assertEquals(before, requests.count { it.contains("/TXG2/") })
+    }
+
+    @Test
+    fun aFamilyEndpointThatHangsDoesNotHoldBackTheRide() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1",
+            "familyRouteIds" to listOf("TXG1", "TXG2"),
+            "boardingStopId" to 1,
+            "destinationStopId" to 3,
+        )
+        var busStop = stopsOf(trip).first()
+        var gpsTime = nowSeconds() - 85
+        val variantRequested = CountDownLatch(1)
+        val releaseVariant = CountDownLatch(1)
+        var primaryAnswers: CountDownLatch? = null
+        backend = { path ->
+            when (path) {
+                "/api/v1/routes/TXG1/realtime/buses" -> {
+                    primaryAnswers?.await(10, TimeUnit.SECONDS)
+                    busFeed("MAIN-001", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+                }
+                "/api/v1/routes/TXG2/realtime/buses" -> {
+                    variantRequested.countDown()
+                    releaseVariant.await(20, TimeUnit.SECONDS)
+                    null
+                }
+                else -> null
+            }
+        }
+        try {
+            service.onStartCommand(startIntent(trip), 0, 1)
+            assertTrue(variantRequested.await(10, TimeUnit.SECONDS))
+            // The variant's request is out, and stays out, from here on.
+            awaitOnMainThread("the primary route's bus being seen") { ride(service).nextBusVehicleId == "MAIN-001" }
+            service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+            assertEquals("MAIN-001", ride(service).trackedVehicleId)
+
+            // The bus runs on to the rider's stop. Its endpoint answers at
+            // once; nothing may wait for the variant's.
+            busStop = stopsOf(trip)[2]
+            gpsTime += 80
+            ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+            // Exactly this refresh: the poll now overdue would publish too.
+            val mainHandler = ReflectionHelpers.getField<android.os.Handler>(service, "mainHandler")
+            mainHandler.removeCallbacksAndMessages(null)
+            // Its answer comes after the refresh that asked has published
+            // what was known before, so only the answer's own publishing can
+            // bring the arrival out.
+            primaryAnswers = CountDownLatch(1)
+            refreshWithoutWaiting()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(0L, ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs"))
+            primaryAnswers!!.countDown()
+            awaitOnMainThread("arrival, from the endpoint that answered") {
+                ReflectionHelpers.getField<Long>(service, "arrivalDetectedAtMs") > 0L
+            }
+            assertEquals(0, ride(service).remainingStops)
+
+            // Nor does the rider's own position wait for it.
+            val (lat, lon) = THREE_STOPS[2]
+            val fix = Location("fused").apply {
+                latitude = lat
+                longitude = lon
+                accuracy = 10f
+                elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                time = System.currentTimeMillis()
+            }
+            ReflectionHelpers.setField(service, "latestLocation", fix)
+            ReflectionHelpers.callInstanceMethod<Any?>(
+                service, "onUserLocation", ReflectionHelpers.ClassParameter.from(Location::class.java, fix),
+            )
+            assertFalse(ride(service).hasUsableLocation)
+            refreshWithoutWaiting()
+            assertTrue("the rider's own fix is published at once", ride(service).hasUsableLocation)
+            assertTrue("the variant is still out", service.feedFetchesInFlight.get() > 0)
+        } finally {
+            releaseVariant.countDown()
+        }
+        awaitQueuedRefreshes()
+    }
+
+    @Test
+    fun aFeedWithARequestOutIsNotAskedForAgain() {
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val release = CountDownLatch(1)
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                requests.incrementAndGet()
+                release.await(20, TimeUnit.SECONDS)
+                "[]"
+            } else {
+                null
+            }
+        }
+        try {
+            service.onStartCommand(startIntent(trip), 0, 1)
+            repeat(3) {
+                ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+                refreshWithoutWaiting()
+            }
+            assertEquals(1, requests.get())
+        } finally {
+            release.countDown()
+        }
+        awaitQueuedRefreshes()
+        ShadowSystemClock.advanceBy(30, TimeUnit.SECONDS)
+        fetchLiveData()
+        assertEquals("once it has been answered the feed is due again as usual", 2, requests.get())
     }
 
     @Test
@@ -1601,6 +1804,8 @@ class RouteTripMonitorServiceTest {
                 } else {
                     busFeed("VARIANT-001", stopsOf(trip).first(), gpsTimeSeconds = reportedAt)
                 }
+            } else if (path.endsWith("/TXG2/stops")) {
+                variantTopology(trip, 0, 1, 2)
             } else {
                 null
             }
@@ -1638,6 +1843,7 @@ class RouteTripMonitorServiceTest {
                     check(releaseVariantFetch.await(10, TimeUnit.SECONDS)) { "variant request was never released" }
                     busFeed("REMOVED", stopsOf(trip)[2])
                 }
+                "/api/v1/routes/TXG2/stops" -> variantTopology(trip, 0, 1, 2)
                 else -> null
             }
         }
@@ -1995,8 +2201,33 @@ class RouteTripMonitorServiceTest {
         gpsTimeSeconds: Long = nowSeconds(),
     ) = """[{"id":"$vehicleId","direction":$pathId,"lat":${stop["lat"]},"lon":${stop["lon"]},"time":$gpsTimeSeconds}]"""
 
-    /** One refresh as the service runs it, after anything it already queued. */
+    /** One refresh as the service runs it, after anything it already queued, with its requests answered. */
     private fun fetchLiveData() {
+        refreshWithoutWaiting()
+        awaitQueuedRefreshes()
+    }
+
+    /** Waits until every refresh queued so far, and every request it sent, has been dealt with. */
+    private fun awaitQueuedRefreshes() {
+        val fetches = service.feedFetchesInFlight
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (true) {
+            ioExecutor().submit {}.get(10, TimeUnit.SECONDS)
+            // A response publishes the ride on the IO thread before its
+            // request counts as finished.
+            if (fetches.get() == 0) {
+                ioExecutor().submit {}.get(10, TimeUnit.SECONDS)
+                if (fetches.get() == 0) {
+                    return
+                }
+            }
+            check(System.nanoTime() < deadline) { "a feed request never finished" }
+            Thread.sleep(2)
+        }
+    }
+
+    /** One refresh, without waiting for the requests it sends to be answered. */
+    private fun refreshWithoutWaiting() {
         ioExecutor().submit {
             ReflectionHelpers.callInstanceMethod<Any?>(
                 service,
@@ -2006,9 +2237,24 @@ class RouteTripMonitorServiceTest {
         }.get(10, TimeUnit.SECONDS)
     }
 
-    private fun awaitQueuedRefreshes() {
-        ioExecutor().submit {}.get(10, TimeUnit.SECONDS)
+    /** Polls, delivering what refreshes leave for the main thread, until [condition] holds. */
+    private fun awaitOnMainThread(what: String, condition: () -> Boolean) {
+        repeat(400) {
+            shadowOf(Looper.getMainLooper()).idle()
+            if (condition()) {
+                return
+            }
+            Thread.sleep(10)
+        }
+        throw AssertionError("never happened: $what")
     }
+
+    /** The stops of [session] that a variant route calls at, as `/routes/{id}/stops` gives them. */
+    private fun variantTopology(session: Map<String, Any?>, vararg stopIndices: Int): String =
+        stopIndices.joinToString(",", prefix = """{"paths":[{"pathid":0,"stops":[""", postfix = "]}]}") { index ->
+            val stop = stopsOf(session)[index]
+            """{"stopid":"${stop["stopId"]}","name":"${stop["stopName"]}","lat":${stop["lat"]},"lon":${stop["lon"]}}"""
+        }
 
     /**
      * Runs [block] with the refresh it sets off held back, so that what the

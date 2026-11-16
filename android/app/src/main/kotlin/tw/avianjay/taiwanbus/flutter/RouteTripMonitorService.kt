@@ -32,6 +32,7 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -40,7 +41,18 @@ internal fun buildOnboardTripSubText(nearestStopName: String): String =
     "已上車 · 最近站牌 $nearestStopName"
 
 class RouteTripMonitorService : Service() {
+    /** Works out what the detector now knows and what to show for it. Never waits for the network. */
     private val ioExecutor = Executors.newSingleThreadExecutor()
+
+    /**
+     * Fetches the feeds, each request on its own. A request can hang for
+     * twenty seconds before it times out, and a route's family can be half a
+     * dozen endpoints: none of them may hold up the others, or the ride.
+     */
+    private val feedExecutor = Executors.newFixedThreadPool(FEED_FETCH_THREADS)
+
+    /** Feed requests asked for and not yet finished. */
+    internal val feedFetchesInFlight = AtomicInteger()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var notificationManager: NotificationManagerCompat
@@ -97,6 +109,8 @@ class RouteTripMonitorService : Service() {
     private var cachedLivePathId: Int? = null
     private var cachedLiveFetchedAtMs = 0L
     private var cachedLiveStops: Map<Int, LiveStopState> = emptyMap()
+    /** Under refreshLock: a request for the stop feed is out. */
+    private var liveStopFetchInFlight = false
     /** Under refreshLock: every family route shares the same polling policy. */
     private val busFeedRefreshByRoute = mutableMapOf<String, BusFeedRefresh>()
     private var liveStopBackoffUntilMs = 0L
@@ -428,6 +442,8 @@ class RouteTripMonitorService : Service() {
     private data class BusFeedRefresh(
         val fetchedAtElapsedMs: Long? = null,
         val retryAtElapsedMs: Long = 0L,
+        /** A request for this route's vehicles is out. */
+        val inFlight: Boolean = false,
     )
 
     private fun currentTrip(): TrackedTrip? = synchronized(detectorLock) {
@@ -516,6 +532,7 @@ class RouteTripMonitorService : Service() {
         }
         releaseWakeLock()
         ioExecutor.shutdownNow()
+        feedExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -772,12 +789,18 @@ class RouteTripMonitorService : Service() {
     }
 
     /**
-     * One refresh, on the IO thread: fetch, let the detector look again, and
-     * hand what is to be shown and alerted to the main thread.
+     * One refresh, on the IO thread: ask for whatever feeds are due, let the
+     * detector look again at what it already has, and hand what is to be shown
+     * and alerted to the main thread.
      *
-     * The trip is read here rather than where the refresh was asked for, and is
-     * checked again after every wait, because the main thread can replace it at
-     * any moment.
+     * Nothing here waits for the network. The rider's own fixes and the
+     * timers — the boarding question, the arrival countdown — move whether or
+     * not a request is out, and a request that hangs must not stop them: every
+     * feed is fetched on [feedExecutor], and each response, as it is applied,
+     * has the ride published again.
+     *
+     * The trip is read here rather than where the refresh was asked for,
+     * because the main thread can replace it at any moment.
      */
     private fun refreshTrip(force: Boolean) {
         val trip = currentTrip() ?: return
@@ -790,14 +813,17 @@ class RouteTripMonitorService : Service() {
                 notificationManager.notify(TRACKING_NOTIFICATION_ID, startup)
             }
         }
-        // Fetched before the snapshot: everything the detector learns arrives
-        // through here.
-        if (!updateLiveData(trip)) {
-            return
-        }
-        // Advanced on every refresh, not just when the bus feed came back,
-        // because the question timing and the user's own progress move
-        // independently of it.
+        requestLiveData(trip)
+        publishRide(trip)
+    }
+
+    /**
+     * Lets [trip]'s detector look again and publishes what it makes of the
+     * ride. Advanced on every refresh, not just when a feed came back, because
+     * the question timing and the user's own progress move independently.
+     */
+    private fun publishRide(trip: TrackedTrip) {
+        val trackedSession = trip.session
         val ride = advanceRide(trip, System.currentTimeMillis()) ?: return
         val trackingSnapshot = buildSnapshot(
             trackedSession,
@@ -808,114 +834,174 @@ class RouteTripMonitorService : Service() {
         // Alerts can pause or stop the trip, so they are decided where trips
         // are replaced and the rider's answers arrive: one worked out for the
         // last trip, or from before "I am not on it", must not be acted on.
+        // A snapshot overtaken by a later one is dropped there too.
         postIfStillTracking(trackedSession, ride) {
             notificationManager.notify(TRACKING_NOTIFICATION_ID, notification)
             maybeSendTripAlerts(trackedSession, trackingSnapshot)
         }
     }
 
+    /** Publishes [trip]'s ride from a fetch thread, by way of the IO thread. */
+    private fun publishRideSoon(trip: TrackedTrip) {
+        // Rejected once the service has been destroyed; nothing to publish then.
+        runCatching { ioExecutor.execute { runCatching { publishRide(trip) } } }
+    }
+
     /**
-     * Pulls whatever the detector needs from the backend: the boarding stop's
-     * ETA, and the live positions of every vehicle on the route.
+     * Asks the backend for whatever the detector is due: the boarding stop's
+     * ETA, and the live positions of every vehicle on the route and its
+     * family. Returns at once; each response is applied when it arrives.
      *
      * Both feeds share one rate-limit bucket with the rest of the app, so they
      * are throttled by age rather than fetched on every refresh, and a failed
      * request backs that endpoint off instead of hammering the server. Every
-     * family route uses that same interval/back-off policy independently, so a
-     * failed stop feed or variant does not silence healthy vehicle endpoints.
-     *
-     * Returns false when [trip] was replaced while a request was out; nothing
-     * fetched after that point has been applied, and the caller should stop.
+     * family route uses that same interval/back-off policy independently, and
+     * is fetched independently: a variant that fails, or hangs, silences only
+     * itself. A feed with a request already out is not asked for again.
      */
-    private fun updateLiveData(trip: TrackedTrip): Boolean {
+    private fun requestLiveData(trip: TrackedTrip) {
         val session = trip.session
         val routeIds = session.realtimeRouteIds
         if (routeIds.isEmpty()) {
-            return true
+            return
         }
         val nowElapsed = SystemClock.elapsedRealtime()
         val (wantsStops, busRouteIdsDue) = synchronized(refreshLock) {
-            val stopsDue = nowElapsed >= liveStopBackoffUntilMs && (
+            val stopsDue = !liveStopFetchInFlight && nowElapsed >= liveStopBackoffUntilMs && (
                 cachedLiveRouteIds != routeIds ||
                     cachedLivePathId != session.pathId ||
                     nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
                 )
+            if (stopsDue) {
+                liveStopFetchInFlight = true
+            }
             val busesDue = routeIds.filter { routeId ->
                 val state = busFeedRefreshByRoute[routeId]
-                state == null || (nowElapsed >= state.retryAtElapsedMs &&
+                state == null || (!state.inFlight && nowElapsed >= state.retryAtElapsedMs &&
                     (state.fetchedAtElapsedMs == null ||
                         nowElapsed - state.fetchedAtElapsedMs >= LIVE_BUS_REFRESH_INTERVAL_MS))
             }
+            busesDue.forEach { routeId ->
+                busFeedRefreshByRoute[routeId] =
+                    (busFeedRefreshByRoute[routeId] ?: BusFeedRefresh()).copy(inFlight = true)
+            }
             stopsDue to busesDue
         }
-
         if (wantsStops) {
-            val liveStops = fetchLiveStopMapFromBackend(session)
-            val stillTracked = applyToTrip(trip) {
-                // The same detector can receive a newer foreground update while
-                // this request is out. Discard its stop data and back-off only;
-                // the independently fetched vehicle positions remain useful.
-                if (stopFeedRevision != trip.stopFeedRevision) {
-                    return@applyToTrip
-                }
-                // familyRealtime folds a failed request into an empty map, and a
-                // route with stops to look up that answers with nothing is a
-                // failure rather than an empty feed — so back off rather than
-                // spend the shared rate limit on retries.
-                if (liveStops.isEmpty()) {
-                    synchronized(refreshLock) {
-                        liveStopBackoffUntilMs = nowElapsed + LIVE_FETCH_BACKOFF_MS
-                    }
-                } else {
-                    synchronized(refreshLock) {
-                        cachedLiveRouteIds = routeIds
-                        cachedLivePathId = session.pathId
-                        cachedLiveFetchedAtMs = nowElapsed
-                        cachedLiveStops = liveStops
-                    }
-                    liveStops.values.mapNotNull { it.observedAtMs }.maxOrNull()?.let { observedAtMs ->
-                        liveStopsObservedAtMs = maxOf(liveStopsObservedAtMs, observedAtMs)
-                    }
-                    feedBoardingEta(trip.detector, session, liveStops, fromTheApp = false)
-                }
-            }
-            if (!stillTracked) {
-                return false
-            }
+            fetchInBackground(
+                fetch = { fetchStopFeed(trip, nowElapsed) },
+                abandon = { liveStopFetchInFlight = false },
+            )
         }
+        busRouteIdsDue.forEach { routeId ->
+            fetchInBackground(
+                fetch = { fetchBusFeed(trip, routeId) },
+                abandon = {
+                    busFeedRefreshByRoute[routeId]?.let { busFeedRefreshByRoute[routeId] = it.copy(inFlight = false) }
+                },
+            )
+        }
+    }
 
-        val reportsByRoute = linkedMapOf<String, List<RideBusReport>>()
-        for (routeId in busRouteIdsDue) {
-            val reports = fetchBusReportsFromBackend(routeId)
-            if (!applyToTrip(trip) {
-                // A confirmed ride survives family updates, but an endpoint
-                // removed from its family must not publish an in-flight result.
-                if (routeId !in this.session?.realtimeRouteIds.orEmpty()) {
-                    return@applyToTrip
-                }
-                synchronized(refreshLock) {
-                    val receivedAt = SystemClock.elapsedRealtime()
-                    busFeedRefreshByRoute[routeId] = if (reports == null) {
-                        (busFeedRefreshByRoute[routeId] ?: BusFeedRefresh()).copy(
-                            retryAtElapsedMs = receivedAt + LIVE_FETCH_BACKOFF_MS,
-                        )
-                    } else {
-                        BusFeedRefresh(fetchedAtElapsedMs = receivedAt)
+    /**
+     * Runs [fetch] on a fetch thread. Should it never run, or fail outright,
+     * [abandon] — under refreshLock — marks its feed as no longer being
+     * fetched, so that the next refresh can ask again.
+     */
+    private fun fetchInBackground(fetch: () -> Unit, abandon: () -> Unit) {
+        feedFetchesInFlight.incrementAndGet()
+        val submitted = runCatching {
+            feedExecutor.execute {
+                try {
+                    if (runCatching(fetch).isFailure) {
+                        synchronized(refreshLock) { abandon() }
                     }
+                } finally {
+                    feedFetchesInFlight.decrementAndGet()
                 }
-                reports?.let { reportsByRoute[routeId] = it }
-            }) {
-                return false
+            }
+        }.isSuccess
+        if (!submitted) {
+            // Executor already shut down (service destroyed mid-refresh).
+            feedFetchesInFlight.decrementAndGet()
+            synchronized(refreshLock) { abandon() }
+        }
+    }
+
+    /**
+     * Fetches the stop feed for [trip] and applies it. What was fetched for a
+     * trip since replaced is dropped, and its bookkeeping left alone: that
+     * belongs to the new trip now.
+     */
+    private fun fetchStopFeed(trip: TrackedTrip, requestedAtElapsedMs: Long) {
+        val session = trip.session
+        val liveStops = fetchLiveStopMapFromBackend(session)
+        val applied = applyToTrip(trip) {
+            synchronized(refreshLock) { liveStopFetchInFlight = false }
+            // The same detector can receive a newer foreground update while
+            // this request is out. Discard its stop data and back-off only;
+            // the independently fetched vehicle positions remain useful.
+            if (stopFeedRevision != trip.stopFeedRevision) {
+                return@applyToTrip
+            }
+            // familyRealtime folds a failed request into an empty map, and a
+            // route with stops to look up that answers with nothing is a
+            // failure rather than an empty feed — so back off rather than
+            // spend the shared rate limit on retries.
+            if (liveStops.isEmpty()) {
+                synchronized(refreshLock) {
+                    liveStopBackoffUntilMs = requestedAtElapsedMs + LIVE_FETCH_BACKOFF_MS
+                }
+            } else {
+                synchronized(refreshLock) {
+                    cachedLiveRouteIds = session.realtimeRouteIds
+                    cachedLivePathId = session.pathId
+                    cachedLiveFetchedAtMs = requestedAtElapsedMs
+                    cachedLiveStops = liveStops
+                }
+                liveStops.values.mapNotNull { it.observedAtMs }.maxOrNull()?.let { observedAtMs ->
+                    liveStopsObservedAtMs = maxOf(liveStopsObservedAtMs, observedAtMs)
+                }
+                feedBoardingEta(trip.detector, session, liveStops, fromTheApp = false)
             }
         }
-        return applyToTrip(trip) {
-            val currentRoutes = this.session?.realtimeRouteIds.orEmpty().toSet()
-            // A plate can occur in more than one endpoint; it is still one bus.
-            // Keep its newest report, rather than letting route iteration order
-            // choose which position drives a ride with no phone location.
-            val reports = reportsByRoute.filterKeys { it in currentRoutes }.values.flatten()
-                .groupBy { it.vehicleId }.values.mapNotNull { track -> track.maxByOrNull { it.gpsTimeMs } }
-            trip.detector.onBusReports(reports)
+        if (applied) {
+            publishRideSoon(trip)
+        }
+    }
+
+    /**
+     * Fetches the vehicles of [routeId] for [trip] and hands them to its
+     * detector, unless the trip has been replaced meanwhile.
+     *
+     * Each route's vehicles go to the detector as they arrive. A plate can
+     * occur in more than one endpoint and is still one bus: the detector keeps
+     * a vehicle's reports in the order they were made, and drops one no newer
+     * than the last, so which endpoint answered first decides nothing.
+     */
+    private fun fetchBusFeed(trip: TrackedTrip, routeId: String) {
+        val reports = fetchBusReportsFromBackend(trip.session, routeId)
+        val applied = applyToTrip(trip) {
+            // A confirmed ride survives family updates, but an endpoint
+            // removed from its family must not publish an in-flight result.
+            if (routeId !in this.session?.realtimeRouteIds.orEmpty()) {
+                return@applyToTrip
+            }
+            synchronized(refreshLock) {
+                val receivedAt = SystemClock.elapsedRealtime()
+                busFeedRefreshByRoute[routeId] = if (reports == null) {
+                    (busFeedRefreshByRoute[routeId] ?: BusFeedRefresh()).copy(
+                        retryAtElapsedMs = receivedAt + LIVE_FETCH_BACKOFF_MS,
+                        inFlight = false,
+                    )
+                } else {
+                    BusFeedRefresh(fetchedAtElapsedMs = receivedAt)
+                }
+            }
+            reports?.let(trip.detector::onBusReports)
+        }
+        if (applied && reports != null) {
+            publishRideSoon(trip)
         }
     }
 
@@ -2203,6 +2289,8 @@ class RouteTripMonitorService : Service() {
         cachedLiveStops = emptyMap()
         busFeedRefreshByRoute.clear()
         liveStopBackoffUntilMs = 0L
+        // A request still out is for the trip that was; its answer is dropped.
+        liveStopFetchInFlight = false
     }
 
     /**
@@ -2235,13 +2323,27 @@ class RouteTripMonitorService : Service() {
         return familyRealtime.fetch(session)
     }
 
-    /** Live positions of every vehicle on the route; null when the request failed. */
-    private fun fetchBusReportsFromBackend(routeId: String): List<RideBusReport>? {
+    /**
+     * Live positions of every vehicle on [routeId]; null when they could not
+     * be fetched.
+     *
+     * A vehicle of another route of the family is on this trip's route only
+     * where the two share stops, so its reports say which stops those are. If
+     * that cannot be found out the vehicles are not used: one placed on this
+     * route where its own route has left it would be read as arriving at stops
+     * it never calls at.
+     */
+    private fun fetchBusReportsFromBackend(session: TrackingSession, routeId: String): List<RideBusReport>? {
         val encodedRouteId = URLEncoder.encode(routeId, Charsets.UTF_8.name())
         val array = fetchBackendJsonArray("/api/v1/routes/$encodedRouteId/realtime/buses")
             ?: return null
         val receivedAtMs = System.currentTimeMillis()
-        return runCatching { parseBusReports(array, receivedAtMs) }.getOrNull()
+        val reports = runCatching { parseBusReports(array, receivedAtMs) }.getOrNull() ?: return null
+        if (routeId == session.routeId || reports.isEmpty()) {
+            return reports
+        }
+        val servedStopIds = familyRealtime.stopsServedBy(session, routeId) ?: return null
+        return reports.map { it.copy(servedStopIds = servedStopIds) }
     }
 
     private fun parseBusReports(
@@ -2436,6 +2538,7 @@ class RouteTripMonitorService : Service() {
         private const val LIVE_BUS_REFRESH_INTERVAL_MS = 15_000L
         private const val LIVE_FETCH_BACKOFF_MS = 60_000L
         private const val MIN_REFRESH_INTERVAL_MS = 2_000L
+        private const val FEED_FETCH_THREADS = 4
         private const val LOCATION_UPDATE_INTERVAL_MS = 12_000L
         private const val LOCATION_MIN_UPDATE_INTERVAL_MS = 6_000L
         private const val BACKGROUND_AUTO_PAUSE_GRACE_MS = 90_000L

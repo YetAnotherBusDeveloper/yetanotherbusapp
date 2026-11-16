@@ -265,6 +265,38 @@ class TripRideDetectorManualBoardingTest {
     }
 
     @Test
+    fun aVariantsBusCountsOnlyWhereItsRouteSharesThisOnes() {
+        // The variant calls at the second to the fourth of these six stops.
+        val shared = setOf(2, 3, 4)
+        fun variant(seconds: Long, along: Double) = report(seconds, along).copy(servedStopIds = shared)
+        val detector = newDetector(boardingStopId = 2)
+        detector.onBusReports(listOf(variant(0, along = 500.0)))
+        detector.confirmBoardedByUser(at(0))
+        assertEquals(BUS, detector.snapshot(at(0)).trackedVehicleId)
+
+        detector.onBusReports(listOf(variant(60, along = 1_000.0)))
+        val between = detector.snapshot(at(60))
+        assertEquals(2, between.progressStopIndex)
+        assertTrue(between.hasRouteValidProgress)
+
+        // Past the last stop it shares, its place along this route means nothing.
+        detector.onBusReports(listOf(variant(120, along = 1_900.0)))
+        val beyond = detector.snapshot(at(120))
+        assertEquals("it is still the rider's bus", BUS, beyond.trackedVehicleId)
+        assertEquals(-1, beyond.progressStopIndex)
+        assertFalse(beyond.hasRouteValidProgress)
+        assertNull(beyond.passedDestinationByStops)
+
+        // Nor before the first: it is not coming up to the boarding stop here.
+        val approaching = newDetector(boardingStopId = 2)
+        approaching.onBusReports(listOf(variant(0, along = 100.0)))
+        assertNull(approaching.snapshot(at(0)).nextBusVehicleId)
+        // A bus of the route itself, in the same place, is.
+        approaching.onBusReports(listOf(report(0, along = 100.0, id = "MAIN")))
+        assertEquals("MAIN", approaching.snapshot(at(0)).nextBusVehicleId)
+    }
+
+    @Test
     fun atStopEvidenceMustBeFromTheNinetySecondsBeforeConfirming() {
         for (seconds in listOf(90L, 91L)) {
             val detector = newDetector()

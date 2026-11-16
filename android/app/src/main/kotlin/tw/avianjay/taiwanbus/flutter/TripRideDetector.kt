@@ -30,6 +30,12 @@ internal data class RideBusReport(
     val longitude: Double,
     val gpsTimeMs: Long,
     val receivedAtMs: Long,
+    /**
+     * For a vehicle of another route of the family: the stops of this trip's
+     * path that its own route also calls at. Null for a vehicle of the route
+     * itself, which calls at all of them.
+     */
+    val servedStopIds: Set<Int>? = null,
 )
 
 /**
@@ -289,8 +295,28 @@ internal class TripRideDetector(
             samePath = report.pathId == null || report.pathId == pathId,
             // Parked and deadheading vehicles project onto the route from
             // far away; only vehicles actually on it may announce arrivals.
-            onRoute = isOnRoute(projection),
+            onRoute = isOnRoute(projection) && runsHere(report.servedStopIds, projection.alongMeters),
         )
+    }
+
+    /**
+     * Whether a vehicle whose route calls at [servedStopIds] is, at
+     * [alongMeters], on a stretch its route shares with this trip's.
+     *
+     * A variant of the route runs along it for some of its stops and then goes
+     * its own way — to another platform of the same terminal, say, seventy
+     * metres from this route's. Its position still projects onto this route,
+     * as near the last stop as makes no difference, and would be read as the
+     * ride arriving at a stop that bus never calls at. So a variant's position
+     * counts only between the first and the last stop the two routes share.
+     */
+    private fun runsHere(servedStopIds: Set<Int>?, alongMeters: Double): Boolean {
+        servedStopIds ?: return true
+        val first = stopIds.indexOfFirst { it in servedStopIds }
+        val last = stopIds.indexOfLast { it in servedStopIds }
+        return first >= 0 &&
+            alongMeters >= line.alongOfStop(first) - AT_STOP_MARGIN_METERS &&
+            alongMeters <= line.alongOfStop(last) + AT_STOP_MARGIN_METERS
     }
 
     /** Whether a bus at [from] could have driven to where [report] puts it by then. */
