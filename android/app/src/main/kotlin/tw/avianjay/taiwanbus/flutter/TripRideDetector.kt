@@ -186,6 +186,9 @@ internal class TripRideDetector(
             timestampMs = point.timestampMs,
             accuracyMeters = point.accuracyMeters,
             speedMetersPerSecond = point.speedMetersPerSecond,
+            // A phone can be anywhere. One on another road still projects to a
+            // position along this route, and moves along it as it goes.
+            onRoute = isOnRoute(projection),
         )
         while (userTrack.size > MAX_USER_SAMPLES) {
             userTrack.removeFirst()
@@ -215,16 +218,26 @@ internal class TripRideDetector(
                 samePath = report.pathId == null || report.pathId == pathId,
                 // Parked and deadheading vehicles project onto the route from
                 // far away; only vehicles actually on it may announce arrivals.
-                onRoute = projection.crossTrackMeters <= maxOf(
-                    ON_ROUTE_MIN_CROSS_TRACK_METERS,
-                    ON_ROUTE_SEGMENT_SHARE * line.segmentLengthMeters(projection.segmentIndex),
-                ),
+                onRoute = isOnRoute(projection),
             )
             while (track.size > MAX_BUS_SAMPLES) {
                 track.removeFirst()
             }
         }
     }
+
+    /**
+     * Whether a projected fix lies on the route, rather than merely level with
+     * some point of it. Everything here is measured along the stop sequence,
+     * and a fix kilometres to one side still has a position along it. The
+     * allowance grows with the stretch between two stops, because the road
+     * between them is not the straight line the stops are joined by.
+     */
+    private fun isOnRoute(projection: RideProjection): Boolean =
+        projection.crossTrackMeters <= maxOf(
+            ON_ROUTE_MIN_CROSS_TRACK_METERS,
+            ON_ROUTE_SEGMENT_SHARE * line.segmentLengthMeters(projection.segmentIndex),
+        )
 
     /**
      * Feeds the boarding stop's ETA. An estimate that reaches zero and then
@@ -424,11 +437,13 @@ internal class TripRideDetector(
         prune(nowMs)
         val latestUser = userTrack.lastOrNull()
         val usableUser = latestUser?.takeIf { nowMs - it.timestampMs <= LOCATION_STALE_MS }
-        if (anchoredBoardingIndex < 0 && usableUser != null) {
+        if (anchoredBoardingIndex < 0 && usableUser != null && usableUser.onRoute) {
             // Used only when no boarding stop was chosen: the trip starts
             // wherever the user actually is. Only a current fix can say that —
             // a cached one from minutes ago would pin the whole trip to a stop
-            // the user may have left long before.
+            // the user may have left long before — and only one made on the
+            // route: from anywhere else it would name the stop the user
+            // happens to be level with.
             anchoredBoardingIndex = line.nearestStopIndex(usableUser.alongMeters)
         }
         val boardingStop = boardingIndex
@@ -442,8 +457,8 @@ internal class TripRideDetector(
             val coMovingVehicleId = detectCoMovement(nowMs)
             if (coMovingVehicleId != null) {
                 markBoarded(BoardingEvidence.BUS_CO_MOVEMENT, coMovingVehicleId)
-            } else if (boardingAlong != null && usableUser != null &&
-                detectSelfProgress(nowMs, boardingAlong, usableUser)
+            } else if (boardingStop >= 0 && usableUser != null &&
+                detectSelfProgress(nowMs, boardingStop, usableUser)
             ) {
                 markBoarded(BoardingEvidence.SELF_PROGRESS, vehicleId = null)
             }
@@ -535,7 +550,14 @@ internal class TripRideDetector(
      * Only an unbroken run of reports made on this trip's direction, on the
      * route, is evidence. The feed lists every vehicle of the route — the other
      * direction's, and ones parked or deadheading beside it — and each of those
-     * still projects to some position along this line.
+     * still projects to some position along this line. The same goes for the
+     * rider: a phone travelling a parallel road keeps level with a bus on this
+     * one without being on it.
+     *
+     * Nor is anything from before the rider last said "not yet". That answer
+     * was about what they had been doing, beside whichever bus: two buses
+     * running together would otherwise have the second detected, from the
+     * same minute of movement, the moment the first was turned down.
      */
     private fun detectCoMovement(nowMs: Long): String? {
         if (userTrack.size < 2) {
@@ -554,11 +576,16 @@ internal class TripRideDetector(
                     pairs.clear()
                     return@forEach
                 }
-                if (report.receivedAtMs < nowMs - COMOVE_WINDOW_MS) {
+                if (report.receivedAtMs < nowMs - COMOVE_WINDOW_MS || report.gpsTimeMs < lastDeclineAtMs) {
                     return@forEach
                 }
-                val userAlong = userAlongAt(report.gpsTimeMs) ?: return@forEach
-                pairs += CoMovementPair(userAlong, report.alongMeters, report.gpsTimeMs)
+                // Fixes from before the answer are not interpolated from either.
+                val user = userAt(report.gpsTimeMs, notBeforeMs = lastDeclineAtMs) ?: return@forEach
+                if (!user.onRoute) {
+                    pairs.clear()
+                    return@forEach
+                }
+                pairs += CoMovementPair(user.alongMeters, report.alongMeters, report.gpsTimeMs)
             }
             if (isCoMovement(pairs)) {
                 return vehicleId
@@ -619,24 +646,47 @@ internal class TripRideDetector(
      * count: that is the movement the answer was about, and letting it count
      * again would overrule the answer a moment after it was given. Evidence
      * starts accumulating from scratch instead.
+     *
+     * The travel is measured along the route, so it has to be travel on the
+     * route: it starts at the boarding stop itself, not at a point level with
+     * it on another road, and no fix since has been off the route. And it is
+     * travel the phone made. Where the route uses a street twice, a fix a
+     * little way back down it can be placed on the later pass, a loop further
+     * on; the ground the phone covered meanwhile shows that it was not.
      */
     private fun detectSelfProgress(
         nowMs: Long,
-        boardingAlong: Double,
+        boardingStop: Int,
         latestUser: UserSample,
     ): Boolean {
         if (latestUser.timestampMs < lastDeclineAtMs) {
             return false
         }
         val windowStartMs = maxOf(nowMs - SELF_PROGRESS_WINDOW_MS, lastDeclineAtMs)
+        val lastOffRouteAtMs = userTrack.lastOrNull { !it.onRoute }?.timestampMs ?: Long.MIN_VALUE
         val origin = userTrack.firstOrNull { sample ->
             sample.timestampMs >= windowStartMs &&
+                sample.timestampMs > lastOffRouteAtMs &&
                 sample.accuracyMeters <= SELF_PROGRESS_MAX_ACCURACY_METERS &&
-                abs(sample.alongMeters - boardingAlong) <= BOARDING_ORIGIN_RADIUS_METERS
+                line.metersToStop(sample.latitude, sample.longitude, boardingStop) <=
+                BOARDING_ORIGIN_RADIUS_METERS
         } ?: return false
         val travel = latestUser.alongMeters - origin.alongMeters
         val elapsedSeconds = (latestUser.timestampMs - origin.timestampMs) / 1000.0
         if (travel < SELF_PROGRESS_MIN_METERS || elapsedSeconds <= 0.0) {
+            return false
+        }
+        var groundMeters = 0.0
+        var previous = origin
+        userTrack.forEach { sample ->
+            if (sample.timestampMs > origin.timestampMs) {
+                groundMeters += line.metersBetween(
+                    previous.latitude, previous.longitude, sample.latitude, sample.longitude,
+                )
+                previous = sample
+            }
+        }
+        if (travel > groundMeters * SELF_PROGRESS_MAX_STRETCH + SELF_PROGRESS_STRETCH_ALLOWANCE_METERS) {
             return false
         }
         return travel / elapsedSeconds >= SELF_PROGRESS_MIN_SPEED_MPS &&
@@ -1028,30 +1078,48 @@ internal class TripRideDetector(
         }
     }
 
-    /** The user's along-route position at [timestampMs], linearly interpolated. */
-    private fun userAlongAt(timestampMs: Long): Double? {
-        var previous: UserSample? = null
-        userTrack.forEach { sample ->
-            if (sample.timestampMs >= timestampMs) {
-                val before = previous
-                if (before == null) {
-                    return sample.alongMeters.takeIf {
-                        sample.timestampMs - timestampMs <= INTERPOLATION_TOLERANCE_MS
-                    }
-                }
-                val spanMs = sample.timestampMs - before.timestampMs
-                if (spanMs > MAX_INTERPOLATION_SPAN_MS) {
-                    // No fixes for too long to guess where the user was.
-                    return null
-                }
-                val fraction = (timestampMs - before.timestampMs).toDouble() / spanMs
-                return before.alongMeters + fraction * (sample.alongMeters - before.alongMeters)
+    /**
+     * Where the user was at [timestampMs].
+     *
+     * A fix made at that very moment is the answer, however long it had been
+     * since the one before. Between two fixes no more than
+     * [MAX_INTERPOLATION_SPAN_MS] apart it is a point on the line from one to
+     * the other. Otherwise the nearer fix stands for it only if it was made
+     * within [INTERPOLATION_TOLERANCE_MS] of the moment: across a longer gap
+     * there is no guessing where the user was in between. Fixes older than
+     * [notBeforeMs] are not looked at.
+     */
+    private fun userAt(timestampMs: Long, notBeforeMs: Long = Long.MIN_VALUE): UserPosition? {
+        var before: UserSample? = null
+        var after: UserSample? = null
+        for (sample in userTrack) {
+            if (sample.timestampMs < notBeforeMs) {
+                continue
             }
-            previous = sample
+            if (sample.timestampMs >= timestampMs) {
+                after = sample
+                break
+            }
+            before = sample
         }
-        return previous?.alongMeters?.takeIf {
-            timestampMs - (previous?.timestampMs ?: 0L) <= INTERPOLATION_TOLERANCE_MS
+        if (after != null && after.timestampMs == timestampMs) {
+            return UserPosition(after.alongMeters, after.onRoute)
         }
+        if (before != null && after != null) {
+            val spanMs = after.timestampMs - before.timestampMs
+            if (spanMs <= MAX_INTERPOLATION_SPAN_MS) {
+                val fraction = (timestampMs - before.timestampMs).toDouble() / spanMs
+                return UserPosition(
+                    alongMeters = before.alongMeters + fraction * (after.alongMeters - before.alongMeters),
+                    onRoute = before.onRoute && after.onRoute,
+                )
+            }
+        }
+        val nearest = listOfNotNull(before, after)
+            .minByOrNull { abs(it.timestampMs - timestampMs) }
+            ?.takeIf { abs(it.timestampMs - timestampMs) <= INTERPOLATION_TOLERANCE_MS }
+            ?: return null
+        return UserPosition(nearest.alongMeters, nearest.onRoute)
     }
 
     private fun prune(nowMs: Long) {
@@ -1079,7 +1147,11 @@ internal class TripRideDetector(
         val timestampMs: Long,
         val accuracyMeters: Float,
         val speedMetersPerSecond: Float?,
+        val onRoute: Boolean,
     )
+
+    /** The user's along-route position at some moment, and whether they were on the route. */
+    private data class UserPosition(val alongMeters: Double, val onRoute: Boolean)
 
     private data class BusSample(
         val latitude: Double,
@@ -1146,6 +1218,15 @@ internal class TripRideDetector(
         const val SELF_PROGRESS_MIN_SPEED_MPS = 2.5
         const val SELF_PROGRESS_MAX_ACCURACY_METERS = 60f
         const val BOARDING_ORIGIN_RADIUS_METERS = 250.0
+
+        /**
+         * How much further along the route than over the ground a run of fixes
+         * may have gone. The route is drawn stop to stop, so rounding a corner
+         * between two fixes covers more of it than the straight line between
+         * them — but not several times more.
+         */
+        const val SELF_PROGRESS_MAX_STRETCH = 2.0
+        const val SELF_PROGRESS_STRETCH_ALLOWANCE_METERS = 100.0
 
         const val VEHICLE_SPEED_MPS = 3f
         const val MIN_SPEED_SAMPLES = 3

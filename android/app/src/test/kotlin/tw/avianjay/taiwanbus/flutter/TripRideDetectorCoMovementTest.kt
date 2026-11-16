@@ -148,30 +148,150 @@ class TripRideDetectorCoMovementTest {
         )
     }
 
-    /** The rider travels 300 m up the route in a minute, beside whatever [vehicle] reports. */
-    private fun rideAlongside(vehicle: (Long) -> RideBusReport): RideSnapshot {
+    @Test
+    fun fixesMadeAsTheBusReportedNeedNoFixBetweenThem() {
+        // Bus and phone both speak every 40 s. A fix made when the bus
+        // reported is where the rider was then, with nothing to interpolate —
+        // exactly then, or within the few seconds a fix is allowed at either
+        // end of the track.
+        for (fixLagSeconds in listOf(0L, 4L)) {
+            val detector = newDetector()
+            var ride = RideSnapshot()
+            for (seconds in 0L..80L step 40L) {
+                detector.onBusReports(listOf(report(seconds, along = 5.0 * seconds)))
+                detector.snapshot(at(seconds))
+                val fixAt = seconds + fixLagSeconds
+                detector.onUserLocation(fix(fixAt, along = 5.0 * fixAt))
+                ride = detector.snapshot(at(fixAt))
+            }
+
+            assertEquals("fixes ${fixLagSeconds}s after each report", BoardingEvidence.BUS_CO_MOVEMENT, ride.evidence)
+            assertEquals(BUS, ride.trackedVehicleId)
+        }
+    }
+
+    @Test
+    fun aLongGapWithNoFixNearTheReportIsStillNotGuessedAcross() {
+        // The same ride, but every fix falls 20 s from the nearest report and
+        // 40 s from the next fix: where the rider was when the bus reported is
+        // anyone's guess.
+        val detector = newDetector()
+        var ride = RideSnapshot()
+        for (seconds in 0L..80L step 40L) {
+            detector.onBusReports(listOf(report(seconds, along = 5.0 * seconds)))
+            detector.onUserLocation(fix(seconds + 20, along = 5.0 * (seconds + 20)))
+            ride = detector.snapshot(at(seconds + 20))
+        }
+
+        assertFalse(ride.hasBoarded)
+    }
+
+    @Test
+    fun aPhoneOnAnotherRoadIsNotRidingTheBusItKeepsLevelWith() {
+        // Three kilometres east of the route, heading north at the pace of a
+        // bus that is on it.
+        val ride = rideAlongside(riderOffsetMeters = 3_000.0) { seconds ->
+            report(seconds, along = 5.0 * seconds)
+        }
+
+        assertFalse("level with the bus is not on the bus", ride.hasBoarded)
+        assertEquals(BoardingEvidence.NONE, ride.evidence)
+    }
+
+    @Test
+    fun aPhoneOnAnotherRoadHasNotLeftTheBoardingStopAlongTheRoute() {
+        // No vehicle feed, so only the rider's own progress could say they
+        // boarded: 700 m north in 140 s.
+        fun travel(offsetMeters: (Long) -> Double): RideSnapshot {
+            val detector = newDetector()
+            var ride = RideSnapshot()
+            for (seconds in 0L..140L step 20L) {
+                detector.onUserLocation(fix(seconds, along = 5.0 * seconds, offsetMeters = offsetMeters(seconds)))
+                ride = detector.snapshot(at(seconds))
+            }
+            return ride
+        }
+
+        assertEquals(
+            "along the route itself this is a ride",
+            BoardingEvidence.SELF_PROGRESS,
+            travel { 0.0 }.evidence,
+        )
+        assertFalse("three kilometres to one side it is not", travel { 3_000.0 }.hasBoarded)
+        assertFalse(
+            "nor is setting off from the stop and turning down another road",
+            travel { seconds -> if (seconds < 60) 0.0 else 400.0 }.hasBoarded,
+        )
+    }
+
+    @Test
+    fun aTripWithNoBoardingStopStartsWhereTheRiderIsOnTheRoute() {
+        val detector = newDetector(boardingStopId = null)
+        // Level with the third stop, three kilometres from it.
+        detector.onUserLocation(fix(0, along = 1_000.0, offsetMeters = 3_000.0))
+        assertEquals("nowhere on the route yet", -1, detector.snapshot(at(0)).boardingStopIndex)
+
+        detector.onUserLocation(fix(120, along = 500.0))
+        assertEquals(1, detector.snapshot(at(120)).boardingStopIndex)
+    }
+
+    @Test
+    fun walkingBackDownAStreetTheRouteUsesTwiceIsNotTravelAlongIt() {
+        // Up a street to its end and back down it: the boarding stop, 700 m
+        // up, is passed again 600 m of route later.
+        val outAndBack = listOf(0.0, 700.0, 1_000.0, 700.0, 0.0).mapIndexed { index, north ->
+            val (lat, lon) = point(north, 0.0)
+            TrackingStop(stopId = 900 + index, stopName = "stop-$index", sequence = index, lat = lat, lon = lon)
+        }
+        val detector = TripRideDetector(outAndBack, pathId = 0, boardingStopId = 901, destinationStopId = 904)
+        // Waiting at the stop, then two minutes without a fix while walking
+        // 220 m back the way the bus will come. That fix is as near the return
+        // pass as the outbound one, and 820 m of route separate the two.
+        detector.onUserLocation(waitingFix(0, north = 700.0))
+        detector.onUserLocation(waitingFix(20, north = 700.0))
+        detector.snapshot(at(20))
+        detector.onUserLocation(waitingFix(140, north = 480.0))
+        val ride = detector.snapshot(at(140))
+
+        assertFalse("220 m on foot is not 820 m by bus", ride.hasBoarded)
+    }
+
+    /** A fix with no Doppler speed, as a phone standing or walking reports. */
+    private fun waitingFix(seconds: Long, north: Double): RideGeoPoint {
+        val (lat, lon) = point(north, 0.0)
+        return RideGeoPoint(lat, lon, at(seconds), accuracyMeters = 12f, speedMetersPerSecond = null)
+    }
+
+    /**
+     * The rider travels 300 m up the route in a minute, beside whatever
+     * [vehicle] reports; [riderOffsetMeters] puts them that far east of it.
+     */
+    private fun rideAlongside(
+        riderOffsetMeters: Double = 0.0,
+        vehicle: (Long) -> RideBusReport,
+    ): RideSnapshot {
         val detector = newDetector()
         var snapshot = RideSnapshot()
         for (seconds in 0L..60L step 20L) {
             detector.onBusReports(listOf(vehicle(seconds)))
-            detector.onUserLocation(fix(seconds, along = 5.0 * seconds))
+            detector.onUserLocation(fix(seconds, along = 5.0 * seconds, offsetMeters = riderOffsetMeters))
             snapshot = detector.snapshot(at(seconds))
         }
         return snapshot
     }
 
-    private fun newDetector() = TripRideDetector(
+    private fun newDetector(boardingStopId: Int? = 900) = TripRideDetector(
         stops = (0..4).map { index ->
             val (lat, lon) = point(index * 500.0, 0.0)
             TrackingStop(stopId = 900 + index, stopName = "stop-$index", sequence = index, lat = lat, lon = lon)
         },
         pathId = 0,
-        boardingStopId = 900,
+        boardingStopId = boardingStopId,
         destinationStopId = 904,
     )
 
-    private fun fix(seconds: Long, along: Double): RideGeoPoint {
-        val (lat, lon) = point(along, 0.0)
+    private fun fix(seconds: Long, along: Double, offsetMeters: Double = 0.0): RideGeoPoint {
+        val (lat, lon) = point(along, offsetMeters)
         return RideGeoPoint(lat, lon, at(seconds), accuracyMeters = 12f, speedMetersPerSecond = 5f)
     }
 

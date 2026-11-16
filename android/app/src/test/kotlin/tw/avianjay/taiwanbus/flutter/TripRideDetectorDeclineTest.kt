@@ -4,6 +4,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -184,6 +185,66 @@ class TripRideDetectorDeclineTest {
             "the next bus must be asked about however late the last answer came",
             detector.snapshot(at(350)).boardingPromptDue,
         )
+    }
+
+    @Test
+    fun turningDownOneOfTwoBusesRunningTogetherIsNotAnsweredWithTheOther() {
+        val detector = newDetector()
+        val detected = detector.keepPaceWithTwoBuses()
+        assertEquals(BoardingEvidence.BUS_CO_MOVEMENT, detected.evidence)
+        assertEquals(DECLINED_BUS, detected.trackedVehicleId)
+
+        // Nothing new comes in between the answer and the next look.
+        detector.declineBoarding(at(61))
+        val answered = detector.snapshot(at(61))
+
+        assertFalse(
+            "the minute the rider just said was not a ride cannot be one on the bus alongside",
+            answered.hasBoarded,
+        )
+        assertNull(answered.trackedVehicleId)
+    }
+
+    @Test
+    fun onlyWhatHappensAfterNotYetCountsTowardsTheNextBus() {
+        val detector = newDetector()
+        detector.keepPaceWithTwoBuses()
+        detector.declineBoarding(at(61))
+
+        // The rider keeps moving with the second bus. Its reports now fall two
+        // seconds after each of their fixes, so its first one since the answer
+        // lies between a fix made before the answer and one made after.
+        fun lookAt(seconds: Long): RideSnapshot {
+            detector.onUserLocation(path(step(0, 0.0, 0.0, 5f), step(200, 1_000.0, 0.0, 5f)).fix(at(seconds - 2)))
+            val (lat, lon) = point(5.0 * seconds, 0.0)
+            detector.onBusReports(listOf(RideBusReport(NEXT_BUS, 0, lat, lon, at(seconds), at(seconds))))
+            return detector.snapshot(at(seconds))
+        }
+        detector.onBusReports(
+            point(310.0, 0.0).let { (lat, lon) -> listOf(RideBusReport(NEXT_BUS, 0, lat, lon, at(62), at(62))) },
+        )
+        lookAt(82)
+        assertFalse(
+            "two reports since the answer are not yet a ride, and the fix from before it lends no third",
+            lookAt(102).hasBoarded,
+        )
+
+        val riding = lookAt(122)
+        assertEquals("what has happened since the answer is evidence like any other", NEXT_BUS, riding.trackedVehicleId)
+        assertEquals(BoardingEvidence.BUS_CO_MOVEMENT, riding.evidence)
+    }
+
+    /** Two buses nose to tail for a minute, and the phone keeping pace with both. */
+    private fun TripRideDetector.keepPaceWithTwoBuses(): RideSnapshot {
+        val positions = arrayOf(0L to 0.0, 20L to 100.0, 40L to 200.0, 60L to 300.0)
+        var latest = RideSnapshot()
+        feed(
+            path(step(0, 0.0, 0.0, 5f), step(200, 1_000.0, 0.0, 5f)),
+            listOf(busRun(DECLINED_BUS, *positions), busRun(NEXT_BUS, *positions)),
+            0,
+            60,
+        ) { _, snapshot -> latest = snapshot }
+        return latest
     }
 
     /** A bus pulls in at the boarding stop and drives off, 20 s a report. */
