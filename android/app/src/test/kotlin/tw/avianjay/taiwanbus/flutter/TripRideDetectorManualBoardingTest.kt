@@ -721,6 +721,256 @@ class TripRideDetectorManualBoardingTest {
         )
     }
 
+    // ---- an identified ride keeps its bus -----------------------------------
+
+    @Test
+    fun anIdentifiedRideIsNotHandedToTheNextBusWhenThePhoneGoesQuiet() {
+        // On A at the boarding stop, phone and bus together. Then the phone
+        // stops reporting, and a minute later A is 700 m on with B at the stop.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+        detector.onUserLocation(fix(0, along = 0.0))
+        detector.confirmBoardedByUser(at(0))
+        assertEquals("BUS-A", detector.snapshot(at(0)).trackedVehicleId)
+
+        detector.reportBoth(60, a = 700.0, b = 0.0)
+        val quiet = detector.snapshot(at(60))
+        assertEquals(
+            "where the phone was a minute ago does not show the rider got off A",
+            "BUS-A",
+            quiet.trackedVehicleId,
+        )
+
+        // The fix lapses altogether, and it is A that carries the ride on.
+        detector.reportBoth(100, a = 1_000.0, b = 300.0)
+        val ride = detector.snapshot(at(100))
+        assertFalse(ride.hasUsableLocation)
+        assertEquals("BUS-A", ride.trackedVehicleId)
+        assertEquals(2, ride.progressStopIndex)
+    }
+
+    @Test
+    fun aVehicleReportIsHeldAgainstWhereTheRiderWasWhenItWasMade() {
+        // A fix twenty seconds old, at the stop. A's report, made after it,
+        // has A 400 m on; B is pulling in. Nothing says where the rider was
+        // when A reported — on A, for all the fix shows.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+        detector.onUserLocation(fix(0, along = 0.0))
+        detector.confirmBoardedByUser(at(0))
+        assertEquals("BUS-A", detector.snapshot(at(0)).trackedVehicleId)
+        detector.reportBoth(20, a = 400.0, b = 0.0)
+
+        assertEquals("BUS-A", detector.snapshot(at(20)).trackedVehicleId)
+    }
+
+    @Test
+    fun aVehicleFeedOutageWithAFixStillInHandDoesNotMoveTheRide() {
+        // A's feed stops. The last fix, at the stop and still usable, lies
+        // beside another bus when that one reports.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+        detector.confirmBoardedByUser(at(0))
+        assertEquals("BUS-A", detector.snapshot(at(0)).trackedVehicleId)
+        detector.onUserLocation(fix(150, along = 0.0))
+        detector.onBusReports(listOf(report(200, along = 50.0, id = "BUS-B")))
+
+        val outage = detector.snapshot(at(200))
+        assertTrue(outage.hasUsableLocation)
+        assertEquals("BUS-A", outage.trackedVehicleId)
+    }
+
+    @Test
+    fun aFreshFixThatAnotherBusExplainsStillMovesTheRideToIt() {
+        // Co-movement can lock on to the wrong one of two buses running close
+        // together. The rider's own position, current, sorts that out.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+        detector.onUserLocation(fix(0, along = 0.0))
+        detector.confirmBoardedByUser(at(0))
+        assertEquals("BUS-A", detector.snapshot(at(0)).trackedVehicleId)
+
+        // A has run 700 m ahead; the rider is at the stop still, with B.
+        detector.reportBoth(60, a = 700.0, b = 0.0)
+        detector.onUserLocation(fix(58, along = 5.0))
+        assertEquals("BUS-B", detector.snapshot(at(60)).trackedVehicleId)
+    }
+
+    @Test
+    fun aBusThatFallsSilentIsNotReplacedByOneThatHappensToBeNear() {
+        // Riding A with the phone reporting. A's feed stops; B is 200 m behind
+        // the rider. The rider is still on A.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+        detector.onUserLocation(fix(0, along = 0.0))
+        detector.confirmBoardedByUser(at(0))
+        detector.onBusReports(listOf(report(30, along = 250.0, id = "BUS-A")))
+        detector.onUserLocation(fix(30, along = 250.0))
+        assertEquals("BUS-A", detector.snapshot(at(30)).trackedVehicleId)
+
+        for (seconds in listOf(60L, 120L, 180L, 240L)) {
+            detector.onUserLocation(fix(seconds, along = 250.0 + 4.0 * (seconds - 30)))
+            detector.onBusReports(listOf(report(seconds, along = 50.0 + 4.0 * (seconds - 30), id = "BUS-B")))
+            detector.snapshot(at(seconds))
+        }
+        // A is long past being a live vehicle by now.
+        assertEquals("BUS-A", detector.snapshot(at(240)).trackedVehicleId)
+
+        // Not heard from for more than six minutes, it is no longer anything
+        // to hold on to, and the ride is placed afresh from the rider's own
+        // position, as one with no vehicle would be.
+        for (seconds in listOf(300L, 360L, 420L)) {
+            detector.onUserLocation(fix(seconds, along = 250.0 + 4.0 * (seconds - 30)))
+            detector.onBusReports(listOf(report(seconds, along = 50.0 + 4.0 * (seconds - 30), id = "BUS-B")))
+            detector.snapshot(at(seconds))
+        }
+        assertEquals("BUS-B", detector.snapshot(at(420)).trackedVehicleId)
+    }
+
+    // ---- a bus the rider turned down ----------------------------------------
+
+    @Test
+    fun confirmingByHandDoesNotPutTheRiderBackOnABusTheyTurnedDown() {
+        // A left and the rider said "not yet". It is held up 200 m past the
+        // stop when the rider, still at the stop, boards a bus with no
+        // position feed and says so.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0, id = "BUS-A")))
+        detector.snapshot(at(0))
+        detector.onBusReports(listOf(report(20, along = 150.0, id = "BUS-A")))
+        detector.snapshot(at(20))
+        val asked = detector.snapshot(at(60)).boardingCheckId
+        assertTrue(asked != 0L)
+        detector.declineBoarding(at(65), answeredCheckId = asked)
+
+        detector.onUserLocation(fix(70, along = 0.0))
+        detector.onBusReports(listOf(report(70, along = 200.0, id = "BUS-A")))
+        detector.confirmBoardedByUser(at(75))
+        val confirmed = detector.snapshot(at(75))
+        assertTrue(confirmed.hasBoarded)
+        assertNull("A is the one bus the rider has said they are not on", confirmed.trackedVehicleId)
+
+        // The phone goes quiet and A drives on past the rider's destination.
+        detector.onBusReports(listOf(report(200, along = 2_000.0, id = "BUS-A")))
+        val later = detector.snapshot(at(200))
+        assertNull(later.trackedVehicleId)
+        assertNull("and it must not carry the ride past the destination", later.passedDestinationByStops)
+    }
+
+    @Test
+    fun aRideDetectedOnABusLaterTurnedDownByNameIsNotKept() {
+        // Turned down while it was the detected ride, A is not picked up again
+        // by a later confirmation either.
+        val detector = newDetector()
+        for (seconds in 0L..60L step 20L) {
+            detector.onBusReports(listOf(report(seconds, along = 5.0 * seconds, id = "BUS-A")))
+            detector.onUserLocation(fix(seconds, along = 5.0 * seconds))
+            detector.snapshot(at(seconds))
+        }
+        assertEquals("BUS-A", detector.snapshot(at(60)).trackedVehicleId)
+        detector.declineBoarding(at(61))
+
+        detector.onUserLocation(fix(80, along = 400.0))
+        detector.onBusReports(listOf(report(80, along = 400.0, id = "BUS-A")))
+        detector.confirmBoardedByUser(at(85))
+        assertNull(detector.snapshot(at(85)).trackedVehicleId)
+    }
+
+    // ---- a vehicle position that cannot be right ------------------------------
+
+    @Test
+    fun aVehicleCannotCarryTheRidePastTheDestinationInOneLeap() {
+        // No phone. Riding A from the first stop; twenty seconds later it
+        // reports from two kilometres down the route.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0)))
+        detector.confirmBoardedByUser(at(0))
+        assertEquals(BUS, detector.snapshot(at(0)).trackedVehicleId)
+
+        detector.onBusReports(listOf(report(20, along = 2_000.0)))
+        val leapt = detector.snapshot(at(20))
+        assertEquals("still the rider's bus", BUS, leapt.trackedVehicleId)
+        assertNull("100 m/s is not a bus", leapt.passedDestinationByStops)
+        assertFalse(leapt.hasRouteValidProgress)
+        assertEquals(-1, leapt.progressStopIndex)
+        // Nor a minute later, with nothing new to go on.
+        assertNull(detector.snapshot(at(65)).passedDestinationByStops)
+        assertFalse(detector.snapshot(at(80)).hasRouteValidProgress)
+    }
+
+    @Test
+    fun aVehicleThatGoesOnReportingFromItsNewPlaceIsBelievedThere() {
+        // The leap was real after all: a gap in its own records, say. Its next
+        // report agrees with where the leap put it.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0)))
+        detector.confirmBoardedByUser(at(0))
+        detector.onBusReports(listOf(report(20, along = 2_000.0)))
+        assertFalse(detector.snapshot(at(20)).hasRouteValidProgress)
+
+        detector.onBusReports(listOf(report(40, along = 2_150.0)))
+        val ride = detector.snapshot(at(40))
+        assertTrue(ride.hasRouteValidProgress)
+        assertEquals(4, ride.progressStopIndex)
+        assertEquals(1, ride.passedDestinationByStops)
+    }
+
+    @Test
+    fun aSingleWildPositionDoesNotDisturbTheRide() {
+        // One bad fix, and the bus is back where it should be on the next.
+        val detector = newDetector()
+        detector.onBusReports(listOf(report(0, along = 0.0)))
+        detector.confirmBoardedByUser(at(0))
+        detector.onBusReports(listOf(report(20, along = 2_000.0)))
+        assertFalse(detector.snapshot(at(20)).hasRouteValidProgress)
+
+        detector.onBusReports(listOf(report(40, along = 300.0)))
+        val ride = detector.snapshot(at(40))
+        assertTrue(ride.hasRouteValidProgress)
+        assertEquals(0, ride.progressStopIndex)
+        assertEquals(3, ride.remainingStops)
+        assertNull(ride.passedDestinationByStops)
+    }
+
+    @Test
+    fun aWildPositionDoesNotAnnounceADeparture() {
+        // A bus waiting short of the boarding stop reports, once, from far
+        // down the route. Nobody at the stop has seen a bus leave.
+        val detector = newDetector(boardingStopId = 2)
+        detector.onBusReports(listOf(report(0, along = 450.0)))
+        assertEquals(0L, detector.snapshot(at(0)).boardingCheckId)
+
+        detector.onBusReports(listOf(report(20, along = 2_400.0)))
+        assertEquals(0L, detector.snapshot(at(20)).boardingCheckId)
+        detector.onBusReports(listOf(report(40, along = 470.0)))
+        assertEquals(0L, detector.snapshot(at(40)).boardingCheckId)
+
+        // When it really does pull away, that is asked about as usual.
+        detector.onBusReports(listOf(report(60, along = 500.0)))
+        detector.snapshot(at(60))
+        detector.onBusReports(listOf(report(80, along = 650.0)))
+        assertTrue(detector.snapshot(at(80)).boardingCheckId != 0L)
+    }
+
+    @Test
+    fun aVehicleThatLeaptPastTheStopWasNotSeenLeavingIt() {
+        // Short of the boarding stop, and then — in two reports that agree —
+        // two kilometres beyond it. It is there, but no bus drove past the
+        // stop in those twenty seconds for anyone to have boarded.
+        val detector = newDetector(boardingStopId = 2)
+        detector.onBusReports(listOf(report(0, along = 450.0)))
+        detector.snapshot(at(0))
+        detector.onBusReports(listOf(report(20, along = 2_400.0)))
+        detector.snapshot(at(20))
+        detector.onBusReports(listOf(report(40, along = 2_450.0)))
+
+        assertEquals(0L, detector.snapshot(at(40)).boardingCheckId)
+    }
+
+    private fun fix(seconds: Long, along: Double) = RideGeoPoint(
+        latitude(along), 120.6, at(seconds), accuracyMeters = 10f, speedMetersPerSecond = null,
+    )
+
     private fun assertUnidentified(ride: RideSnapshot) {
         assertTrue("the manual action still confirms that the rider boarded", ride.hasBoarded)
         assertEquals(BoardingEvidence.USER_CONFIRMED, ride.evidence)

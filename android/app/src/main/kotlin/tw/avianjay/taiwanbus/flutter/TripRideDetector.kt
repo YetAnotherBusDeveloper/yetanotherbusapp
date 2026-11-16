@@ -97,6 +97,13 @@ internal class TripRideDetector(
 
     private val userTrack = ArrayDeque<UserSample>()
     private val busTracks = LinkedHashMap<String, ArrayDeque<BusSample>>()
+
+    /**
+     * For each vehicle, a report that put it impossibly far from where it was,
+     * kept back until its next report shows which of the two places was right.
+     * See [onBusReports].
+     */
+    private val unconfirmedLeaps = HashMap<String, BusSample>()
     /** Vehicles last seen short of the boarding stop, with when that report arrived. */
     private val seenBeforeBoardingStopAt = HashMap<String, Long>()
 
@@ -196,6 +203,20 @@ internal class TripRideDetector(
         return true
     }
 
+    /**
+     * Feeds one poll of the vehicle feed.
+     *
+     * A vehicle that reports itself further from its last position than a bus
+     * can drive in the time between is not believed at once. The recorded
+     * feeds have such a report in one of every two thousand — a vehicle seven
+     * kilometres away forty seconds later — and with no phone fix a single one
+     * would carry the ride past the destination and sound the overshoot alarm.
+     * The report is kept back instead: the vehicle counts as heard from, but
+     * not as being anywhere. Its next report settles it. One that fits the
+     * track shows the leap was a stray fix, and it is dropped; one that could
+     * have been driven to from the kept-back position confirms that position,
+     * and both join the track as a new stretch.
+     */
     fun onBusReports(reports: List<RideBusReport>) {
         reports.forEach { report ->
             if (report.vehicleId.isBlank() || report.gpsTimeMs <= 0L) {
@@ -203,27 +224,53 @@ internal class TripRideDetector(
             }
             val track = busTracks.getOrPut(report.vehicleId) { ArrayDeque() }
             val last = track.lastOrNull()
+            val leap = unconfirmedLeaps[report.vehicleId]
             // Vehicles report every ~20 s but the feed is polled more often, so
             // most polls repeat the previous fix.
-            if (last != null && report.gpsTimeMs <= last.gpsTimeMs) {
+            if (report.gpsTimeMs <= (leap?.gpsTimeMs ?: last?.gpsTimeMs ?: 0L)) {
                 return@forEach
             }
-            val projection = line.project(report.latitude, report.longitude, last?.alongMeters)
-            track += BusSample(
-                latitude = report.latitude,
-                longitude = report.longitude,
-                alongMeters = projection.alongMeters,
-                gpsTimeMs = report.gpsTimeMs,
-                receivedAtMs = report.receivedAtMs,
-                samePath = report.pathId == null || report.pathId == pathId,
-                // Parked and deadheading vehicles project onto the route from
-                // far away; only vehicles actually on it may announce arrivals.
-                onRoute = isOnRoute(projection),
-            )
+            if (last == null || isDrivable(last, report)) {
+                unconfirmedLeaps.remove(report.vehicleId)
+                track += sampleOf(report, hint = last?.alongMeters)
+            } else if (leap != null && isDrivable(leap, report)) {
+                // It went on from where the leap put it: that was the vehicle.
+                unconfirmedLeaps.remove(report.vehicleId)
+                track += leap.copy(startsNewStretch = true)
+                track += sampleOf(report, hint = leap.alongMeters)
+            } else {
+                // Too far from the track, and from any leap before it.
+                unconfirmedLeaps[report.vehicleId] = sampleOf(report, hint = null)
+            }
             while (track.size > MAX_BUS_SAMPLES) {
                 track.removeFirst()
             }
         }
+    }
+
+    private fun sampleOf(report: RideBusReport, hint: Double?): BusSample {
+        val projection = line.project(report.latitude, report.longitude, hint)
+        return BusSample(
+            latitude = report.latitude,
+            longitude = report.longitude,
+            alongMeters = projection.alongMeters,
+            gpsTimeMs = report.gpsTimeMs,
+            receivedAtMs = report.receivedAtMs,
+            samePath = report.pathId == null || report.pathId == pathId,
+            // Parked and deadheading vehicles project onto the route from
+            // far away; only vehicles actually on it may announce arrivals.
+            onRoute = isOnRoute(projection),
+        )
+    }
+
+    /** Whether a bus at [from] could have driven to where [report] puts it by then. */
+    private fun isDrivable(from: BusSample, report: RideBusReport): Boolean {
+        val elapsedSeconds = (report.gpsTimeMs - from.gpsTimeMs) / 1000.0
+        if (elapsedSeconds <= 0.0) {
+            return false
+        }
+        val meters = line.metersBetween(from.latitude, from.longitude, report.latitude, report.longitude)
+        return meters <= MAX_BUS_STEP_ALLOWANCE_METERS + MAX_PLAUSIBLE_BUS_SPEED_MPS * elapsedSeconds
     }
 
     /**
@@ -465,14 +512,17 @@ internal class TripRideDetector(
         }
         trackedVehicleId = resolveTrackedVehicle(vehicles, usableUser, nowMs)
         val trackedVehicle = vehicles.firstOrNull {
-            it.vehicleId == trackedVehicleId && it.samePath && it.onRoute
+            it.vehicleId == trackedVehicleId && it.samePath && it.onRoute && !it.positionUnconfirmed
         }
 
         val nextBus = if (boardingAlong == null) {
             null
         } else {
             vehicles
-                .filter { it.samePath && it.onRoute && it.alongMeters <= boardingAlong + AT_STOP_MARGIN_METERS }
+                .filter {
+                    it.samePath && it.onRoute && !it.positionUnconfirmed &&
+                        it.alongMeters <= boardingAlong + AT_STOP_MARGIN_METERS
+                }
                 .maxByOrNull { it.alongMeters }
         }
 
@@ -570,6 +620,10 @@ internal class TripRideDetector(
             }
             pairs.clear()
             track.forEach { report ->
+                if (report.startsNewStretch) {
+                    // Nothing is known of how it got here from where it was.
+                    pairs.clear()
+                }
                 if (!report.samePath || !report.onRoute) {
                     // Whatever came before is not joined to what follows as
                     // though the bus had run on through.
@@ -720,7 +774,8 @@ internal class TripRideDetector(
         nowMs: Long,
     ) {
         vehicles.forEach { vehicle ->
-            if (!vehicle.samePath || !vehicle.onRoute) {
+            if (!vehicle.samePath || !vehicle.onRoute || vehicle.positionUnconfirmed) {
+                // Where it is cannot be said, so neither can whether it left.
                 return@forEach
             }
             val offset = vehicle.alongMeters - boardingAlong
@@ -729,13 +784,21 @@ internal class TripRideDetector(
             } else if (offset > LEFT_STOP_MARGIN_METERS) {
                 val seenAt = seenBeforeBoardingStopAt.remove(vehicle.vehicleId) ?: return@forEach
                 // A vehicle that went quiet short of the stop and turns up past
-                // it much later left long ago; nobody is boarding it now.
-                if (vehicle.receivedAtMs - seenAt <= DEPARTURE_MAX_REPORT_GAP_MS) {
+                // it much later left long ago; nobody is boarding it now. Nor
+                // one that got past it by a leap no bus could have driven:
+                // nobody watched that pull away from the stop.
+                if (vehicle.receivedAtMs - seenAt <= DEPARTURE_MAX_REPORT_GAP_MS &&
+                    !leaptSince(vehicle.vehicleId, seenAt)
+                ) {
                     registerDeparture(vehicle.vehicleId, nowMs)
                 }
             }
         }
     }
+
+    /** Whether [vehicleId] has, since [sinceMs], reached a position by a leap no bus could drive. */
+    private fun leaptSince(vehicleId: String, sinceMs: Long): Boolean =
+        busTracks[vehicleId].orEmpty().any { it.startsNewStretch && it.receivedAtMs > sinceMs }
 
     /**
      * Counts a bus leaving the boarding stop, which is what the question is
@@ -940,11 +1003,27 @@ internal class TripRideDetector(
     }
 
     /**
-     * Once on board, the vehicle to follow is the one the user is inside. Its
-     * reported position trails the user's own fix by the feed's delay, so it is
-     * expected a little behind and never far ahead. It is also on this trip's
-     * direction and on the route: a vehicle parked beside the route projects
-     * onto it too, and can be the nearest one there is.
+     * Once on board, the vehicle to follow is the one the user is inside. It
+     * is on this trip's direction and on the route: a vehicle parked beside
+     * the route projects onto it too, and can be the nearest one there is.
+     *
+     * A vehicle is held against where the rider was when it made its report,
+     * not against where the rider is now: a report is half a minute old by the
+     * time it arrives, and the two have both moved on since. The bounds are
+     * wide all the same — the vehicle's clock and the phone's can disagree by
+     * several seconds, which at speed is a long way.
+     *
+     * So a vehicle the ride is already on is given up only when the rider's
+     * track shows them somewhere else at the time of its report. With no fix
+     * from around then there is nothing to show that: the phone going quiet
+     * while the bus drives on leaves the last fix at the boarding stop, beside
+     * whichever bus pulls in next, and that is not the rider getting off one
+     * and on to the other. Nor is a vehicle's own feed going quiet, or one
+     * bad report from it, a reason to take up the nearest bus still reporting.
+     *
+     * A bus the rider has said they are not on is never picked, whatever is
+     * near: "I have boarded" confirms a ride, and says nothing to take that
+     * answer back.
      */
     private fun resolveTrackedVehicle(
         vehicles: List<LiveVehicle>,
@@ -954,28 +1033,49 @@ internal class TripRideDetector(
         if (!boarded) {
             return null
         }
-        val locked = vehicles.firstOrNull { it.vehicleId == trackedVehicleId && it.samePath && it.onRoute }
+        val current = trackedVehicleId?.takeUnless { isRejected(it, nowMs) }
         if (usableUser == null) {
             // Remember the ride through an outage or an invalid report, but
             // only a fresh, valid report supplies progress in snapshot(). A
             // manual confirmation may also precede the first vehicle response.
-            return trackedVehicleId ?: if (evidence == BoardingEvidence.USER_CONFIRMED) {
+            return current ?: if (evidence == BoardingEvidence.USER_CONFIRMED) {
                 identifyBoardingVehicle(nowMs)
             } else {
                 null
             }
         }
-        if (locked != null &&
-            usableUser.alongMeters - locked.alongMeters in -TRACK_MAX_AHEAD_METERS..TRACK_KEEP_BEHIND_METERS
-        ) {
-            return locked.vehicleId
+        val placed = vehicles.filter {
+            it.samePath && it.onRoute && !it.positionUnconfirmed && !isRejected(it.vehicleId, nowMs)
         }
-        return vehicles
-            .filter { it.samePath && it.onRoute }
-            .filter { usableUser.alongMeters - it.alongMeters in -TRACK_MAX_AHEAD_METERS..TRACK_PICK_BEHIND_METERS }
-            .minByOrNull { abs(usableUser.alongMeters - it.alongMeters) }
-            ?.vehicleId
+        val locked = placed.firstOrNull { it.vehicleId == current }
+        if (locked != null) {
+            val ahead = riderAheadOf(locked)
+            if (ahead == null || ahead in -TRACK_MAX_AHEAD_METERS..TRACK_KEEP_BEHIND_METERS) {
+                return locked.vehicleId
+            }
+        } else if (current != null && busTracks.containsKey(current)) {
+            // Heard from within the last few minutes, but not usably placed
+            // now: nothing to hold the rider's position against.
+            return current
+        }
+        val other = placed
+            .mapNotNull { vehicle -> riderAheadOf(vehicle)?.let { vehicle.vehicleId to it } }
+            .filter { (_, ahead) -> ahead in -TRACK_MAX_AHEAD_METERS..TRACK_PICK_BEHIND_METERS }
+            .minByOrNull { (_, ahead) -> abs(ahead) }
+            ?.first
+        // A vehicle shown not to be the rider's is dropped even with no other
+        // to take its place; one that has simply not been heard from for
+        // minutes stays until another fits.
+        return other ?: current.takeIf { locked == null }
     }
+
+    /**
+     * How far ahead of [vehicle] the rider was at the moment it made its
+     * latest report; null when the rider's track does not say where they were
+     * then.
+     */
+    private fun riderAheadOf(vehicle: LiveVehicle): Double? =
+        userAt(vehicle.gpsTimeMs)?.let { it.alongMeters - vehicle.alongMeters }
 
     /**
      * Associates an unprompted "I have boarded" with a vehicle, not just a
@@ -1011,7 +1111,8 @@ internal class TripRideDetector(
         }
         val boardingAlong = line.alongOfStop(boardingStop)
         val candidates = liveVehicles(nowMs).filter { vehicle ->
-            if (!vehicle.samePath || !vehicle.onRoute ||
+            if (!vehicle.samePath || !vehicle.onRoute || vehicle.positionUnconfirmed ||
+                isRejected(vehicle.vehicleId, nowMs) ||
                 vehicle.alongMeters - boardingAlong !in -AT_STOP_MARGIN_METERS..MANUAL_VEHICLE_MAX_AHEAD_METERS
             ) {
                 return@filter false
@@ -1071,10 +1172,20 @@ internal class TripRideDetector(
     private fun liveVehicles(nowMs: Long): List<LiveVehicle> {
         return busTracks.entries.mapNotNull { (vehicleId, track) ->
             val last = track.lastOrNull() ?: return@mapNotNull null
-            if (nowMs - last.receivedAtMs > BUS_REPORT_STALE_MS) {
+            val leap = unconfirmedLeaps[vehicleId]
+            val heardAtMs = maxOf(last.receivedAtMs, leap?.receivedAtMs ?: 0L)
+            if (nowMs - heardAtMs > BUS_REPORT_STALE_MS) {
                 return@mapNotNull null
             }
-            LiveVehicle(vehicleId, last.alongMeters, last.samePath, last.onRoute, last.receivedAtMs)
+            LiveVehicle(
+                vehicleId = vehicleId,
+                alongMeters = last.alongMeters,
+                samePath = last.samePath,
+                onRoute = last.onRoute,
+                receivedAtMs = heardAtMs,
+                gpsTimeMs = last.gpsTimeMs,
+                positionUnconfirmed = leap != null,
+            )
         }
     }
 
@@ -1134,6 +1245,7 @@ internal class TripRideDetector(
         busTracks.entries.removeAll { it.value.isEmpty() }
         rejectedAt.entries.removeAll { nowMs - it.value > REJECTED_VEHICLE_TTL_MS }
         seenBeforeBoardingStopAt.keys.retainAll(busTracks.keys)
+        unconfirmedLeaps.keys.retainAll(busTracks.keys)
     }
 
     private fun indexOfStop(stopId: Int?): Int {
@@ -1161,6 +1273,8 @@ internal class TripRideDetector(
         val receivedAtMs: Long,
         val samePath: Boolean,
         val onRoute: Boolean,
+        /** The vehicle reached this position by a leap no bus could drive; see [onBusReports]. */
+        val startsNewStretch: Boolean = false,
     )
 
     /**
@@ -1182,6 +1296,10 @@ internal class TripRideDetector(
         val samePath: Boolean,
         val onRoute: Boolean,
         val receivedAtMs: Long,
+        /** When the vehicle was at [alongMeters], by its own clock. */
+        val gpsTimeMs: Long,
+        /** Its latest report put it somewhere no bus could have driven to; [alongMeters] is where it was before. */
+        val positionUnconfirmed: Boolean = false,
     )
 
     private data class CoMovementPair(
@@ -1200,6 +1318,15 @@ internal class TripRideDetector(
         const val LOCATION_STALE_MS = 90_000L
         const val USER_STOP_PROXIMITY_MAX_METERS = 100.0
         const val MAX_PLAUSIBLE_SPEED_MPS = 55.0
+
+        /**
+         * The furthest a vehicle is believed to have gone between two reports.
+         * City buses in the recorded feeds reach 19 m/s at the 99.9th
+         * percentile; 35 m/s leaves room for a motorway stretch, and the fixed
+         * allowance for GPS error over a short interval.
+         */
+        const val MAX_PLAUSIBLE_BUS_SPEED_MPS = 35.0
+        const val MAX_BUS_STEP_ALLOWANCE_METERS = 150.0
         const val INTERPOLATION_TOLERANCE_MS = 6_000L
         const val MAX_INTERPOLATION_SPAN_MS = 30_000L
 
