@@ -1992,6 +1992,7 @@ class StopEta {
     this.vehicleId,
     this.source = 'tdx',
     this.estimated = false,
+    this.isArriving = false,
     this.etaReferenceAt,
     this.updatedAt,
   });
@@ -1999,6 +2000,10 @@ class StopEta {
   final int? sec;
   final String? msg;
   final String? vehicleId;
+
+  /// The feed flags this vehicle as arriving at the stop. Being listed for a
+  /// stop is not that: every bus heading for it is listed, however far off.
+  final bool isArriving;
   final String source;
   final bool estimated;
   final String? etaReferenceAt;

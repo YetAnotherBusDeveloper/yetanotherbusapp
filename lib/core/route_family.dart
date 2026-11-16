@@ -68,7 +68,8 @@ StopInfo mergeRouteFamilyStopLiveData(
     }
     for (final eta in stop.etas) {
       final key =
-          '${eta.vehicleId}:${eta.sec}:${eta.msg}:${eta.source}:${eta.estimated}';
+          '${eta.vehicleId}:${eta.sec}:${eta.msg}:${eta.source}:${eta.estimated}'
+          ':${eta.isArriving}';
       etasByKey.putIfAbsent(
         key,
         () => StopEta(
@@ -77,6 +78,7 @@ StopInfo mergeRouteFamilyStopLiveData(
           vehicleId: eta.vehicleId,
           source: eta.source,
           estimated: eta.estimated,
+          isArriving: eta.isArriving,
           etaReferenceAt: eta.etaReferenceAt ?? stop.etaReferenceAt,
           updatedAt: eta.updatedAt ?? stop.t,
         ),

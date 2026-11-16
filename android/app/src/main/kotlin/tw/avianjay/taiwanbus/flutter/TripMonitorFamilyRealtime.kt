@@ -101,12 +101,24 @@ private fun liveStops(
     }
 }
 
+/**
+ * One stop of the live feed.
+ *
+ * `buses` is not "the buses at this stop". The backend lists each vehicle under
+ * the stop it will reach next, so a bus a quarter of an hour away appears in
+ * the `buses` of the stop it is heading for: in recorded 台中 and 高雄 feeds a
+ * fifth to a third of those vehicles were more than ten minutes out. What does
+ * place a vehicle at a stop is its own ETA entry there: `is_arriving`, which
+ * the backend sets from the vehicle's own stop status, or an estimate that has
+ * run out.
+ */
 internal fun parseTripMonitorLiveStop(stop: JSONObject): LiveStopState {
     val etas = stop.optJSONArray("etas").objects().mapNotNull { eta ->
         LiveEtaEntry(
             seconds = integer(eta.opt("eta")),
             message = text(eta, "message"),
             vehicleId = vehicle(eta, "plate", "vehicle_id", "id"),
+            isArriving = eta.optBoolean("is_arriving", false),
         ).takeIf { it.seconds != null || it.message != null || it.vehicleId != null }
     }
     val buses = stop.optJSONArray("buses").objects()
@@ -116,23 +128,24 @@ internal fun parseTripMonitorLiveStop(stop: JSONObject): LiveStopState {
         message = text(stop, "message"),
         vehicleIds = (buses + etas.mapNotNull { it.vehicleId }).distinct(),
         etaEntries = etas,
-        busesAtStop = buses,
     )
 }
 
 private fun mergeStops(stops: List<LiveStopState>): LiveStopState {
     val earliest = stops.filter { it.seconds != null && it.seconds >= 0 }.minByOrNull { it.seconds!! }
     val entries = stops.flatMap { stop ->
+        // A vehicle listed without an estimate of its own is shown with the
+        // stop's, and marked as such: that estimate is some bus's, not
+        // necessarily this one's, and says nothing of where this one is.
         stop.etaEntries + stop.vehicleIds
             .filter { id -> stop.etaEntries.none { it.vehicleId == id } }
-            .map { LiveEtaEntry(stop.seconds, stop.message, it) }
+            .map { LiveEtaEntry(stop.seconds, stop.message, it, listedOnly = true) }
     }.distinct().sortedBy { it.seconds?.takeIf { seconds -> seconds >= 0 } ?: Int.MAX_VALUE }
     return LiveStopState(
         seconds = earliest?.seconds,
         message = if (earliest == null) stops.firstNotNullOfOrNull { it.message } else null,
         vehicleIds = (entries.mapNotNull { it.vehicleId } + stops.flatMap { it.vehicleIds }).distinct(),
         etaEntries = entries,
-        busesAtStop = stops.flatMap { it.busesAtStop }.distinct(),
     )
 }
 

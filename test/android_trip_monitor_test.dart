@@ -59,6 +59,52 @@ void main() {
     ]);
   });
 
+  test('stop entries reach the monitor as the feed has them', () {
+    // `buses` lists every vehicle heading for the stop, so the monitor is told
+    // which entries the feed flags as arriving, and of the ones with no plate.
+    final live =
+        TripMonitorStop.fromStop(
+              const StopInfo(
+                routeKey: 300,
+                pathId: 0,
+                stopId: 12251,
+                stopName: '測試站',
+                sequence: 1,
+                lat: 24.1,
+                lon: 120.6,
+                sec: -1,
+                buses: [
+                  BusVehicle(
+                    id: 'AAA-001',
+                    type: '0',
+                    note: '',
+                    full: false,
+                    carOnStop: false,
+                  ),
+                  BusVehicle(
+                    id: 'BBB-002',
+                    type: '0',
+                    note: '',
+                    full: false,
+                    carOnStop: false,
+                  ),
+                ],
+                etas: [
+                  StopEta(sec: -1, vehicleId: 'AAA-001', isArriving: true),
+                  StopEta(sec: -1, isArriving: true),
+                  StopEta(sec: 811, vehicleId: 'BBB-002'),
+                ],
+              ),
+            ).toMap()['liveData']
+            as Map;
+
+    expect(live['etas'], [
+      {'plate': 'AAA-001', 'eta': -1, 'message': null, 'is_arriving': true},
+      {'plate': null, 'eta': -1, 'message': null, 'is_arriving': true},
+      {'plate': 'BBB-002', 'eta': 811, 'message': null, 'is_arriving': false},
+    ]);
+  });
+
   test('session carries when its initial position was measured', () {
     // The route screen's last fix can be minutes old when a trip starts. The
     // monitor judges staleness from this, so it has to cross the channel.

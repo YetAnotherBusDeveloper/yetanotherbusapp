@@ -871,25 +871,30 @@ class RouteTripMonitorService : Service() {
     ) {
         val boardingStopId = session.boardingStopId ?: return
         val liveStop = liveStops[boardingStopId] ?: return
-        val etaEntry = liveStop.etaEntries.firstOrNull()
-        // A plate on an ETA entry is a bus still on its way, possibly ten
-        // minutes out; only a bus the feed places at the stop counts as here.
-        val arriving = liveStop.seconds?.let { it <= 0 } == true ||
-            liveStop.busesAtStop.isNotEmpty() ||
-            liveStop.message?.contains("進站") == true ||
-            liveStop.message?.contains("到站") == true
-        // Which buses those are, all of them: the detector ties the ETA
-        // rolling over to a vehicle only if one alone has been there.
-        val atStop = liveStop.busesAtStop.ifEmpty {
-            liveStop.etaEntries.filter { (it.seconds ?: 1) <= 0 }.mapNotNull { it.vehicleId }
-        }.mapNotNull(::normalizeVehicleId).distinct()
+        // The detector is told what the feed says of each bus, and decides for
+        // itself which of them that places at the stop. Being listed for the
+        // stop — on an ETA entry, or in `buses` — is a bus on its way to it,
+        // possibly a quarter of an hour out.
+        val buses = liveStop.etaEntries.map { entry ->
+            StopFeedBus(
+                vehicleId = normalizeVehicleId(entry.vehicleId),
+                etaSeconds = entry.seconds.takeUnless { entry.listedOnly },
+                arriving = entry.isArriving,
+            )
+        } + liveStop.vehicleIds
+            .mapNotNull(::normalizeVehicleId)
+            .filter { id -> liveStop.etaEntries.none { normalizeVehicleId(it.vehicleId) == id } }
+            .map { StopFeedBus(vehicleId = it, etaSeconds = null) }
         val now = System.currentTimeMillis()
         synchronized(detectorLock) {
             target.onBoardingStopEta(
-                etaSeconds = liveStop.seconds ?: etaEntry?.seconds,
-                arriving = arriving,
+                etaSeconds = liveStop.seconds
+                    ?: liveStop.etaEntries.firstOrNull { !it.listedOnly }?.seconds,
+                arriving = liveStop.etaEntries.any { it.isArriving } ||
+                    liveStop.message?.contains("進站") == true ||
+                    liveStop.message?.contains("到站") == true,
                 nowMs = now,
-                arrivingVehicleIds = if (arriving) atStop else emptyList(),
+                buses = buses,
             )
         }
     }
@@ -2544,17 +2549,25 @@ data class TrackingStop(
 data class LiveStopState(
     val seconds: Int?,
     val message: String?,
-    /** Every vehicle the stop's feed names, including buses still on their way. */
+    /**
+     * Every vehicle the stop's feed names. Any of them may still be on its
+     * way: the feed lists a bus under the stop it will reach next.
+     */
     val vehicleIds: List<String>,
     val etaEntries: List<LiveEtaEntry> = emptyList(),
-    /** Only the vehicles the feed places at this stop right now. */
-    val busesAtStop: List<String> = emptyList(),
 )
 
 data class LiveEtaEntry(
     val seconds: Int?,
     val message: String?,
     val vehicleId: String?,
+    /** The feed flags this vehicle as arriving at the stop. */
+    val isArriving: Boolean = false,
+    /**
+     * The feed lists this vehicle for the stop with no estimate of its own;
+     * [seconds] and [message] are the stop's, for display.
+     */
+    val listedOnly: Boolean = false,
 )
 
 data class TrackingSnapshot(

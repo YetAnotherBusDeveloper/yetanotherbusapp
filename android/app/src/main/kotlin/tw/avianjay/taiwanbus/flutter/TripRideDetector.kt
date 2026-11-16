@@ -32,6 +32,22 @@ internal data class RideBusReport(
     val receivedAtMs: Long,
 )
 
+/**
+ * What the stop feed says of one bus heading for the boarding stop.
+ *
+ * Being listed is not being there. The backend lists a vehicle under the stop
+ * it will reach next, with an estimate that can be three quarters of an hour;
+ * what places it at the stop is [arriving], or its own estimate having run out.
+ */
+internal data class StopFeedBus(
+    /** Null when the feed gives the bus no plate, as 雙北's does not. */
+    val vehicleId: String?,
+    /** Its own estimate for the stop; null when the feed lists it without one. */
+    val etaSeconds: Int?,
+    /** The feed flags it as arriving at the stop. */
+    val arriving: Boolean = false,
+)
+
 internal enum class BoardingEvidence {
     NONE,
 
@@ -136,9 +152,23 @@ internal class TripRideDetector(
     private val declinedDepartures = ArrayList<Departure>()
     private var declinedRideAtMs = 0L
 
+    /** When the stop feed last had a bus at the boarding stop, or due there; 0 when none is. */
     private var etaArrivingAtMs = 0L
-    /** Every vehicle the stop feed has placed at the stop since the ETA last reached zero. */
-    private val etaArrivingVehicles = HashSet<String>()
+
+    /** When the stop feed last carried a live estimate: a bus arriving, or one due within four minutes. */
+    private var etaLiveAtMs = 0L
+
+    /**
+     * Every named bus the stop feed has placed at the stop since one was last
+     * due there, with when it was first and last placed there.
+     */
+    private val etaArrivingVehicles = HashMap<String, StopPresence>()
+
+    /** Every named bus the feed has had within four minutes of the stop meanwhile. */
+    private val etaNearbyVehicles = HashSet<String>()
+
+    /** Whether the feed has, meanwhile, had a bus at the stop without saying which. */
+    private var etaArrivalUnidentified = false
 
     /**
      * The pending "did you get on?" question: its id, and every bus that has
@@ -287,42 +317,103 @@ internal class TripRideDetector(
         )
 
     /**
-     * Feeds the boarding stop's ETA. An estimate that reaches zero and then
-     * rolls over to the next bus means a vehicle has left, which is the only
-     * departure signal available when that vehicle has no position feed.
+     * Feeds the boarding stop's entry in the stop feed. A bus due at the stop,
+     * followed by the estimate rolling over to the next bus or vanishing, means
+     * a vehicle has left — the only departure signal there is when that
+     * vehicle has no position feed.
+     *
+     * [etaSeconds] is the stop's estimate, [arriving] whether the feed says
+     * outright that a bus is arriving, and [buses] what it says of each bus
+     * heading for the stop.
+     *
+     * A bus is due when the feed flags one as arriving, or the estimate is
+     * within half a minute. An estimate that has run out — the backend counts
+     * it down to −1 and leaves it there — says a bus was due only as the end
+     * of a countdown this detector watched: in recorded feeds every one of
+     * those was a bus passing the stop, and they are most of what 雙北, whose
+     * feed never flags an arrival, has to offer. By itself, with no estimate
+     * before it, it is a stop nobody is counting down to, and no bus.
+     *
+     * Which bus left is said only when the feed leaves one possibility. It
+     * must have placed exactly one named bus at the stop; none it did not
+     * name; and no other named bus within four minutes of it meanwhile, since
+     * a bus that close can pull in and leave between two polls. Otherwise the
+     * rollover is a bus leaving, and no more than that.
      */
     fun onBoardingStopEta(
         etaSeconds: Int?,
         arriving: Boolean,
         nowMs: Long,
-        arrivingVehicleIds: Collection<String> = emptyList(),
+        buses: List<StopFeedBus> = emptyList(),
     ) {
-        if (arriving || (etaSeconds != null && etaSeconds <= ETA_ARRIVING_SECONDS)) {
-            if (etaArrivingAtMs == 0L || nowMs - etaArrivingAtMs > ETA_ROLLOVER_WINDOW_MS) {
-                etaArrivingVehicles.clear()
+        val ranOut = !arriving && etaSeconds != null && etaSeconds < 0
+        val busDue = arriving ||
+            (etaSeconds != null && etaSeconds in 0..ETA_ARRIVING_SECONDS) ||
+            (ranOut && etaLiveAtMs != 0L && nowMs - etaLiveAtMs <= ETA_RAN_OUT_MAX_MS)
+        if (arriving || (etaSeconds != null && etaSeconds in 0 until ETA_ROLLOVER_SECONDS)) {
+            etaLiveAtMs = nowMs
+        }
+        val nearby = buses.filter { bus ->
+            bus.vehicleId != null &&
+                (bus.arriving || bus.etaSeconds == null || bus.etaSeconds < ETA_ROLLOVER_SECONDS)
+        }.mapNotNull { it.vehicleId }
+        val arrivalOpen = etaArrivingAtMs != 0L && nowMs - etaArrivingAtMs <= ETA_ROLLOVER_WINDOW_MS
+        if (busDue) {
+            if (!arrivalOpen) {
+                forgetStopArrival()
             }
             etaArrivingAtMs = nowMs
-            // Where the stop feed says which bus is standing there, the
-            // rollover that follows is that bus leaving — the one thing that
-            // ties an ETA departure to a vehicle. Only while it has been the
-            // one bus there throughout: once a second has been at the stop,
-            // together with it or after it, the rollover is either of them
-            // leaving, and may not be the first of them to have left.
-            etaArrivingVehicles += arrivingVehicleIds
+            val there = buses.filter { it.arriving || (it.etaSeconds != null && it.etaSeconds <= 0) }
+            there.mapNotNull { it.vehicleId }.forEach { vehicleId ->
+                etaArrivingVehicles.getOrPut(vehicleId) { StopPresence(sinceMs = nowMs) }.untilMs = nowMs
+            }
+            etaNearbyVehicles += nearby
+            // A bus there with no plate; or the feed saying one is arriving
+            // and listing none that is.
+            if (there.any { it.vehicleId == null } || (arriving && there.isEmpty())) {
+                etaArrivalUnidentified = true
+            }
             return
         }
-        // Once the estimate reaches zero it either jumps to the next bus or
-        // disappears entirely; both mean the vehicle that was arriving has gone.
-        val rolledOver = etaArrivingAtMs != 0L &&
-            nowMs - etaArrivingAtMs <= ETA_ROLLOVER_WINDOW_MS &&
-            (etaSeconds == null || etaSeconds >= ETA_ROLLOVER_SECONDS)
-        if (rolledOver) {
-            val departed = etaArrivingVehicles.singleOrNull()
-            etaArrivingAtMs = 0L
-            etaArrivingVehicles.clear()
+        if (ranOut || !arrivalOpen) {
+            // A stale estimate is neither a bus due nor the next bus's.
+            return
+        }
+        if (etaSeconds == null || etaSeconds >= ETA_ROLLOVER_SECONDS) {
+            // Once a bus has been due the estimate either jumps to the next
+            // bus or disappears entirely; both mean that bus has gone.
+            val only = etaArrivingVehicles.keys.singleOrNull()
+            val departed = only?.takeUnless {
+                etaArrivalUnidentified || etaNearbyVehicles.any { it != only }
+            }
+            forgetStopArrival()
             registerDeparture(vehicleId = departed, nowMs = nowMs, byEta = true)
+        } else {
+            // Between half a minute and four minutes out: this one too may
+            // have come and gone by the time the estimate rolls over.
+            etaNearbyVehicles += nearby
         }
     }
+
+    private fun forgetStopArrival() {
+        etaArrivingAtMs = 0L
+        etaArrivingVehicles.clear()
+        etaNearbyVehicles.clear()
+        etaArrivalUnidentified = false
+    }
+
+    /**
+     * Whether the stop feed had a named bus other than [except] at the boarding
+     * stop around [atMs]. It may have no position feed to be seen by, and the
+     * rider can be boarding it all the same. A poll is some seconds behind
+     * the street, so a bus first placed there shortly after [atMs] counts too.
+     */
+    private fun theStopFeedHadAnotherBusThere(atMs: Long, except: String): Boolean =
+        etaArrivingVehicles.any { (vehicleId, presence) ->
+            vehicleId != except && !isRejected(vehicleId, atMs) &&
+                presence.sinceMs <= atMs + STOP_FEED_LAG_MS &&
+                presence.untilMs >= atMs - MANUAL_VEHICLE_EVIDENCE_MAX_AGE_MS
+        }
 
     /**
      * The rider says they are on board.
@@ -1156,8 +1247,14 @@ internal class TripRideDetector(
      * away from it, or near enough short of it to have pulled in since — a
      * report is half a minute old by the time it arrives. A bus the rider has
      * turned down is not one of them.
+     *
+     * Either feed can place it there. A bus with no position feed is known
+     * only by the stop feed's word, and is no less boardable for that.
      */
     private fun anotherBusIsBoardable(atMs: Long, boardingAlong: Double, except: String): Boolean {
+        if (theStopFeedHadAnotherBusThere(atMs, except)) {
+            return true
+        }
         return busTracks.any { (vehicleId, track) ->
             if (vehicleId == except || isRejected(vehicleId, atMs)) {
                 return@any false
@@ -1277,6 +1374,9 @@ internal class TripRideDetector(
         val startsNewStretch: Boolean = false,
     )
 
+    /** When the stop feed first and last placed a bus at the boarding stop. */
+    private class StopPresence(val sinceMs: Long, var untilMs: Long = sinceMs)
+
     /**
      * One bus leaving the boarding stop. [vehicleId] is set once a feed has
      * named it, [reportedByEta] once the ETA rolling over has reported it.
@@ -1374,6 +1474,16 @@ internal class TripRideDetector(
         const val ETA_ARRIVING_SECONDS = 30
         const val ETA_ROLLOVER_SECONDS = 240
         const val ETA_ROLLOVER_WINDOW_MS = 150_000L
+
+        /**
+         * How long after the last live estimate one that has run out still
+         * says a bus is due. In recorded feeds the run-out estimate lasted
+         * under a minute in all but a handful of cases.
+         */
+        const val ETA_RAN_OUT_MAX_MS = 90_000L
+
+        /** How far behind the street a poll of the stop feed may be. */
+        const val STOP_FEED_LAG_MS = 30_000L
 
         const val DEPARTURE_DEDUPE_MS = 90_000L
         const val DEPARTURE_USER_LOOKBACK_MS = 150_000L

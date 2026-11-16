@@ -704,31 +704,113 @@ class RouteTripMonitorServiceTest {
         val trip = threeStopSession() + mapOf(
             "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
         )
-        fun atStop(vararg plates: String) = """{"paths":[{"stops":[{"stopid":"1","eta":0,"buses":[""" +
-            plates.joinToString(",") { """{"id":"$it"}""" } + """]}]}]}"""
         // Only A at the stop; then A and B; then the ETA rolls over.
-        var stopFeed = atStop("BUS-A")
+        var stopFeed = realStopFeed(atStop = listOf("BUS-A"), onTheWay = listOf("BUS-B" to 300))
         backend = { path -> if (path.endsWith("/realtime/buses")) "[]" else stopFeed }
         service.onStartCommand(startIntent(trip), 0, 1)
         refreshAndDeliverAlerts()
-        stopFeed = atStop("BUS-A", "BUS-B")
+        stopFeed = realStopFeed(atStop = listOf("BUS-A", "BUS-B"))
         ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
         refreshAndDeliverAlerts()
-        stopFeed = stopFeed(eta = 600, plate = "CCC-003")
+        stopFeed = realStopFeed(onTheWay = listOf("CCC-003" to 600))
         ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
         refreshAndDeliverAlerts()
         assertTrue(ride(service).boardingCheckId != 0L)
-
-        ReflectionHelpers.setField(
-            ReflectionHelpers.getField<Any>(service, "detector"),
-            "pendingCheckSinceMs",
-            System.currentTimeMillis() - 45_000L,
-        )
-        refreshAndDeliverAlerts()
-        service.onStartCommand(buttonIntent(notificationId = 6023, title = "我已上車"), 0, 2)
+        answerTheQuestionWithYes()
 
         assertTrue(ride(service).hasBoarded)
         assertNull("either of the two may be the bus that left", ride(service).trackedVehicleId)
+    }
+
+    @Test
+    fun busesStillOnTheirWayAreNotBusesAtTheStop() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        // As a live 台中 300 response has it: six vehicles in `buses`, the
+        // nearest thirteen minutes out, the last three quarters of an hour.
+        val comingLater = listOf(
+            "BBB-002" to 811, "CCC-003" to 1_231, "DDD-004" to 1_651,
+            "EEE-005" to 2_071, "FFF-006" to 2_431, "GGG-007" to 2_791,
+        )
+        for (laterBuses in listOf(comingLater, comingLater.take(1))) {
+            // [named]: whether the feed says which bus is standing at the stop.
+            for (named in listOf(true, false)) {
+                var stopFeed = realStopFeed(
+                    atStop = listOfNotNull("AAA-001".takeIf { named }),
+                    onTheWay = laterBuses,
+                    unnamedAtStop = !named,
+                )
+                backend = { path -> if (path.endsWith("/realtime/buses")) "[]" else stopFeed }
+                service.onStartCommand(startIntent(trip), 0, 1)
+                refreshAndDeliverAlerts()
+                assertEquals(0L, ride(service).boardingCheckId)
+
+                // It leaves. Every bus still listed is one that has yet to come.
+                stopFeed = realStopFeed(onTheWay = laterBuses)
+                ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+                refreshAndDeliverAlerts()
+                assertTrue(
+                    "the estimate going to ${laterBuses.first().second} s is a bus leaving, " +
+                        "whatever `buses` still lists (${laterBuses.size} listed, named=$named)",
+                    ride(service).boardingCheckId != 0L,
+                )
+                answerTheQuestionWithYes()
+
+                assertTrue(ride(service).hasBoarded)
+                assertEquals(
+                    "a bus yet to arrive is never the one that left",
+                    "AAA-001".takeIf { named },
+                    ride(service).trackedVehicleId,
+                )
+                service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 3)
+            }
+        }
+    }
+
+    @Test
+    fun aBusListedForTheStopButStillOnItsWayIsNotAnArrival() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        // Nothing is at the stop: one bus is listed for it, a quarter of an
+        // hour out, and then its estimate is revised.
+        var stopFeed = realStopFeed(onTheWay = listOf("BBB-002" to 811))
+        backend = { path -> if (path.endsWith("/realtime/buses")) "[]" else stopFeed }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        stopFeed = realStopFeed(onTheWay = listOf("BBB-002" to 900))
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+
+        assertEquals("no bus was here to leave", 0L, ride(service).boardingCheckId)
+    }
+
+    @Test
+    fun anEstimateThatRanOutBeforeTheTripBeganIsNotABusLeaving() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TPE1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        // As a live 雙北 response has it: an estimate left at -1, explicitly
+        // not arriving, with no plate and nothing in `buses`.
+        fun stop(eta: Int) = """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":$eta,"message":"",""" +
+            """"buses":[],"etas":[{"plate":null,"eta":$eta,"is_arriving":false,"source":"tdx","estimated":false}]}]}]}"""
+        var stopFeed = stop(-1)
+        backend = { path -> if (path.endsWith("/realtime/buses")) "[]" else stopFeed }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        stopFeed = stop(600)
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertEquals("nothing was seen to be due at the stop", 0L, ride(service).boardingCheckId)
+
+        // The next bus counts down, runs out and is replaced: that one left.
+        for (eta in listOf(40, -1, 900)) {
+            stopFeed = stop(eta)
+            ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+            refreshAndDeliverAlerts()
+        }
+        assertTrue("a countdown that ran out and rolled over is a bus leaving", ride(service).boardingCheckId != 0L)
     }
 
     @Test
@@ -920,24 +1002,34 @@ class RouteTripMonitorServiceTest {
     fun theStopFeedTheAppHandsOverWhileOpenReachesTheDetector() {
         // With the app open the route screen sends its own copy of the stop feed
         // every few seconds, and the monitor does not fetch one of its own.
-        fun update(eta: Int, plate: String): Intent {
+        // [atStop] is the bus the feed flags as arriving; [coming] are listed
+        // for the stop too, in `buses` and with entries, while still far off.
+        fun update(atStop: String?, coming: List<Pair<String, Int>>): Intent {
             val session = threeStopSession()
-            val stops = stopsOf(session).map { stop ->
-                stop + mapOf(
-                    "liveData" to mapOf("eta" to eta, "etas" to listOf(mapOf("plate" to plate, "eta" to eta))),
-                )
-            }
+            val liveData = mapOf(
+                "eta" to if (atStop != null) -1 else coming.first().second,
+                "message" to "",
+                "buses" to (listOfNotNull(atStop) + coming.map { it.first }).map { mapOf("id" to it) },
+                "etas" to listOfNotNull(
+                    atStop?.let { mapOf("plate" to it, "eta" to -1, "message" to null, "is_arriving" to true) },
+                ) + coming.map { (plate, eta) ->
+                    mapOf("plate" to plate, "eta" to eta, "message" to null, "is_arriving" to false)
+                },
+            )
+            val stops = stopsOf(session).map { stop -> stop + mapOf("liveData" to liveData) }
             return startIntent(session + mapOf("boardingStopId" to 1, "stops" to stops))
         }
-        service.onStartCommand(update(eta = 0, plate = "AAA-001"), 0, 1)
+        val later = listOf("BBB-002" to 811, "CCC-003" to 1_231)
+        service.onStartCommand(update(atStop = "AAA-001", coming = later), 0, 1)
         refreshRide()
         assertEquals(0L, ride(service).boardingCheckId)
 
-        service.onStartCommand(update(eta = 600, plate = "BBB-002"), 0, 2)
+        service.onStartCommand(update(atStop = null, coming = later), 0, 2)
         refreshRide()
 
         assertTrue(
-            "the bus leaving must be noticed from the app's copy of the feed too",
+            "the bus leaving must be noticed from the app's copy of the feed too, " +
+                "whatever buses that still lists for the stop",
             ride(service).boardingCheckId != 0L,
         )
     }
@@ -1390,6 +1482,47 @@ class RouteTripMonitorServiceTest {
                 posted.joinToString { n -> "${n.id}${n.notification.actions.orEmpty().map { it.title }}" },
         )
         return shadowOf(button.actionIntent).savedIntent
+    }
+
+    /**
+     * The boarding stop as the backend really reports it. `buses` lists every
+     * vehicle heading for the stop next, however far off; [atStop] are the
+     * plates flagged as arriving, and [onTheWay] those still coming, with
+     * their ETAs. [unnamedAtStop] puts a bus at the stop with no plate.
+     */
+    private fun realStopFeed(
+        atStop: List<String> = emptyList(),
+        onTheWay: List<Pair<String, Int>> = emptyList(),
+        unnamedAtStop: Boolean = false,
+    ): String {
+        val buses = (atStop + onTheWay.map { it.first })
+            .joinToString(",") { """{"id":"$it","type":"normal","source":"tdx"}""" }
+        val etas = (
+            atStop.map { """{"plate":"$it","eta":-1,"is_arriving":true,"source":"tdx","estimated":false}""" } +
+                listOfNotNull(
+                    """{"plate":null,"eta":-1,"is_arriving":true,"source":"tdx","estimated":false}"""
+                        .takeIf { unnamedAtStop },
+                ) +
+                onTheWay.map { (plate, eta) ->
+                    """{"plate":"$plate","eta":$eta,"is_arriving":false,"source":"tdx","estimated":false}"""
+                }
+            ).joinToString(",")
+        val eta = if (atStop.isNotEmpty() || unnamedAtStop) -1 else onTheWay.minOfOrNull { it.second }
+        return """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":$eta,"message":"",""" +
+            """"buses":[$buses],"etas":[$etas]}]}]}"""
+    }
+
+    /** Raises the pending question as if its 40 s had passed, and answers "I have boarded". */
+    private fun answerTheQuestionWithYes() {
+        // The service reads the JVM wall clock, so the departure is aged
+        // rather than waited for.
+        ReflectionHelpers.setField(
+            ReflectionHelpers.getField<Any>(service, "detector"),
+            "pendingCheckSinceMs",
+            System.currentTimeMillis() - 45_000L,
+        )
+        refreshAndDeliverAlerts()
+        service.onStartCommand(buttonIntent(notificationId = 6023, title = "我已上車"), 0, 2)
     }
 
     /** Several vehicles in one response. */

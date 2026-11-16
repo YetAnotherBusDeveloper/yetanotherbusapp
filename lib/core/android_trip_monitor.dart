@@ -52,19 +52,27 @@ class TripMonitorStop {
           if (fresh)
             for (final bus in stop.buses) {'id': bus.id},
         ],
+        // Every entry, as the feed has it. Whether a bus is at the stop is
+        // for the monitor to judge, and it needs what the feed says for that:
+        // `is_arriving`, and the entries that carry no plate — a bus the feed
+        // has at the stop without naming it is still a bus at the stop.
         'etas': [
           if (fresh)
             for (final eta in stop.etas)
-              if (normalizeBusVehicleId(eta.vehicleId) != null)
-                {
-                  'plate': eta.vehicleId,
-                  'eta': effectiveStopEtaSecondsForVehicle(
-                    stop,
-                    eta.vehicleId,
-                    now: now,
-                  ),
-                  'message': eta.msg,
-                },
+              {
+                'plate': normalizeBusVehicleId(eta.vehicleId) == null
+                    ? null
+                    : eta.vehicleId,
+                'eta': normalizeBusVehicleId(eta.vehicleId) == null
+                    ? eta.sec
+                    : effectiveStopEtaSecondsForVehicle(
+                        stop,
+                        eta.vehicleId,
+                        now: now,
+                      ),
+                'message': eta.msg,
+                'is_arriving': eta.isArriving,
+              },
         ],
       },
     );

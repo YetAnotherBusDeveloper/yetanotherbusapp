@@ -3707,6 +3707,7 @@ class BusRepository {
         vehicleId: vehicleId,
         source: _nonEmptyString(rawEta['source']) ?? 'tdx',
         estimated: _truthyPayloadValue(rawEta['estimated']),
+        isArriving: _truthyPayloadValue(rawEta['is_arriving']),
       );
       if (eta.sec == null && eta.msg == null && eta.vehicleId == null) {
         continue;
