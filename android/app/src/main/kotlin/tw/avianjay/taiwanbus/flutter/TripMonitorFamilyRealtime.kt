@@ -111,23 +111,35 @@ private fun liveStops(
  * place a vehicle at a stop is its own ETA entry there: `is_arriving`, which
  * the backend sets from the vehicle's own stop status, or an estimate that has
  * run out.
+ *
+ * The same shape arrives from the route screen while the app is open, with two
+ * things added: `observedEta`, the estimate as the backend gave it where `eta`
+ * has since been counted down for display, and `observedAtMs`, when the
+ * backend made the observation. From the backend itself that moment is
+ * `eta_reference_at`, in seconds.
  */
 internal fun parseTripMonitorLiveStop(stop: JSONObject): LiveStopState {
     val etas = stop.optJSONArray("etas").objects().mapNotNull { eta ->
+        val seconds = integer(eta.opt("eta"))
         LiveEtaEntry(
-            seconds = integer(eta.opt("eta")),
+            seconds = seconds,
             message = text(eta, "message"),
             vehicleId = vehicle(eta, "plate", "vehicle_id", "id"),
             isArriving = eta.optBoolean("is_arriving", false),
+            observedSeconds = if (eta.has("observedEta")) integer(eta.opt("observedEta")) else seconds,
         ).takeIf { it.seconds != null || it.message != null || it.vehicleId != null }
     }
     val buses = stop.optJSONArray("buses").objects()
         .mapNotNull { vehicle(it, "id", "vehicle_id", "plate") }
+    val seconds = integer(stop.opt("eta"))
     return LiveStopState(
-        seconds = integer(stop.opt("eta")),
+        seconds = seconds,
         message = text(stop, "message"),
         vehicleIds = (buses + etas.mapNotNull { it.vehicleId }).distinct(),
         etaEntries = etas,
+        observedSeconds = if (stop.has("observedEta")) integer(stop.opt("observedEta")) else seconds,
+        observedAtMs = long(stop.opt("observedAtMs"))
+            ?: long(stop.opt("eta_reference_at"))?.let { it * 1_000L },
     )
 }
 
@@ -146,6 +158,11 @@ private fun mergeStops(stops: List<LiveStopState>): LiveStopState {
         message = if (earliest == null) stops.firstNotNullOfOrNull { it.message } else null,
         vehicleIds = (entries.mapNotNull { it.vehicleId } + stops.flatMap { it.vehicleIds }).distinct(),
         etaEntries = entries,
+        // The badge shows the soonest bus still to come. What was observed is
+        // the soonest estimate of any variant, run out or not: an estimate at
+        // -1 is the bus that is at the stop, and the one to watch leave.
+        observedSeconds = stops.mapNotNull { it.observedSeconds }.minOrNull(),
+        observedAtMs = stops.mapNotNull { it.observedAtMs }.maxOrNull(),
     )
 }
 
@@ -153,6 +170,8 @@ private fun JSONArray?.objects(): List<JSONObject> =
     if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
 
 private fun integer(raw: Any?): Int? = if (raw is Number) raw.toInt() else raw?.toString()?.trim()?.toIntOrNull()
+
+private fun long(raw: Any?): Long? = if (raw is Number) raw.toLong() else raw?.toString()?.trim()?.toLongOrNull()
 
 internal fun stopId(raw: Any?): Int = foldStopId(raw)
 

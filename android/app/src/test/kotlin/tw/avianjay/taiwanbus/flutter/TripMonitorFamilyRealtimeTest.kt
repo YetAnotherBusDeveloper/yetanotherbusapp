@@ -95,6 +95,51 @@ class TripMonitorFamilyRealtimeTest {
     }
 
     @Test
+    fun aStopSaysWhatTheBackendObservedAndWhen() {
+        val fromTheBackend = parseTripMonitorLiveStop(
+            JSONObject(
+                """{"stopid":"1","eta":-1,"message":"","eta_reference_at":1794376374,
+                    "buses":[{"id":"AAA-001"}],
+                    "etas":[{"plate":"AAA-001","eta":-1,"is_arriving":true},{"plate":"BBB-002","eta":811,"is_arriving":false}]}""",
+            ),
+        )
+        assertEquals(1_794_376_374_000L, fromTheBackend.observedAtMs)
+        assertEquals(-1, fromTheBackend.observedSeconds)
+        assertEquals(listOf(true, false), fromTheBackend.etaEntries.map { it.isArriving })
+
+        // From the route screen: counted down for display, and saying so.
+        val fromTheApp = parseTripMonitorLiveStop(
+            JSONObject(
+                """{"eta":0,"observedEta":40,"observedAtMs":1794376374123,"message":"",
+                    "etas":[{"plate":"AAA-001","eta":0,"observedEta":40,"is_arriving":false}]}""",
+            ),
+        )
+        assertEquals(0, fromTheApp.seconds)
+        assertEquals(40, fromTheApp.observedSeconds)
+        assertEquals(1_794_376_374_123L, fromTheApp.observedAtMs)
+        assertEquals(40, fromTheApp.etaEntries.single().observedSeconds)
+
+        // A placeholder for a stop with nothing to show observed nothing.
+        val placeholder = parseTripMonitorLiveStop(JSONObject("""{"eta":null,"observedEta":null,"observedAtMs":null}"""))
+        assertNull(placeholder.observedAtMs)
+        assertNull(placeholder.observedSeconds)
+    }
+
+    @Test
+    fun aVariantsBusAtTheStopIsWhatWasObservedThereWhateverTheBadgeShows() {
+        val client = TripMonitorFamilyRealtime { path ->
+            if (path.startsWith("batchroutes/")) {
+                batch(live("1", 600, "MAIN-001"), live("ALIAS", -1, "FAMILY-001"))
+            } else {
+                topology("ALIAS")
+            }
+        }
+        val stop = client.fetch(session()).getValue(1)
+        assertEquals("the badge counts down to the next bus to come", 600, stop.seconds)
+        assertEquals("what was observed is a bus whose estimate has run out", -1, stop.observedSeconds)
+    }
+
+    @Test
     fun singleRouteUsesExistingEndpoint() {
         val client = TripMonitorFamilyRealtime { path ->
             assertEquals("routes/TXG500/realtime", path)

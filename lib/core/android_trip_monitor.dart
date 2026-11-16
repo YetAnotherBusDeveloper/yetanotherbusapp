@@ -45,8 +45,19 @@ class TripMonitorStop {
       sequence: stop.sequence,
       lat: stop.lat,
       lon: stop.lon,
+      // What the route screen is showing, for the monitor to show too — and,
+      // marked apart from it, what the backend observed and when. The screen
+      // counts estimates down between refreshes and keeps the last ones up
+      // when a refresh fails; neither is the feed saying anything new, and
+      // the monitor reads arrivals and departures only from what the feed
+      // said (`observedEta`), once per observation (`observedAtMs`).
       liveData: {
         'eta': effectiveStopEtaSeconds(stop, now: now),
+        'observedEta': stop.sec,
+        'observedAtMs': stopRealtimeObservedAt(
+          stop,
+          now: now,
+        )?.millisecondsSinceEpoch,
         'message': stop.msg,
         'buses': [
           if (fresh)
@@ -70,6 +81,7 @@ class TripMonitorStop {
                         eta.vehicleId,
                         now: now,
                       ),
+                'observedEta': eta.sec,
                 'message': eta.msg,
                 'is_arriving': eta.isArriving,
               },

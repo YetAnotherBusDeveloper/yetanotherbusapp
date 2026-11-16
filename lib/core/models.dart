@@ -2384,6 +2384,18 @@ DateTime? stopRealtimeUpdatedAt(StopInfo stop, {DateTime? now}) {
       _parseStopRealtimeUpdatedAt(stop.etaReferenceAt, clock);
 }
 
+/// When the backend made the observation [stop]'s live data is from: the
+/// moment its estimates were worked out for, else the source's own timestamp.
+///
+/// A stop keeps its last live data while realtime is unavailable, and a
+/// placeholder has none, so this — not the moment the data is looked at —
+/// is what tells a new observation from the old one shown again.
+DateTime? stopRealtimeObservedAt(StopInfo stop, {DateTime? now}) {
+  final clock = now ?? DateTime.now();
+  return _parseStopRealtimeUpdatedAt(stop.etaReferenceAt, clock) ??
+      _parseStopRealtimeUpdatedAt(stop.t, clock);
+}
+
 bool isStopRealtimeStale(StopInfo stop, {DateTime? now}) {
   final clock = now ?? DateTime.now();
   final updatedAt = stopRealtimeUpdatedAt(stop, now: clock);
