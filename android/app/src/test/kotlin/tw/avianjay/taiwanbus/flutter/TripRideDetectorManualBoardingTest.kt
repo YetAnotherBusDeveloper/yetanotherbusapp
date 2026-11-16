@@ -297,6 +297,42 @@ class TripRideDetectorManualBoardingTest {
     }
 
     @Test
+    fun aBusTwoRoutesOfTheFamilyListRunsWhereEitherOfThemDoes() {
+        // The same fix of the same bus, from the variant's endpoint and from
+        // the route's own, in either order: the route's own says it runs here.
+        val shared = setOf(2, 3, 4)
+        for (variantAnswersFirst in listOf(true, false)) {
+            val detector = newDetector(boardingStopId = 2)
+            fun both(seconds: Long, along: Double) {
+                val own = report(seconds, along)
+                val variant = own.copy(servedStopIds = shared)
+                (if (variantAnswersFirst) listOf(variant, own) else listOf(own, variant))
+                    .forEach { detector.onBusReports(listOf(it)) }
+            }
+            both(0, along = 500.0)
+            detector.confirmBoardedByUser(at(0))
+            both(60, along = 1_000.0)
+            both(120, along = 2_400.0)
+            val beyond = detector.snapshot(at(120))
+            assertEquals("variant first: $variantAnswersFirst", BUS, beyond.trackedVehicleId)
+            assertTrue("variant first: $variantAnswersFirst", beyond.hasRouteValidProgress)
+            assertEquals("variant first: $variantAnswersFirst", 4, beyond.progressStopIndex)
+        }
+
+        // Two variants that list it: where either of their routes runs.
+        val detector = newDetector(boardingStopId = 2)
+        val early = report(0, along = 500.0)
+        detector.onBusReports(listOf(early.copy(servedStopIds = setOf(1, 2))))
+        detector.onBusReports(listOf(early.copy(servedStopIds = setOf(5, 6))))
+        detector.confirmBoardedByUser(at(0))
+        val late = report(60, along = 2_100.0)
+        detector.onBusReports(listOf(late.copy(servedStopIds = setOf(1, 2))))
+        assertFalse(detector.snapshot(at(60)).hasRouteValidProgress)
+        detector.onBusReports(listOf(late.copy(servedStopIds = setOf(5, 6))))
+        assertTrue(detector.snapshot(at(60)).hasRouteValidProgress)
+    }
+
+    @Test
     fun atStopEvidenceMustBeFromTheNinetySecondsBeforeConfirming() {
         for (seconds in listOf(90L, 91L)) {
             val detector = newDetector()

@@ -45,11 +45,14 @@ class RouteTripMonitorService : Service() {
     private val ioExecutor = Executors.newSingleThreadExecutor()
 
     /**
-     * Fetches the feeds, each request on its own. A request can hang for
-     * twenty seconds before it times out, and a route's family can be half a
-     * dozen endpoints: none of them may hold up the others, or the ride.
+     * Fetches the feeds, each request on a thread of its own. A request can
+     * hang for twenty seconds before it times out, and a route's family can
+     * be half a dozen endpoints: none of them may hold up the others, or the
+     * ride. A feed is asked for again only once its last request has ended,
+     * so there are never more threads than a trip has feeds — and, for as
+     * long as its requests take to end, those of the trip before it.
      */
-    private val feedExecutor = Executors.newFixedThreadPool(FEED_FETCH_THREADS)
+    private val feedExecutor = Executors.newCachedThreadPool()
 
     /** Feed requests asked for and not yet finished. */
     internal val feedFetchesInFlight = AtomicInteger()
@@ -889,32 +892,51 @@ class RouteTripMonitorService : Service() {
         }
         if (wantsStops) {
             fetchInBackground(
+                trip,
                 fetch = { fetchStopFeed(trip, nowElapsed) },
-                abandon = { liveStopFetchInFlight = false },
+                abandon = { retryAtElapsedMs ->
+                    liveStopFetchInFlight = false
+                    liveStopBackoffUntilMs = retryAtElapsedMs
+                },
             )
         }
         busRouteIdsDue.forEach { routeId ->
             fetchInBackground(
+                trip,
                 fetch = { fetchBusFeed(trip, routeId) },
-                abandon = {
-                    busFeedRefreshByRoute[routeId]?.let { busFeedRefreshByRoute[routeId] = it.copy(inFlight = false) }
+                abandon = { retryAtElapsedMs ->
+                    busFeedRefreshByRoute[routeId]?.let {
+                        busFeedRefreshByRoute[routeId] =
+                            it.copy(inFlight = false, retryAtElapsedMs = retryAtElapsedMs)
+                    }
                 },
             )
         }
     }
 
     /**
-     * Runs [fetch] on a fetch thread. Should it never run, or fail outright,
-     * [abandon] — under refreshLock — marks its feed as no longer being
-     * fetched, so that the next refresh can ask again.
+     * Runs [fetch] for [trip] on a fetch thread. Should it never run, or fail
+     * in a way it does not itself account for, [abandon] — under refreshLock —
+     * marks its feed as no longer being fetched and as not to be asked for
+     * again before the time it is given: something that failed once in an
+     * unforeseen way would otherwise be asked for on every refresh.
+     *
+     * Only for the trip the request was made for. A feed's bookkeeping passes
+     * to the next trip when the trip is replaced, and by then says that trip's
+     * own request is out.
      */
-    private fun fetchInBackground(fetch: () -> Unit, abandon: () -> Unit) {
+    private fun fetchInBackground(trip: TrackedTrip, fetch: () -> Unit, abandon: (retryAtElapsedMs: Long) -> Unit) {
+        val abandonForTrip = {
+            applyToTrip(trip) {
+                synchronized(refreshLock) { abandon(SystemClock.elapsedRealtime() + LIVE_FETCH_BACKOFF_MS) }
+            }
+        }
         feedFetchesInFlight.incrementAndGet()
         val submitted = runCatching {
             feedExecutor.execute {
                 try {
                     if (runCatching(fetch).isFailure) {
-                        synchronized(refreshLock) { abandon() }
+                        abandonForTrip()
                     }
                 } finally {
                     feedFetchesInFlight.decrementAndGet()
@@ -924,7 +946,7 @@ class RouteTripMonitorService : Service() {
         if (!submitted) {
             // Executor already shut down (service destroyed mid-refresh).
             feedFetchesInFlight.decrementAndGet()
-            synchronized(refreshLock) { abandon() }
+            abandonForTrip()
         }
     }
 
@@ -2294,7 +2316,7 @@ class RouteTripMonitorService : Service() {
     }
 
     /**
-     * The cached stop feed. Fetching happens in [updateLiveData] so that the
+     * The cached stop feed. Fetching happens in [requestLiveData] so that the
      * snapshot builder never blocks on the network and both feeds are
      * throttled together.
      */
@@ -2538,7 +2560,6 @@ class RouteTripMonitorService : Service() {
         private const val LIVE_BUS_REFRESH_INTERVAL_MS = 15_000L
         private const val LIVE_FETCH_BACKOFF_MS = 60_000L
         private const val MIN_REFRESH_INTERVAL_MS = 2_000L
-        private const val FEED_FETCH_THREADS = 4
         private const val LOCATION_UPDATE_INTERVAL_MS = 12_000L
         private const val LOCATION_MIN_UPDATE_INTERVAL_MS = 6_000L
         private const val BACKGROUND_AUTO_PAUSE_GRACE_MS = 90_000L

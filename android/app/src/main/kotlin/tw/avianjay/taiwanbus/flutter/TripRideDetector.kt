@@ -264,6 +264,14 @@ internal class TripRideDetector(
             // Vehicles report every ~20 s but the feed is polled more often, so
             // most polls repeat the previous fix.
             if (report.gpsTimeMs <= (leap?.gpsTimeMs ?: last?.gpsTimeMs ?: 0L)) {
+                // Unless it is that fix from another route of the family: a
+                // bus two of them list runs here if either route does, and
+                // which endpoint happened to answer first is not to decide it.
+                if (leap != null) {
+                    unconfirmedLeaps[report.vehicleId] = leap.alsoListedBy(report)
+                } else if (last != null) {
+                    track[track.lastIndex] = last.alsoListedBy(report)
+                }
                 return@forEach
             }
             if (last == null || isDrivable(last, report)) {
@@ -284,8 +292,19 @@ internal class TripRideDetector(
         }
     }
 
+    /** This fix, as [report] — the same one, from another endpoint — adds to where the bus runs. */
+    private fun BusSample.alsoListedBy(report: RideBusReport): BusSample =
+        if (report.gpsTimeMs == gpsTimeMs && besideRoute && !onRoute &&
+            runsHere(report.servedStopIds, alongMeters)
+        ) {
+            copy(onRoute = true)
+        } else {
+            this
+        }
+
     private fun sampleOf(report: RideBusReport, hint: Double?): BusSample {
         val projection = line.project(report.latitude, report.longitude, hint)
+        val besideRoute = isOnRoute(projection)
         return BusSample(
             latitude = report.latitude,
             longitude = report.longitude,
@@ -293,9 +312,10 @@ internal class TripRideDetector(
             gpsTimeMs = report.gpsTimeMs,
             receivedAtMs = report.receivedAtMs,
             samePath = report.pathId == null || report.pathId == pathId,
+            besideRoute = besideRoute,
             // Parked and deadheading vehicles project onto the route from
             // far away; only vehicles actually on it may announce arrivals.
-            onRoute = isOnRoute(projection) && runsHere(report.servedStopIds, projection.alongMeters),
+            onRoute = besideRoute && runsHere(report.servedStopIds, projection.alongMeters),
         )
     }
 
@@ -1407,6 +1427,9 @@ internal class TripRideDetector(
         val gpsTimeMs: Long,
         val receivedAtMs: Long,
         val samePath: Boolean,
+        /** On the road this route takes — whether or not the vehicle's own route takes it. */
+        val besideRoute: Boolean,
+        /** On this route: beside it, on a stretch the vehicle's own route shares. */
         val onRoute: Boolean,
         /** The vehicle reached this position by a leap no bus could drive; see [onBusReports]. */
         val startsNewStretch: Boolean = false,

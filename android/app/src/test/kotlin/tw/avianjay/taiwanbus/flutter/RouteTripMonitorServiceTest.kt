@@ -1752,6 +1752,73 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun aFeedWhoseRequestBlowsUpIsLeftAloneLikeOneThatFailed() {
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                requests.incrementAndGet()
+                error("not something the fetch expects")
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        awaitQueuedRefreshes()
+        repeat(3) {
+            ShadowSystemClock.advanceBy(5, TimeUnit.SECONDS)
+            fetchLiveData()
+        }
+        assertEquals("it is not asked again on every refresh", 1, requests.get())
+
+        ShadowSystemClock.advanceBy(60, TimeUnit.SECONDS)
+        fetchLiveData()
+        assertEquals("nor is it left marked as still being fetched", 2, requests.get())
+    }
+
+    @Test
+    fun aRequestOfTheLastTripThatBlowsUpDoesNotFreeThisTripsFeed() {
+        val first = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val releaseFirst = CountDownLatch(1)
+        val releaseSecond = CountDownLatch(1)
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                if (requests.incrementAndGet() == 1) {
+                    releaseFirst.await(20, TimeUnit.SECONDS)
+                    error("not something the fetch expects")
+                }
+                releaseSecond.await(20, TimeUnit.SECONDS)
+                "[]"
+            } else {
+                null
+            }
+        }
+        try {
+            service.onStartCommand(startIntent(first), 0, 1)
+            refreshWithoutWaiting()
+            assertEquals(1, requests.get())
+
+            // Another trip on the same route: its own request goes out.
+            service.onStartCommand(startIntent(first + mapOf("boardingStopId" to 2)), 0, 2)
+            refreshWithoutWaiting()
+            awaitOnMainThread("the new trip's request") { requests.get() == 2 }
+
+            // The first trip's request now fails outright, with this one's still out.
+            val stillOut = service.feedFetchesInFlight.get() - 1
+            releaseFirst.countDown()
+            awaitOnMainThread("the first trip's request ending") { service.feedFetchesInFlight.get() == stillOut }
+            ShadowSystemClock.advanceBy(90, TimeUnit.SECONDS)
+            refreshWithoutWaiting()
+            assertEquals("this trip's feed is still being fetched, and is not asked for again", 2, requests.get())
+        } finally {
+            releaseFirst.countDown()
+            releaseSecond.countDown()
+        }
+        awaitQueuedRefreshes()
+    }
+
+    @Test
     fun familyVehicleFetchesAreThrottledAndFailedRoutesBackOffIndependently() {
         val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
         backend = { path ->
