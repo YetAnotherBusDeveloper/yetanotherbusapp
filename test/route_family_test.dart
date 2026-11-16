@@ -119,6 +119,40 @@ void main() {
     expect(merged.buses.map((bus) => bus.id), ['KKA-0001', 'KKA-0002']);
   });
 
+  test('a variant bus the feed has arriving is still arriving once merged', () {
+    final merged = mergeRouteFamilyStopLiveData(
+      stop(
+        rawStopId: '500-main',
+        name: '捷運文心櫻花站',
+        lat: 24.171000,
+        lon: 120.653000,
+      ).copyWith(
+        sec: 240,
+        etas: const [StopEta(sec: 240, vehicleId: 'KKA-0001')],
+      ),
+      [
+        stop(
+          rawStopId: '500-extension',
+          name: '捷運文心櫻花站',
+          lat: 24.171015,
+          lon: 120.653015,
+        ).copyWith(
+          sec: 40,
+          etas: const [
+            StopEta(sec: 40, vehicleId: 'KKA-0002', isArriving: true),
+            // The same bus and estimate, not flagged: a different thing said.
+            StopEta(sec: 40, vehicleId: 'KKA-0002'),
+          ],
+        ),
+      ],
+    );
+
+    expect(
+      [for (final eta in merged.etas) '${eta.vehicleId}:${eta.isArriving}'],
+      ['KKA-0001:false', 'KKA-0002:true', 'KKA-0002:false'],
+    );
+  });
+
   test(
     'replaces an unavailable trunk ETA with a variant ETA at shared stops',
     () {

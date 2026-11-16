@@ -717,6 +717,24 @@ class TripRideDetectorManualBoardingTest {
     }
 
     @Test
+    fun aBusFlaggedAsArrivingIsAtTheStopWhateverItsEstimate() {
+        val detector = newDetector()
+        val flagged = listOf(StopFeedBus("BUS-A", etaSeconds = 95, arriving = true))
+        detector.onBoardingStopEta(95, arriving = true, nowMs = at(0), buses = flagged)
+        detector.onBoardingStopEta(600, arriving = false, nowMs = at(20))
+        val asked = detector.snapshot(at(65))
+        assertTrue(asked.boardingPromptDue)
+        detector.confirmBoardedByUser(at(70), answeredCheckId = asked.boardingCheckId)
+        assertEquals("BUS-A", detector.snapshot(at(70)).trackedVehicleId)
+
+        // Unflagged, a bus that far out is not at the stop, and nothing left.
+        val unflagged = newDetector()
+        unflagged.onBoardingStopEta(95, arriving = false, nowMs = at(0), buses = listOf(StopFeedBus("BUS-A", 95)))
+        unflagged.onBoardingStopEta(600, arriving = false, nowMs = at(20))
+        assertFalse(unflagged.snapshot(at(65)).boardingPromptDue)
+    }
+
+    @Test
     fun aBusListedForTheStopIsNotABusAtTheStop() {
         // The feed lists every bus heading for the stop, with its estimate.
         // [coming] are the ones still on their way while A stands there.

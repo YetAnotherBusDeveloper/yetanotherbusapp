@@ -124,6 +124,8 @@ void main() {
       expect(stop2.etas.single.vehicleId, 'BBB-0002');
       expect(stop2.etas.single.source, 'backfill_buses');
       expect(stop2.etas.single.estimated, isTrue);
+      expect(stop2.etas.single.isArriving, isTrue);
+      expect(stop3.etas.single.isArriving, isFalse);
       expect(
         effectiveStopEtaSecondsForVehicle(stop3, 'BBB-0002', now: updatedAt),
         90,

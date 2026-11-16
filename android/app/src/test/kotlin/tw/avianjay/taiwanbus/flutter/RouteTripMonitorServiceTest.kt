@@ -1017,6 +1017,27 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun aBusTheFeedFlagsAsArrivingIsAtTheStopWhateverItsEstimate() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        // The vehicle reports itself pulling in with a minute and a half
+        // still on its estimate — further out than an estimate alone would
+        // have counted as a bus being due.
+        var stopFeed = realStopFeed(atStop = listOf("AAA-001"), atStopEta = 95)
+        backend = { path -> if (path.endsWith("/realtime/buses")) "[]" else stopFeed }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        stopFeed = realStopFeed(onTheWay = listOf("BBB-002" to 811))
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertTrue("the flagged bus was there, and has left", ride(service).boardingCheckId != 0L)
+        answerTheQuestionWithYes()
+
+        assertEquals("and it is the one the feed named", "AAA-001", ride(service).trackedVehicleId)
+    }
+
+    @Test
     fun busesStillOnTheirWayAreNotBusesAtTheStop() {
         val trip = threeStopSession() + mapOf(
             "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
@@ -1376,6 +1397,104 @@ class RouteTripMonitorServiceTest {
         refreshRide()
 
         assertEquals("that bus left five minutes ago, not now", 0L, ride(service).boardingCheckId)
+    }
+
+    @Test
+    fun aStopTheScreenHasOnlyOldDataForIsNotNewsBecauseAnotherStopIs() {
+        val trip = threeStopSession() + mapOf("boardingStopId" to 1)
+        // Each stop says when it was observed. The boarding stop's refreshes
+        // have been failing for five minutes and it still shows the bus that
+        // was there then; the stop after it is up to date.
+        val longAgo = System.currentTimeMillis() - 300_000L
+        service.onStartCommand(
+            appUpdate(
+                trip,
+                appStop(eta = 0, observedAtMs = longAgo),
+                nextStop = appStop(eta = 200, observedAtMs = observedJustNow()),
+            ),
+            0, 1,
+        )
+        refreshRide()
+        service.onStartCommand(
+            appUpdate(
+                trip,
+                appStop(eta = 600, observedAtMs = observedJustNow()),
+                nextStop = appStop(eta = 800, observedAtMs = observedJustNow()),
+            ),
+            0, 2,
+        )
+        refreshRide()
+
+        assertEquals("that bus left five minutes ago, not now", 0L, ride(service).boardingCheckId)
+    }
+
+    @Test
+    fun anObservationOlderThanOneAlreadyTakenIsNotTheEstimateRollingOver() {
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        val seenByTheScreen = observedJustNow()
+        // The monitor's own fetch is answered from a cache made before the
+        // screen's: the bus the screen saw at the stop had yet to arrive.
+        val before = (seenByTheScreen - 20_000L) / 1_000L
+        val stopFetches = java.util.concurrent.atomic.AtomicInteger()
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                "[]"
+            } else {
+                stopFetches.incrementAndGet()
+                """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":600,"message":"",""" +
+                    """"eta_reference_at":$before,"buses":[{"id":"BBB-002"}],""" +
+                    """"etas":[{"plate":"BBB-002","eta":600,"is_arriving":false}]}]}]}"""
+            }
+        }
+        service.onStartCommand(appUpdate(trip, appStop(eta = 0, observedAtMs = seenByTheScreen)), 0, 1)
+        refreshAndDeliverAlerts()
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+
+        assertEquals(1, stopFetches.get())
+        assertEquals("nothing was seen to leave: that was the stop before the bus came", 0L, ride(service).boardingCheckId)
+    }
+
+    @Test
+    fun theSameObservationSentAgainDoesNotPutOffTheMonitorsOwnFetch() {
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        backend = { path ->
+            requests += path
+            if (path.endsWith("/realtime/buses")) "[]" else realStopFeed(onTheWay = listOf("BBB-002" to 420))
+        }
+        fun stopFetches() = requests.count { !it.endsWith("/realtime/buses") }
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+
+        // The screen is answered from the backend's cache: every update it
+        // sends carries the observation the last one did, and a recent one.
+        val current = appStop(eta = 500, observedAtMs = observedJustNow())
+        service.onStartCommand(appUpdate(trip, current), 0, 1)
+        refreshAndDeliverAlerts()
+        assertEquals("the first time, it is news, and stands in for a fetch", 0, stopFetches())
+        for (round in 1..3) {
+            ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+            beforeTheNextRefresh { service.onStartCommand(appUpdate(trip, current), 0, 1 + round) }
+            refreshAndDeliverAlerts()
+        }
+        assertEquals("after that it is not, and the monitor's own fetch falls due as usual", 3, stopFetches())
+    }
+
+    @Test
+    fun aTripBegunOnOldDataFromTheScreenFetchesItsOwnAtOnce() {
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        backend = { path ->
+            requests += path
+            if (path.endsWith("/realtime/buses")) "[]" else realStopFeed(onTheWay = listOf("BBB-002" to 420))
+        }
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        // The screen's refreshes were already failing when the trip began.
+        val kept = appStop(eta = 500, observedAtMs = System.currentTimeMillis() - 200_000L, shownEta = 410)
+        service.onStartCommand(appUpdate(trip, kept), 0, 1)
+        refreshAndDeliverAlerts()
+
+        assertEquals(1, requests.count { !it.endsWith("/realtime/buses") })
+        val shown = ReflectionHelpers.getField<Map<Int, LiveStopState>>(service, "cachedLiveStops").getValue(1)
+        assertEquals("what was fetched is what is shown, not the screen's old copy", 420, shown.seconds)
     }
 
     @Test
@@ -2186,16 +2305,19 @@ class RouteTripMonitorServiceTest {
      * vehicle heading for the stop next, however far off; [atStop] are the
      * plates flagged as arriving, and [onTheWay] those still coming, with
      * their ETAs. [unnamedAtStop] puts a bus at the stop with no plate.
+     * [atStopEta] is the estimate the arriving ones carry: run out, as a rule,
+     * but the flag comes from the vehicle and can be up before the countdown ends.
      */
     private fun realStopFeed(
         atStop: List<String> = emptyList(),
         onTheWay: List<Pair<String, Int>> = emptyList(),
         unnamedAtStop: Boolean = false,
+        atStopEta: Int = -1,
     ): String {
         val buses = (atStop + onTheWay.map { it.first })
             .joinToString(",") { """{"id":"$it","type":"normal","source":"tdx"}""" }
         val etas = (
-            atStop.map { """{"plate":"$it","eta":-1,"is_arriving":true,"source":"tdx","estimated":false}""" } +
+            atStop.map { """{"plate":"$it","eta":$atStopEta,"is_arriving":true,"source":"tdx","estimated":false}""" } +
                 listOfNotNull(
                     """{"plate":null,"eta":-1,"is_arriving":true,"source":"tdx","estimated":false}"""
                         .takeIf { unnamedAtStop },
@@ -2204,7 +2326,7 @@ class RouteTripMonitorServiceTest {
                     """{"plate":"$plate","eta":$eta,"is_arriving":false,"source":"tdx","estimated":false}"""
                 }
             ).joinToString(",")
-        val eta = if (atStop.isNotEmpty() || unnamedAtStop) -1 else onTheWay.minOfOrNull { it.second }
+        val eta = if (atStop.isNotEmpty() || unnamedAtStop) atStopEta else onTheWay.minOfOrNull { it.second }
         return """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":$eta,"message":"",""" +
             """"buses":[$buses],"etas":[$etas]}]}]}"""
     }
@@ -2228,12 +2350,18 @@ class RouteTripMonitorServiceTest {
     private fun observedJustNow(): Long = System.currentTimeMillis() - 5_000L + observations++
 
     /** The route screen's update for [session], with [liveData] as its copy of the boarding stop's feed. */
-    private fun appUpdate(session: Map<String, Any?>, liveData: Map<String, Any?>?): Intent {
+    private fun appUpdate(
+        session: Map<String, Any?>,
+        liveData: Map<String, Any?>?,
+        nextStop: Map<String, Any?>? = null,
+    ): Intent {
         val stops = stopsOf(session).mapIndexed { index, stop ->
             stop + mapOf(
                 // Every stop comes with live data; for most it is a placeholder.
                 "liveData" to if (index == 0 && liveData != null) {
                     liveData
+                } else if (index == 1 && nextStop != null) {
+                    nextStop
                 } else {
                     mapOf("eta" to null, "observedEta" to null, "observedAtMs" to null, "message" to null)
                 },
