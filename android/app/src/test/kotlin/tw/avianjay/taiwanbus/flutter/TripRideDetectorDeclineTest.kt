@@ -234,6 +234,30 @@ class TripRideDetectorDeclineTest {
         assertEquals(BoardingEvidence.BUS_CO_MOVEMENT, riding.evidence)
     }
 
+    @Test
+    fun notYetToAQuestionNoLongerPendingChangesNothing() {
+        // Never asked, on a trip of its own: an answer to some other question.
+        val unasked = newDetector()
+        assertFalse(unasked.declineBoarding(at(2), answeredCheckId = at(-100)))
+        unasked.confirmBoardedByUser(at(3))
+        assertFalse(
+            "a ride confirmed since is not what that answer was about",
+            unasked.declineBoarding(at(4), answeredCheckId = at(-100)),
+        )
+        assertTrue(unasked.snapshot(at(4)).hasBoarded)
+
+        // Said plainly of the ride, it is still "I am not on it".
+        assertTrue(unasked.declineBoarding(at(5)))
+        assertFalse(unasked.snapshot(at(5)).hasBoarded)
+
+        // And to the question that is pending, it is that question's answer.
+        val asked = newDetector()
+        asked.leaveTheStop(DECLINED_BUS, fromSeconds = 0)
+        val question = asked.snapshot(at(80))
+        assertTrue(question.boardingPromptDue)
+        assertTrue(asked.declineBoarding(at(85), answeredCheckId = question.boardingCheckId))
+    }
+
     /** Two buses nose to tail for a minute, and the phone keeping pace with both. */
     private fun TripRideDetector.keepPaceWithTwoBuses(): RideSnapshot {
         val positions = arrayOf(0L to 0.0, 20L to 100.0, 40L to 200.0, 60L to 300.0)

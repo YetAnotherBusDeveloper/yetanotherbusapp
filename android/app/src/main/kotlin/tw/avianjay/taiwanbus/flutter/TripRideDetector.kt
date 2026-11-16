@@ -531,15 +531,21 @@ internal class TripRideDetector(
      * reminders, so one repeated question is the better failure.
      *
      * [answeredCheckId] is the question being answered, as for
-     * [confirmBoardedByUser]. "Not yet" to a question that has since been
-     * replaced says nothing about the buses the new one is about.
+     * [confirmBoardedByUser]. "Not yet" to a question that is no longer the
+     * one pending — replaced by another, or settled by a ride since detected
+     * or confirmed — says nothing about the buses the new one is about, and
+     * nothing about that ride: it was given before either.
+     *
+     * Returns whether the answer changed what is known of the ride.
      */
-    fun declineBoarding(nowMs: Long, answeredCheckId: Long? = null) {
+    fun declineBoarding(nowMs: Long, answeredCheckId: Long? = null): Boolean {
         noteDepartures(nowMs)
-        if (!boarded && answeredCheckId != null && answeredCheckId != pendingCheckSinceMs) {
-            // Still true of the rider's movement so far, and of nothing else.
-            lastDeclineAtMs = nowMs
-            return
+        if (answeredCheckId != null && answeredCheckId != pendingCheckSinceMs) {
+            if (!boarded) {
+                // Still true of the rider's movement so far, and of nothing else.
+                lastDeclineAtMs = nowMs
+            }
+            return false
         }
         val askedAbout = pendingDepartures.toList()
         val rejected = if (askedAbout.isEmpty()) {
@@ -558,6 +564,7 @@ internal class TripRideDetector(
         declinedRideAtMs = if (askedAbout.isEmpty()) nowMs else 0L
         rejected.forEach { rejectedAt[it] = nowMs }
         clearPendingCheck()
+        return true
     }
 
     /**

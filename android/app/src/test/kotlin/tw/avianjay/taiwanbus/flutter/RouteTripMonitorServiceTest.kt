@@ -606,6 +606,155 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun buttonsMadeForAnotherTripDoNotSpeakForThisOne() {
+        val outbound = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        // Outbound: a bus leaves the boarding stop and the question is shown.
+        var busStop = stopsOf(outbound).first()
+        var gpsTime = nowSeconds() - 60
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed("BUS-A", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(outbound), 0, 1)
+        refreshAndDeliverAlerts()
+        busStop = stopsOf(outbound)[1]
+        gpsTime += 20
+        ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        ReflectionHelpers.setField(
+            ReflectionHelpers.getField<Any>(service, "detector"), "pendingCheckSinceMs",
+            System.currentTimeMillis() - 45_000L,
+        )
+        refreshAndDeliverAlerts()
+        val oldYes = buttonIntent(notificationId = 6023, title = "我已上車")
+        val oldNo = buttonIntent(notificationId = 6023, title = "還沒上車")
+        val oldUnprompted = buttonIntent(notificationId = 6021, title = "我已上車")
+
+        // The rider turns to the other direction. Taps made on the outbound
+        // trip's notifications are delivered only now.
+        val inbound = reversed(outbound) + mapOf("boardingStopId" to 3, "destinationStopId" to 1)
+        backend = { null }
+        service.onStartCommand(startIntent(inbound), 0, 2)
+        for (stale in listOf(oldYes, oldUnprompted)) {
+            service.onStartCommand(stale, 0, 3)
+            assertFalse("yes to the outbound trip is not a ride on the inbound one", ride(service).hasBoarded)
+        }
+
+        // On board the inbound bus, with its alerts under way.
+        service.onStartCommand(command("MARK_BOARDED"), 0, 4)
+        assertTrue(ride(service).hasBoarded)
+        ReflectionHelpers.setField(service, "destinationAlertStage", 1)
+        service.onStartCommand(oldNo, 0, 5)
+
+        assertTrue("not yet, said of the outbound trip, does not undo this ride", ride(service).hasBoarded)
+        assertTrue(ReflectionHelpers.getField(service, "boardingAlertSent"))
+        assertEquals(1, ReflectionHelpers.getField<Int>(service, "destinationAlertStage"))
+    }
+
+    @Test
+    fun aLaterQuestionsButtonsDoNotRewriteAnEarlierOnes() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        // The button on a notification is a token the system keeps; what it
+        // sends is whatever that token holds when it is tapped.
+        fun questionButton(title: String) = service.getSystemService(NotificationManager::class.java)
+            .activeNotifications.single { it.id == 6023 }.notification.actions
+            .single { it.title.toString() == title }.actionIntent
+        fun raiseAQuestion(vehicleId: String): Long {
+            var busStop = stopsOf(trip).first()
+            var gpsTime = nowSeconds() - 60
+            backend = { path ->
+                if (path.endsWith("/realtime/buses")) {
+                    busFeed(vehicleId, busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+                } else {
+                    null
+                }
+            }
+            service.onStartCommand(startIntent(trip), 0, 1)
+            refreshAndDeliverAlerts()
+            busStop = stopsOf(trip)[1]
+            gpsTime += 20
+            ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+            refreshAndDeliverAlerts()
+            ReflectionHelpers.setField(
+                ReflectionHelpers.getField<Any>(service, "detector"), "pendingCheckSinceMs",
+                System.currentTimeMillis() - 45_000L,
+            )
+            refreshAndDeliverAlerts()
+            return ride(service).boardingCheckId
+        }
+        val firstQuestion = raiseAQuestion("BUS-A")
+        val firstYes = questionButton("我已上車")
+        val firstTrip = shadowOf(firstYes).savedIntent.getLongExtra("trip_id", 0L)
+        assertTrue(firstTrip != 0L)
+
+        // The trip is stopped and started again, and asks a question of its own.
+        service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 2)
+        Thread.sleep(5)
+        val secondQuestion = raiseAQuestion("BUS-B")
+        val secondYes = questionButton("我已上車")
+        assertTrue(secondQuestion != firstQuestion)
+
+        assertEquals(
+            "the first question's button still answers the first question",
+            firstQuestion,
+            shadowOf(firstYes).savedIntent.getLongExtra("boarding_check_id", 0L),
+        )
+        assertEquals(firstTrip, shadowOf(firstYes).savedIntent.getLongExtra("trip_id", 0L))
+        assertTrue(shadowOf(secondYes).savedIntent.getLongExtra("trip_id", 0L) != firstTrip)
+        // And tapped now, it is not an answer to the second.
+        service.onStartCommand(shadowOf(firstYes).savedIntent, 0, 3)
+        assertFalse(ride(service).hasBoarded)
+        service.onStartCommand(shadowOf(secondYes).savedIntent, 0, 4)
+        assertEquals("BUS-B", ride(service).trackedVehicleId)
+    }
+
+    @Test
+    fun notYetToAQuestionSettledSinceLeavesTheRideAndItsAlertsAlone() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        var busStop = stopsOf(trip).first()
+        var gpsTime = nowSeconds() - 60
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed("BUS-A", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        busStop = stopsOf(trip)[1]
+        gpsTime += 20
+        ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        ReflectionHelpers.setField(
+            ReflectionHelpers.getField<Any>(service, "detector"), "pendingCheckSinceMs",
+            System.currentTimeMillis() - 45_000L,
+        )
+        refreshAndDeliverAlerts()
+        val no = buttonIntent(notificationId = 6023, title = "還沒上車")
+
+        // The rider says they are on board, on the tracking notification; the
+        // "not yet" they had tapped on the question a moment earlier arrives
+        // after it.
+        service.onStartCommand(buttonIntent(notificationId = 6021, title = "我已上車"), 0, 2)
+        assertTrue(ride(service).hasBoarded)
+        ReflectionHelpers.setField(service, "destinationAlertStage", 1)
+        service.onStartCommand(no, 0, 3)
+
+        assertTrue("the question it answered is no longer the one pending", ride(service).hasBoarded)
+        assertEquals(1, ReflectionHelpers.getField<Int>(service, "destinationAlertStage"))
+    }
+
+    @Test
     fun theAnswerAfterTwoBusesLeftCloseTogetherFollowsNeither() {
         val trip = threeStopSession() + mapOf(
             "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 2,
@@ -1804,8 +1953,18 @@ class RouteTripMonitorServiceTest {
         assertTrue(service.getSystemService(NotificationManager::class.java).activeNotifications.isEmpty())
     }
 
+    /**
+     * A command as the app or a notification sends it. The boarding buttons
+     * speak for the trip they were made for, so those name the current one —
+     * as a button on the notification now showing would.
+     */
     private fun command(action: String) = Intent(service, RouteTripMonitorService::class.java)
         .setAction("tw.avianjay.taiwanbus.flutter.action.$action")
+        .apply {
+            if (action == "MARK_BOARDED" || action == "NOT_BOARDED") {
+                putExtra("trip_id", ReflectionHelpers.getField<Long>(service, "tripId"))
+            }
+        }
 
     private fun startIntent(payload: Map<String, Any?> = sessionPayload()) =
         command("START_OR_UPDATE_TRIP_MONITOR")

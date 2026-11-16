@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.drawable.Icon
 import android.location.Location
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -61,6 +62,15 @@ class RouteTripMonitorService : Service() {
      * the app.
      */
     private var detector: TripRideDetector? = null
+
+    /**
+     * Names the trip [detector] was built for. Every "I have boarded" / "not
+     * yet" button carries the id of the trip it was made for, and one made for
+     * another trip is not acted on: a tap can be delivered, or a notification
+     * linger, after the rider has moved on to another route or direction.
+     */
+    @Volatile
+    private var tripId = 0L
     private var latestRide = RideSnapshot()
     private val detectorLock = Any()
     /** Under detectorLock: newer app-provided stop data supersedes pending stop requests. */
@@ -202,6 +212,10 @@ class RouteTripMonitorService : Service() {
                     stopTracking()
                     return START_NOT_STICKY
                 }
+                if (!isForTheCurrentTrip(intent)) {
+                    // Said of another trip. Nothing here is that trip's to change.
+                    return START_STICKY
+                }
                 val now = System.currentTimeMillis()
                 synchronized(detectorLock) {
                     detector?.confirmBoardedByUser(now, answeredBoardingCheckId(intent))
@@ -218,12 +232,22 @@ class RouteTripMonitorService : Service() {
                     stopTracking()
                     return START_NOT_STICKY
                 }
+                if (!isForTheCurrentTrip(intent)) {
+                    return START_STICKY
+                }
                 val now = System.currentTimeMillis()
-                synchronized(detectorLock) {
+                val answered = synchronized(detectorLock) {
                     // Only the bus that was asked about is set aside; the next
                     // one still gets detected and asked about in its turn.
-                    detector?.declineBoarding(now, answeredBoardingCheckId(intent))
+                    val changed = detector?.declineBoarding(now, answeredBoardingCheckId(intent)) == true
                     latestRide = detector?.snapshot(now) ?: RideSnapshot()
+                    changed
+                }
+                if (!answered) {
+                    // "Not yet" to a question no longer pending: the ride as
+                    // it now stands, its alerts and any newer question are
+                    // not what it was said of.
+                    return START_STICKY
                 }
                 boardingAlertSent = false
                 destinationSetupPromptSent = false
@@ -328,6 +352,7 @@ class RouteTripMonitorService : Service() {
                                 created.resumeConfirmedRide()
                             }
                             detector = created
+                            tripId = maxOf(tripId + 1, System.currentTimeMillis())
                             latestRide = RideSnapshot()
                             liveStopsObservedAtMs = 0L
                             boardingStopObservedAtMs = 0L
@@ -2063,14 +2088,21 @@ class RouteTripMonitorService : Service() {
         answerRequestCode: Int,
         answeredCheckId: Long,
     ): PendingIntent {
+        val forTrip = tripId
         val intent = Intent(this, RouteTripMonitorService::class.java).apply {
             this.action = action
+            // Extras do not tell two PendingIntents apart: one made for the
+            // next trip, or the next question, with the same action and
+            // request code would rewrite the extras of every button made
+            // before it, and an old button would then speak for the new trip.
+            // The data does tell them apart, so each trip and each question
+            // gets buttons of its own.
+            data = Uri.parse("yabus-trip-monitor://boarding/$forTrip/$answeredCheckId")
+            putExtra(EXTRA_TRIP_ID, forTrip)
             if (answeredCheckId != 0L) {
                 putExtra(EXTRA_BOARDING_CHECK_ID, answeredCheckId)
             }
         }
-        // Extras do not tell two PendingIntents apart, so the answer gets a
-        // request code of its own rather than rewriting the unprompted button.
         return PendingIntent.getService(
             this,
             if (answeredCheckId != 0L) answerRequestCode else unpromptedRequestCode,
@@ -2081,6 +2113,10 @@ class RouteTripMonitorService : Service() {
 
     private fun answeredBoardingCheckId(intent: Intent): Long? =
         intent.getLongExtra(EXTRA_BOARDING_CHECK_ID, 0L).takeIf { it != 0L }
+
+    /** Whether a boarding button's [intent] was made for the trip now being tracked. */
+    private fun isForTheCurrentTrip(intent: Intent): Boolean =
+        intent.getLongExtra(EXTRA_TRIP_ID, 0L).let { it != 0L && it == tripId }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         AppRuntimeStateStore.setAppInForeground(this, false)
@@ -2370,6 +2406,7 @@ class RouteTripMonitorService : Service() {
         private const val EXTRA_APP_IN_FOREGROUND = "app_in_foreground"
         private const val EXTRA_PAUSE_REASON = "pause_reason"
         private const val EXTRA_BOARDING_CHECK_ID = "boarding_check_id"
+        private const val EXTRA_TRIP_ID = "trip_id"
 
         private const val LEGACY_TRACKING_CHANNEL_ID = "trip_monitor_tracking"
         private const val TRACKING_CHANNEL_ID = "trip_monitor_tracking_v2"
