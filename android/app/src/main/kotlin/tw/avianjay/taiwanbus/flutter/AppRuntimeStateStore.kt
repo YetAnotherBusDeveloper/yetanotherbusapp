@@ -12,6 +12,7 @@ object AppRuntimeStateStore {
     private const val KEY_PAUSED_DESTINATION_STOP_ID = "trip_monitor_paused_destination_stop_id"
     private const val KEY_PAUSED_REASON = "trip_monitor_paused_reason"
     private const val KEY_PAUSED_AT_MS = "trip_monitor_paused_at_ms"
+    private const val KEY_PAUSED_VEHICLE_ID = "trip_monitor_paused_vehicle_id"
 
     fun setAppInForeground(context: Context, value: Boolean) {
         preferences(context).edit()
@@ -23,10 +24,17 @@ object AppRuntimeStateStore {
         return preferences(context).getBoolean(KEY_APP_IN_FOREGROUND, false)
     }
 
+    /**
+     * [rideVehicleId] is the bus the paused ride had been identified as being
+     * on, when it had: the detector that knew it is gone once the monitor
+     * pauses, and with no phone fix that bus is all a resumed ride has to tell
+     * how far it has got.
+     */
     fun savePausedTripMonitor(
         context: Context,
         session: TrackingSession,
         reason: String,
+        rideVehicleId: String? = null,
     ) {
         preferences(context).edit()
             .putString(KEY_PAUSED_PROVIDER, session.provider)
@@ -36,6 +44,7 @@ object AppRuntimeStateStore {
             .putInt(KEY_PAUSED_DESTINATION_STOP_ID, session.destinationStopId ?: -1)
             .putString(KEY_PAUSED_REASON, reason)
             .putLong(KEY_PAUSED_AT_MS, System.currentTimeMillis())
+            .putString(KEY_PAUSED_VEHICLE_ID, rideVehicleId)
             .apply()
     }
 
@@ -48,6 +57,7 @@ object AppRuntimeStateStore {
             .remove(KEY_PAUSED_DESTINATION_STOP_ID)
             .remove(KEY_PAUSED_REASON)
             .remove(KEY_PAUSED_AT_MS)
+            .remove(KEY_PAUSED_VEHICLE_ID)
             .apply()
     }
 
@@ -74,6 +84,9 @@ object AppRuntimeStateStore {
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() },
             pausedAtMs = preferences.getLong(KEY_PAUSED_AT_MS, 0L),
+            rideVehicleId = preferences.getString(KEY_PAUSED_VEHICLE_ID, null)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() },
         )
     }
 
@@ -98,6 +111,8 @@ data class TripMonitorPauseState(
     val destinationStopId: Int?,
     val reason: String?,
     val pausedAtMs: Long,
+    /** The bus the paused ride was identified as being on; null when it was not. */
+    val rideVehicleId: String? = null,
 ) {
     fun matches(session: TrackingSession): Boolean {
         return provider == session.provider &&

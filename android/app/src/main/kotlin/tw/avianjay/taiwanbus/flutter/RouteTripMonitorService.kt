@@ -282,11 +282,10 @@ class RouteTripMonitorService : Service() {
                     return START_NOT_STICKY
                 }
                 val startedAtMs = System.currentTimeMillis()
-                val continuesBoardedRide = !hadDetector && continuesBoardedRide(
-                    paused = AppRuntimeStateStore.loadPausedTripMonitor(this),
-                    session = parsedSession,
-                    nowMs = startedAtMs,
-                )
+                val resumedRide = AppRuntimeStateStore.loadPausedTripMonitor(this)?.takeIf { paused ->
+                    !hadDetector && continuesBoardedRide(paused, parsedSession, startedAtMs)
+                }
+                val continuesBoardedRide = resumedRide != null
                 appInForeground = parsedSession.appInForeground
                 // The route screen's display state: placeholders for stops
                 // with nothing to show, and the last data it had for as long
@@ -345,11 +344,12 @@ class RouteTripMonitorService : Service() {
                     session = parsedSession
                     val tracking = if (startsNewTrip) {
                         createDetector(parsedSession).also { created ->
-                            if (continuesBoardedRide) {
+                            if (resumedRide != null) {
                                 // Choosing where to get off, in answer to "you
                                 // have boarded", is the rider confirming it —
-                                // but of a ride that began some stops back.
-                                created.resumeConfirmedRide()
+                                // but of a ride that began some stops back, on
+                                // the bus it was on then if that was known.
+                                created.resumeConfirmedRide(resumedRide.rideVehicleId)
                             }
                             detector = created
                             tripId = maxOf(tripId + 1, System.currentTimeMillis())
@@ -481,20 +481,24 @@ class RouteTripMonitorService : Service() {
      * it again — on the same bus. Coming back as "waiting to board" would throw
      * the ride away at the very moment the reminders it was chosen for become
      * possible, and mid-route there may be nothing left to detect it from.
+     *
+     * It is the same ride when it is the same route, direction and boarding
+     * stop. A ride paused with no boarding stop chosen is matched by any: the
+     * route screen fills in the stop nearest the rider when none is chosen,
+     * and by the time they answer, that is a stop further down the route.
      */
     private fun continuesBoardedRide(
-        paused: TripMonitorPauseState?,
+        paused: TripMonitorPauseState,
         session: TrackingSession,
         nowMs: Long,
     ): Boolean {
-        paused ?: return false
         return paused.reason == PAUSE_REASON_BOARDED_NO_DESTINATION &&
             paused.destinationStopId == null &&
             session.destinationStopId != null &&
             paused.provider == session.provider &&
             paused.routeKey == session.routeKey &&
             paused.pathId == session.pathId &&
-            paused.boardingStopId == session.boardingStopId &&
+            (paused.boardingStopId == null || paused.boardingStopId == session.boardingStopId) &&
             nowMs - paused.pausedAtMs in 0L..BOARDED_RIDE_RESUME_WINDOW_MS
     }
 
@@ -2047,8 +2051,14 @@ class RouteTripMonitorService : Service() {
             // The full-width id, because Dart compares it against the ids its
             // own stop models carry: a folded 高雄 id matches nothing there, so
             // tapping the notification would not select the stop.
-            stopId = session.destinationLaunchStopId
-                ?: session.stops.firstOrNull()?.launchStopId?.takeIf { it > 0L },
+            //
+            // With no destination it is the boarding stop, and nothing when
+            // that is not chosen either. A route screen opened by the tap
+            // takes this stop as where the rider boards, and "choose where to
+            // get off" is answered on that screen: sent the route's first
+            // stop, it came back with a trip from the first stop, which is not
+            // the ride that was paused, and the ride was dropped.
+            stopId = session.destinationLaunchStopId ?: session.boardingLaunchStopId,
         )
         return PendingIntent.getActivity(
             this,
@@ -2131,7 +2141,12 @@ class RouteTripMonitorService : Service() {
     ) {
         val sessionToPause = explicitSession ?: session
         if (sessionToPause != null) {
-            AppRuntimeStateStore.savePausedTripMonitor(this, sessionToPause, reason)
+            // The ride in progress, and the bus it is on, belong to the trip
+            // being tracked — not to a session the app names from outside.
+            val ride = currentRideSnapshot().takeIf { explicitSession == null && it.hasBoarded }
+            AppRuntimeStateStore.savePausedTripMonitor(
+                this, sessionToPause, reason, rideVehicleId = ride?.trackedVehicleId,
+            )
         }
         stopTracking(cancelAlertNotification = !preserveAlertNotification)
     }

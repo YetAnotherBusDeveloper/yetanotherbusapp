@@ -502,14 +502,19 @@ internal class TripRideDetector(
     /**
      * Takes up a ride the rider confirmed earlier, on a detector built since.
      *
-     * The confirmation was given some way back along the route, so nothing at
-     * the boarding stop now has anything to do with it: the vehicle stays
-     * unknown until the rider's own position picks it out.
+     * [knownVehicleId] is the bus that ride had been identified as being on,
+     * if it had: it is the same ride, so it is the same bus, and with no phone
+     * fix its positions are the only measure of how far the ride has got.
+     *
+     * When none was identified the vehicle stays unknown until the rider's own
+     * position picks it out. The confirmation was given some way back along
+     * the route, so nothing at the boarding stop now has anything to do with
+     * it.
      */
-    fun resumeConfirmedRide() {
+    fun resumeConfirmedRide(knownVehicleId: String? = null) {
         boarded = true
         evidence = BoardingEvidence.USER_CONFIRMED
-        trackedVehicleId = null
+        trackedVehicleId = knownVehicleId
         manualConfirmationAtMs = null
         manualVehicleAmbiguous = false
         clearPendingCheck()

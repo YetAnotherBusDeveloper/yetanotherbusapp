@@ -460,6 +460,111 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun aRidePausedForADestinationComesBackOnTheBusItWasOn() {
+        // No phone fix at any point: the bus is the only measure of the ride.
+        val waiting = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        var busStop = stopsOf(waiting).first()
+        var gpsTime = nowSeconds() - 20
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed("TRACKED-001", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(waiting), 0, 1)
+        fetchLiveData()
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        assertEquals("TRACKED-001", ride(service).trackedVehicleId)
+
+        val paused = awaitPause()
+        assertEquals("boarded_no_destination", paused.reason)
+        assertEquals("the bus is remembered with the paused ride", "TRACKED-001", paused.rideVehicleId)
+
+        // The rider chooses the last stop. The bus has reached the second.
+        busStop = stopsOf(waiting)[1]
+        gpsTime += 40
+        service.onStartCommand(
+            startIntent(waiting + mapOf("destinationStopId" to 3, "destinationStopName" to "三站")),
+            0,
+            3,
+        )
+        refreshAndDeliverAlerts()
+
+        val resumed = ride(service)
+        assertTrue(resumed.hasBoarded)
+        assertFalse(resumed.hasUsableLocation)
+        assertEquals("TRACKED-001", resumed.trackedVehicleId)
+        assertEquals("its position is the ride's progress again", 1, resumed.remainingStops)
+        assertNotNull("and what the destination reminders are worked out from", resumed.destinationDistanceMeters)
+        assertTrue(
+            "one stop to go: the reminder is due",
+            ReflectionHelpers.getField<Int>(service, "destinationAlertStage") >= 1,
+        )
+    }
+
+    @Test
+    fun aPauseTheAppAsksForOnAnotherSessionDoesNotCarryThisRidesBus() {
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3)
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed("TRACKED-001", stopsOf(trip).first(), pathId = 0, gpsTimeSeconds = nowSeconds() - 20)
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        fetchLiveData()
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        assertEquals("TRACKED-001", ride(service).trackedVehicleId)
+
+        val other = reversed(trip) + mapOf("boardingStopId" to 3, "destinationStopId" to 1)
+        service.onStartCommand(
+            command("PAUSE_TRIP_MONITOR").putExtra("session_json", org.json.JSONObject(other).toString()),
+            0,
+            3,
+        )
+
+        assertNull(AppRuntimeStateStore.loadPausedTripMonitor(service)?.rideVehicleId)
+    }
+
+    @Test
+    fun theDestinationPromptOpensTheRouteAtTheStopTheRideBeganFrom() {
+        fun promptLaunch(waiting: Map<String, Any?>): Map<String, Any?> {
+            service.onStartCommand(startIntent(waiting), 0, 1)
+            service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+            awaitPause()
+            val prompt = shadowOf(service.getSystemService(NotificationManager::class.java)).getNotification(6022)
+            assertEquals("已偵測上車", prompt.extras.getString(Notification.EXTRA_TITLE))
+            val launch = AppLaunchConstants.extractLaunchPayload(shadowOf(prompt.contentIntent).savedIntent)!!
+            service.onStartCommand(command("STOP_TRIP_MONITOR"), 0, 3)
+            return launch
+        }
+        val route = threeStopSession() + mapOf("routeId" to "TXG1")
+
+        // Boarded at the second stop. A route screen opened from the prompt
+        // takes the stop it is given as the boarding stop, and has to come
+        // back with the trip that was paused.
+        val launch = promptLaunch(route + mapOf("boardingStopId" to 2, "boardingStopName" to "二站"))
+        assertEquals(2L, launch["stopId"])
+        assertEquals(0, launch["pathId"])
+
+    }
+
+    @Test
+    fun theDestinationPromptNamesNoStopWhenTheRideHadNoBoardingStop() {
+        // The first stop of the route would be taken for the boarding stop.
+        service.onStartCommand(startIntent(threeStopSession() + mapOf("routeId" to "TXG1")), 0, 1)
+        service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+        awaitPause()
+        val prompt = shadowOf(service.getSystemService(NotificationManager::class.java)).getNotification(6022)
+        val launch = AppLaunchConstants.extractLaunchPayload(shadowOf(prompt.contentIntent).savedIntent)!!
+
+        assertFalse(launch.containsKey("stopId"))
+        assertEquals(0, launch["pathId"])
+    }
+
+    @Test
     fun onlyTheRidePausedForADestinationIsPickedBackUp() {
         val waiting = threeStopSession() + mapOf("boardingStopId" to 1)
         val withDestination = waiting + mapOf("destinationStopId" to 3)
@@ -495,6 +600,18 @@ class RouteTripMonitorServiceTest {
         assertFalse(
             "another boarding stop is another trip",
             startedAsBoarded(waiting, "boarded_no_destination", withDestination + mapOf("boardingStopId" to 2)),
+        )
+        assertTrue(
+            "a ride with no boarding stop chosen is still that ride once the screen fills one in",
+            startedAsBoarded(
+                waiting - "boardingStopId", "boarded_no_destination", withDestination + mapOf("boardingStopId" to 2),
+            ),
+        )
+        assertFalse(
+            "but not on the other direction",
+            startedAsBoarded(
+                waiting - "boardingStopId", "boarded_no_destination", reversed(withDestination),
+            ),
         )
         assertFalse(
             "an hour on, that ride is over",

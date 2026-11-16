@@ -249,6 +249,22 @@ class TripRideDetectorManualBoardingTest {
     }
 
     @Test
+    fun aRidePickedBackUpOnAKnownBusIsMeasuredByThatBus() {
+        // No phone. The ride was on BUS when it was paused; the detector is
+        // new, and BUS is now two kilometres along, with another at the stop.
+        val detector = newDetector()
+        detector.resumeConfirmedRide(knownVehicleId = BUS)
+        detector.onBusReports(listOf(report(0, along = 1_000.0), report(0, along = 0.0, id = "NEXT-BUS")))
+
+        val ride = detector.snapshot(at(0))
+        assertTrue(ride.hasBoarded)
+        assertEquals(BUS, ride.trackedVehicleId)
+        assertEquals(1, ride.remainingStops)
+        assertEquals(500.0, ride.destinationDistanceMeters!!, 1.0)
+        assertTrue(ride.hasRouteValidProgress)
+    }
+
+    @Test
     fun atStopEvidenceMustBeFromTheNinetySecondsBeforeConfirming() {
         for (seconds in listOf(90L, 91L)) {
             val detector = newDetector()
