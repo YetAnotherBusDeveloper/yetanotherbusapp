@@ -104,7 +104,7 @@ class TripMonitorFamilyRealtimeTest {
             ),
         )
         assertEquals(1_794_376_374_000L, fromTheBackend.observedAtMs)
-        assertEquals(-1, fromTheBackend.observedSeconds)
+        assertEquals(-1, fromTheBackend.observations.single().seconds)
         assertEquals(listOf(true, false), fromTheBackend.etaEntries.map { it.isArriving })
 
         // From the route screen: counted down for display, and saying so.
@@ -115,28 +115,58 @@ class TripMonitorFamilyRealtimeTest {
             ),
         )
         assertEquals(0, fromTheApp.seconds)
-        assertEquals(40, fromTheApp.observedSeconds)
-        assertEquals(1_794_376_374_123L, fromTheApp.observedAtMs)
+        assertEquals(StopObservation("", 40, 1_794_376_374_123L), fromTheApp.observations.single())
         assertEquals(40, fromTheApp.etaEntries.single().observedSeconds)
 
         // A placeholder for a stop with nothing to show observed nothing.
         val placeholder = parseTripMonitorLiveStop(JSONObject("""{"eta":null,"observedEta":null,"observedAtMs":null}"""))
         assertNull(placeholder.observedAtMs)
-        assertNull(placeholder.observedSeconds)
+        assertNull(placeholder.observations.single().seconds)
+
+        // A stop the screen merged from a family says what each route observed.
+        val merged = parseTripMonitorLiveStop(
+            JSONObject(
+                """{"eta":40,"observedEta":40,"observedAtMs":1794376374123,"observations":[
+                    {"source":"TXG500","eta":-1,"atMs":1794376354000},
+                    {"source":"TXG501","eta":40,"atMs":1794376374123}]}""",
+            ),
+            source = "TXG500",
+        )
+        assertEquals(
+            listOf(
+                StopObservation("TXG500", -1, 1_794_376_354_000L),
+                StopObservation("TXG501", 40, 1_794_376_374_123L),
+            ),
+            merged.observations,
+        )
     }
 
     @Test
-    fun aVariantsBusAtTheStopIsWhatWasObservedThereWhateverTheBadgeShows() {
+    fun whatEachRouteObservedOfASharedStopStaysItsOwn() {
         val client = TripMonitorFamilyRealtime { path ->
             if (path.startsWith("batchroutes/")) {
-                batch(live("1", 600, "MAIN-001"), live("ALIAS", -1, "FAMILY-001"))
+                batch(
+                    live("1", 600, "MAIN-001").observedAt(1_794_376_374L),
+                    live("ALIAS", -1, "FAMILY-001").observedAt(1_794_376_354L),
+                )
             } else {
                 topology("ALIAS")
             }
         }
         val stop = client.fetch(session()).getValue(1)
         assertEquals("the badge counts down to the next bus to come", 600, stop.seconds)
-        assertEquals("what was observed is a bus whose estimate has run out", -1, stop.observedSeconds)
+        assertEquals(
+            "each estimate keeps the moment it was observed at, and neither stands for the other",
+            listOf(
+                StopObservation("TXG500", 600, 1_794_376_374_000L),
+                StopObservation("TXG501", -1, 1_794_376_354_000L),
+            ),
+            stop.observations,
+        )
+    }
+
+    private fun JSONObject.observedAt(seconds: Long) = apply {
+        getJSONArray("paths").getJSONObject(0).getJSONArray("stops").getJSONObject(0).put("eta_reference_at", seconds)
     }
 
     @Test

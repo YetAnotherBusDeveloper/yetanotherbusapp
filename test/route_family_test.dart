@@ -153,6 +153,45 @@ void main() {
     );
   });
 
+  test('a merged stop keeps what each route observed, and when', () {
+    final merged = mergeRouteFamilyStopLiveData(
+      stop(
+        rawStopId: '500-main',
+        name: '捷運文心櫻花站',
+        lat: 24.171000,
+        lon: 120.653000,
+      ).copyWith(sec: -1, t: '1794376354', etaReferenceAt: '1794376354'),
+      [
+        stop(
+          rawStopId: '500-extension',
+          name: '捷運文心櫻花站',
+          lat: 24.171015,
+          lon: 120.653015,
+        ).copyWith(sec: 0, t: '1794376374', etaReferenceAt: '1794376374'),
+        // A route with nothing to say of the stop observed nothing.
+        stop(
+          rawStopId: '500-other',
+          name: '捷運文心櫻花站',
+          lat: 24.171015,
+          lon: 120.653015,
+        ),
+      ],
+      baseRouteId: 'TXG500',
+      sharedRouteIds: const ['TXG5002', 'TXG5003'],
+    );
+
+    expect(
+      [
+        for (final observation in merged.routeObservations)
+          '${observation.routeId} ${observation.sec} '
+              '${observation.etaReferenceAt}',
+      ],
+      ['TXG500 -1 1794376354', 'TXG5002 0 1794376374'],
+    );
+    // And they stay with the stop when its live data is carried over.
+    expect(merged.copyWith(msg: '').routeObservations, hasLength(2));
+  });
+
   test(
     'replaces an unavailable trunk ETA with a variant ETA at shared stops',
     () {
@@ -207,6 +246,15 @@ void main() {
       expect(sharedLiveStop.sec, 33);
       expect(sharedLiveStop.msg, isNull);
       expect(merged.familyRouteIds, ['TXG5000', 'TXG5002']);
+      // The trunk had nothing to say of the stop; what was observed there
+      // is the variant's, and is kept as the variant's.
+      expect(
+        [
+          for (final observation in sharedLiveStop.routeObservations)
+            '${observation.routeId} ${observation.sec}',
+        ],
+        ['TXG5002 33'],
+      );
     },
   );
 }

@@ -168,6 +168,50 @@ void main() {
     );
     expect(placeholder['observedAtMs'], isNull);
     expect(placeholder['observedEta'], isNull);
+    expect(placeholder.containsKey('observations'), isFalse);
+
+    // A stop merged from a family says what each route observed, and when.
+    final earlier = observedAt.subtract(const Duration(seconds: 20));
+    final earlierReference = (earlier.millisecondsSinceEpoch ~/ 1000)
+        .toString();
+    final merged = liveOf(
+      StopInfo(
+        routeKey: 1,
+        pathId: 0,
+        stopId: 3,
+        stopName: '共用站',
+        sequence: 3,
+        lat: 24.1,
+        lon: 120.6,
+        sec: 60,
+        t: reference,
+        etaReferenceAt: reference,
+        routeObservations: [
+          StopRouteObservation(
+            routeId: 'TXG500',
+            sec: -1,
+            etaReferenceAt: earlierReference,
+          ),
+          StopRouteObservation(
+            routeId: 'TXG5002',
+            sec: 60,
+            etaReferenceAt: reference,
+          ),
+        ],
+      ),
+    );
+    expect(merged['observations'], [
+      {
+        'source': 'TXG500',
+        'eta': -1,
+        'atMs': (earlier.millisecondsSinceEpoch ~/ 1000) * 1000,
+      },
+      {
+        'source': 'TXG5002',
+        'eta': 60,
+        'atMs': (observedAt.millisecondsSinceEpoch ~/ 1000) * 1000,
+      },
+    ]);
   });
 
   test('session carries when its initial position was measured', () {

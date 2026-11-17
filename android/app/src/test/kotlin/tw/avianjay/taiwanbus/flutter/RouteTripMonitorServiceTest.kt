@@ -1585,6 +1585,268 @@ class RouteTripMonitorServiceTest {
         assertEquals("what was fetched is what is shown, not the screen's old copy", 420, shown.seconds)
     }
 
+    /** The family's stop feed: what each of two routes says of the boarding stop, and when. */
+    private fun familyStopFeed(
+        main: Pair<Int?, Long>,
+        variant: Pair<Int?, Long>,
+    ): (String) -> String? = { path ->
+        fun route(estimate: Pair<Int?, Long>) =
+            """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":${estimate.first},"message":"",""" +
+                """"eta_reference_at":${estimate.second},"buses":[],""" +
+                """"etas":[{"plate":null,"eta":${estimate.first},"is_arriving":false}]}]}]}"""
+        when {
+            path.endsWith("/realtime/buses") -> "[]"
+            path.contains("batchroutes/") ->
+                """{"routes":{"TXG1":${route(main)},"TXG2":${route(variant)}}}"""
+            path.endsWith("/TXG2/stops") ->
+                """{"paths":[{"pathid":0,"stops":[{"stopid":"1","name":"一站",""" +
+                    """"lat":${THREE_STOPS[0].first},"lon":${THREE_STOPS[0].second}}]}]}"""
+            else -> null
+        }
+    }
+
+    @Test
+    fun aBusOneRouteOfTheFamilyHasDueIsDueWhateverAnotherRoutesEstimateSays() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "familyRouteIds" to listOf("TXG1", "TXG2"), "boardingStopId" to 1,
+        )
+        // One route's estimate ran out some time ago, with nothing counting
+        // down to it. The other's has a bus due this moment.
+        val t = nowSeconds() - 30
+        backend = familyStopFeed(main = -1 to t, variant = 0 to t)
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        assertEquals(0L, ride(service).boardingCheckId)
+
+        // Both roll over to the bus after.
+        backend = familyStopFeed(main = 600 to t + 20, variant = 600 to t + 20)
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertTrue("the bus that was due has left", ride(service).boardingCheckId != 0L)
+    }
+
+    @Test
+    fun aRouteOfTheFamilyNotHeardFromAgainIsNotItsBusArrivingAgain() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "familyRouteIds" to listOf("TXG1", "TXG2"), "boardingStopId" to 1,
+        )
+        // The variant has a bus due. The route itself has one ten minutes off.
+        val t = nowSeconds() - 60
+        backend = familyStopFeed(main = 600 to t, variant = 0 to t)
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        fun dueAt() = ReflectionHelpers.getField<Long>(
+            ReflectionHelpers.getField<Any>(service, "detector"), "etaArrivingAtMs",
+        )
+        val firstDue = dueAt()
+        assertTrue(firstDue != 0L)
+
+        // Only the route itself is observed again. The variant's estimate is
+        // the one already taken, and is not a bus due all over again.
+        Thread.sleep(15)
+        backend = familyStopFeed(main = 580 to t + 20, variant = 0 to t)
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertEquals("nothing new was said of a bus due", firstDue, dueAt())
+        assertEquals("nor has it left: nothing new was said of that either", 0L, ride(service).boardingCheckId)
+
+        // Then the variant is, and its bus has gone.
+        backend = familyStopFeed(main = 560 to t + 40, variant = 900 to t + 40)
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertTrue(ride(service).boardingCheckId != 0L)
+    }
+
+    @Test
+    fun aRouteOfTheFamilyLongNotHeardFromNoLongerHoldsItsBusAtTheStop() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "familyRouteIds" to listOf("TXG1", "TXG2"), "boardingStopId" to 1,
+        )
+        // The variant's bus is due — as of an observation nearly a minute and
+        // a half old, and the last there will be of it.
+        val t = nowSeconds()
+        backend = familyStopFeed(main = 600 to t - 30, variant = 0 to t - 88)
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        assertEquals(0L, ride(service).boardingCheckId)
+
+        Thread.sleep(3_000)
+        backend = familyStopFeed(main = 580 to t - 10, variant = 0 to t - 88)
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertTrue(
+            "what the variant last said is too old to go on meaning a bus at the stop",
+            ride(service).boardingCheckId != 0L,
+        )
+    }
+
+    @Test
+    fun theSameObservationFromTheScreenAndFromTheMonitorsOwnFetchIsOneObservation() {
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        val observedAt = (nowSeconds() - 5) * 1_000L
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                "[]"
+            } else {
+                """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":0,"message":"",""" +
+                    """"eta_reference_at":${observedAt / 1_000L},"buses":[],""" +
+                    """"etas":[{"plate":null,"eta":0,"is_arriving":false}]}]}]}"""
+            }
+        }
+        service.onStartCommand(appUpdate(trip, appStop(eta = 0, observedAtMs = observedAt)), 0, 1)
+        refreshAndDeliverAlerts()
+        fun dueAt() = ReflectionHelpers.getField<Long>(
+            ReflectionHelpers.getField<Any>(service, "detector"), "etaArrivingAtMs",
+        )
+        val firstDue = dueAt()
+        assertTrue(firstDue != 0L)
+
+        // The monitor's own fetch falls due and is answered from the same
+        // backend snapshot the screen had.
+        Thread.sleep(15)
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertEquals("it is the route's one observation, whichever way it came", firstDue, dueAt())
+    }
+
+    @Test
+    fun newsOfOtherStopsDoesNotPutOffFetchingTheBoardingStop() {
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        backend = { path ->
+            requests += path
+            if (path.endsWith("/realtime/buses")) "[]" else realStopFeed(onTheWay = listOf("BBB-002" to 420))
+        }
+        fun stopFetches() = requests.count { !it.endsWith("/realtime/buses") }
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+
+        // The screen has nothing for the boarding stop, and news of the next
+        // one every time.
+        for (round in 0..3) {
+            if (round > 0) {
+                ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+            }
+            beforeTheNextRefresh {
+                service.onStartCommand(
+                    appUpdate(trip, null, nextStop = appStop(eta = 300, observedAtMs = observedJustNow())),
+                    0, 1 + round,
+                )
+            }
+            refreshAndDeliverAlerts()
+        }
+        assertEquals("the boarding stop is fetched every time it falls due", 4, stopFetches())
+    }
+
+    @Test
+    fun whatTheMonitorFetchedIsNotReplacedByAnEarlierObservationFromTheScreen() {
+        val trip = threeStopSession() + mapOf("routeId" to "TXG1", "boardingStopId" to 1)
+        val fetchedAt = nowSeconds() - 5
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                "[]"
+            } else {
+                """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":420,"message":"",""" +
+                    """"eta_reference_at":$fetchedAt,"buses":[],"etas":[]}]}]}"""
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        fun shown() = ReflectionHelpers.getField<Map<Int, LiveStopState>>(service, "cachedLiveStops").getValue(1).seconds
+        assertEquals(420, shown())
+
+        // The screen is a refresh behind: recent, but from before that.
+        service.onStartCommand(
+            appUpdate(trip, appStop(eta = 500, observedAtMs = (fetchedAt - 15) * 1_000L)), 0, 2,
+        )
+        assertEquals(420, shown())
+    }
+
+    @Test
+    fun theBoardingStopIsNewsWhenItIsEvenIfAnotherStopWasObservedLater() {
+        val trip = threeStopSession() + mapOf("boardingStopId" to 1)
+        // The screen's stops are not all observed together. The stop after
+        // the boarding stop is already twenty seconds ahead of it.
+        val t = System.currentTimeMillis() - 40_000L
+        val ahead = appStop(eta = 300, observedAtMs = t + 20_000L)
+        service.onStartCommand(appUpdate(trip, appStop(eta = 0, observedAtMs = t), nextStop = ahead), 0, 1)
+        refreshRide()
+        // The boarding stop catches up: its bus has gone. Nothing else is newer.
+        service.onStartCommand(
+            appUpdate(trip, appStop(eta = 600, observedAtMs = t + 10_000L), nextStop = ahead), 0, 2,
+        )
+        refreshRide()
+
+        assertTrue("the boarding stop's own estimate rolled over", ride(service).boardingCheckId != 0L)
+        val shown = ReflectionHelpers.getField<Map<Int, LiveStopState>>(service, "cachedLiveStops").getValue(1)
+        assertEquals("and it is what the monitor shows", 600, shown.seconds)
+    }
+
+    @Test
+    fun anAnswerForARouteSinceDroppedFromTheFamilyAndPutBackIsNotThisRequestsAnswer() =
+        theRequestFromBeforeARouteWasDroppedAndPutBackEnds { "[]" }
+
+    @Test
+    fun aFailureForARouteSinceDroppedFromTheFamilyAndPutBackIsNotThisRequestsFailure() =
+        theRequestFromBeforeARouteWasDroppedAndPutBackEnds { error("not something the fetch expects") }
+
+    private fun theRequestFromBeforeARouteWasDroppedAndPutBackEnds(itsAnswer: () -> String) {
+        val withVariant = threeStopSession() + mapOf(
+            "routeId" to "TXG1",
+            "familyRouteIds" to listOf("TXG1", "TXG2"),
+            "boardingStopId" to 1,
+            "destinationStopId" to 3,
+        )
+        val withoutIt = withVariant + mapOf("familyRouteIds" to listOf("TXG1"))
+        val variantRequests = java.util.concurrent.atomic.AtomicInteger()
+        val firstAsked = CountDownLatch(1)
+        val releaseFirst = CountDownLatch(1)
+        val releaseLater = CountDownLatch(1)
+        backend = { path ->
+            when {
+                path == "/api/v1/routes/TXG2/realtime/buses" ->
+                    if (variantRequests.incrementAndGet() == 1) {
+                        firstAsked.countDown()
+                        releaseFirst.await(20, TimeUnit.SECONDS)
+                        itsAnswer()
+                    } else {
+                        releaseLater.await(20, TimeUnit.SECONDS)
+                        "[]"
+                    }
+                path.endsWith("/realtime/buses") -> "[]"
+                else -> null
+            }
+        }
+        try {
+            service.onStartCommand(startIntent(withVariant), 0, 1)
+            assertTrue(firstAsked.await(10, TimeUnit.SECONDS))
+            service.onStartCommand(command("MARK_BOARDED"), 0, 2)
+            val theRide = ReflectionHelpers.getField<Any>(service, "detector")
+            // The screen loses the variant for a moment and finds it again.
+            service.onStartCommand(startIntent(withoutIt), 0, 3)
+            service.onStartCommand(startIntent(withVariant), 0, 4)
+            assertTrue("it is the same ride throughout", ReflectionHelpers.getField<Any>(service, "detector") === theRide)
+            awaitOnMainThread("the variant being asked for again") {
+                refreshWithoutWaiting()
+                variantRequests.get() == 2
+            }
+
+            // The first request is answered with the second still out, and
+            // nothing else: every other request has come back by now.
+            awaitOnMainThread("only the two requests being out") { service.feedFetchesInFlight.get() == 2 }
+            releaseFirst.countDown()
+            awaitOnMainThread("the first request ending") { service.feedFetchesInFlight.get() == 1 }
+            ShadowSystemClock.advanceBy(90, TimeUnit.SECONDS)
+            refreshWithoutWaiting()
+            // Requests go out on threads of their own; whatever else this
+            // refresh asked for comes back, and one request is left out.
+            awaitOnMainThread("no request but the one already out") { service.feedFetchesInFlight.get() == 1 }
+            assertEquals("the request now out is still out, and is not sent a third time", 2, variantRequests.get())
+        } finally {
+            releaseFirst.countDown()
+            releaseLater.countDown()
+        }
+        awaitQueuedRefreshes()
+    }
+
     @Test
     fun theMonitorFetchesForItselfWhileTheRouteScreenHasNothingNew() {
         val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -2012,11 +2274,12 @@ class RouteTripMonitorServiceTest {
             awaitOnMainThread("the new trip's request") { requests.get() == 2 }
 
             // The first trip's request now fails outright, with this one's still out.
-            val stillOut = service.feedFetchesInFlight.get() - 1
+            awaitOnMainThread("only the two requests being out") { service.feedFetchesInFlight.get() == 2 }
             releaseFirst.countDown()
-            awaitOnMainThread("the first trip's request ending") { service.feedFetchesInFlight.get() == stillOut }
+            awaitOnMainThread("the first trip's request ending") { service.feedFetchesInFlight.get() == 1 }
             ShadowSystemClock.advanceBy(90, TimeUnit.SECONDS)
             refreshWithoutWaiting()
+            awaitOnMainThread("no request but the one already out") { service.feedFetchesInFlight.get() == 1 }
             assertEquals("this trip's feed is still being fetched, and is not asked for again", 2, requests.get())
         } finally {
             releaseFirst.countDown()

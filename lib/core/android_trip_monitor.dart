@@ -58,6 +58,20 @@ class TripMonitorStop {
           stop,
           now: now,
         )?.millisecondsSinceEpoch,
+        // A stop merged from the routes of a family: what each of them
+        // observed. The soonest estimate above is the badge; these are what
+        // the feed said, each with the moment it said it.
+        if (stop.routeObservations.isNotEmpty)
+          'observations': [
+            for (final observation in stop.routeObservations)
+              {
+                'source': observation.routeId,
+                'eta': observation.sec,
+                'atMs': observation
+                    .observedAt(now: now)
+                    ?.millisecondsSinceEpoch,
+              },
+          ],
         'message': stop.msg,
         'buses': [
           if (fresh)

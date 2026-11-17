@@ -1109,6 +1109,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           etaReferenceAt: previousStop.etaReferenceAt,
           buses: previousStop.buses,
           etas: previousStop.etas,
+          routeObservations: previousStop.routeObservations,
         );
       }).toList();
     }

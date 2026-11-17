@@ -39,6 +39,20 @@ internal data class RideBusReport(
 )
 
 /**
+ * What one route's feed estimates for the boarding stop.
+ *
+ * A stop shared by the routes of a family has an estimate from each, observed
+ * at different moments. [source] says whose this is. [observedNow] is false
+ * for one that has not been observed again since the detector was last told
+ * of it: it still stands, and says nothing new.
+ */
+internal data class StopEstimate(
+    val source: String,
+    val seconds: Int?,
+    val observedNow: Boolean = true,
+)
+
+/**
  * What the stop feed says of one bus heading for the boarding stop.
  *
  * Being listed is not being there. The backend lists a vehicle under the stop
@@ -161,8 +175,11 @@ internal class TripRideDetector(
     /** When the stop feed last had a bus at the boarding stop, or due there; 0 when none is. */
     private var etaArrivingAtMs = 0L
 
-    /** When the stop feed last carried a live estimate: a bus arriving, or one due within four minutes. */
-    private var etaLiveAtMs = 0L
+    /**
+     * When each source of the stop feed last carried a live estimate: a bus
+     * arriving, or one due within four minutes.
+     */
+    private val etaLiveAtMs = HashMap<String, Long>()
 
     /**
      * Every named bus the stop feed has placed at the stop since one was last
@@ -368,17 +385,26 @@ internal class TripRideDetector(
      * a vehicle has left — the only departure signal there is when that
      * vehicle has no position feed.
      *
-     * [etaSeconds] is the stop's estimate, [arriving] whether the feed says
+     * [estimates] is the stop's estimate from each route that serves it —
+     * one, unless the route has a family — [arriving] whether the feed says
      * outright that a bus is arriving, and [buses] what it says of each bus
      * heading for the stop.
      *
-     * A bus is due when the feed flags one as arriving, or the estimate is
+     * A bus is due when the feed flags one as arriving, or an estimate is
      * within half a minute. An estimate that has run out — the backend counts
      * it down to −1 and leaves it there — says a bus was due only as the end
-     * of a countdown this detector watched: in recorded feeds every one of
-     * those was a bus passing the stop, and they are most of what 雙北, whose
-     * feed never flags an arrival, has to offer. By itself, with no estimate
-     * before it, it is a stop nobody is counting down to, and no bus.
+     * of a countdown this detector watched from that same source: in recorded
+     * feeds every one of those was a bus passing the stop, and they are most
+     * of what 雙北, whose feed never flags an arrival, has to offer. By
+     * itself, with no estimate before it, it is a stop nobody is counting
+     * down to, and no bus.
+     *
+     * Each route's estimate is judged by itself, and any one of them makes a
+     * bus due: the soonest of them is not "the stop's estimate", and one
+     * route's run-out estimate must not hide another's bus. One that was not
+     * observed again this time opens nothing and renews nothing — that would
+     * be its bus arriving twice — but while it still has a bus due, the others
+     * moving on is not that bus leaving.
      *
      * Which bus left is said only when the feed leaves one possibility. It
      * must have placed exactly one named bus at the stop; none it did not
@@ -386,18 +412,31 @@ internal class TripRideDetector(
      * a bus that close can pull in and leave between two polls. Otherwise the
      * rollover is a bus leaving, and no more than that.
      */
-    fun onBoardingStopEta(
-        etaSeconds: Int?,
+    fun onBoardingStopFeed(
+        estimates: List<StopEstimate>,
         arriving: Boolean,
         nowMs: Long,
         buses: List<StopFeedBus> = emptyList(),
     ) {
-        val ranOut = !arriving && etaSeconds != null && etaSeconds < 0
-        val busDue = arriving ||
-            (etaSeconds != null && etaSeconds in 0..ETA_ARRIVING_SECONDS) ||
-            (ranOut && etaLiveAtMs != 0L && nowMs - etaLiveAtMs <= ETA_RAN_OUT_MAX_MS)
-        if (arriving || (etaSeconds != null && etaSeconds in 0 until ETA_ROLLOVER_SECONDS)) {
-            etaLiveAtMs = nowMs
+        var busDue = arriving
+        var busStillDue = false
+        estimates.forEach { estimate ->
+            val seconds = estimate.seconds ?: return@forEach
+            val liveAtMs = etaLiveAtMs[estimate.source]
+            val due = seconds in 0..ETA_ARRIVING_SECONDS ||
+                (seconds < 0 && liveAtMs != null && nowMs - liveAtMs <= ETA_RAN_OUT_MAX_MS)
+            if (due && estimate.observedNow) {
+                busDue = true
+            } else if (due) {
+                busStillDue = true
+            }
+        }
+        estimates.forEach { estimate ->
+            if (estimate.observedNow &&
+                (arriving || (estimate.seconds != null && estimate.seconds in 0 until ETA_ROLLOVER_SECONDS))
+            ) {
+                etaLiveAtMs[estimate.source] = nowMs
+            }
         }
         val nearby = buses.filter { bus ->
             bus.vehicleId != null &&
@@ -421,11 +460,17 @@ internal class TripRideDetector(
             }
             return
         }
-        if (ranOut || !arrivalOpen) {
+        if (busStillDue || !arrivalOpen) {
+            // Nothing observed this time has a bus due, but a route not heard
+            // from again still does.
+            return
+        }
+        val toCome = estimates.mapNotNull { it.seconds }.filter { it >= 0 }
+        if (toCome.isEmpty() && estimates.any { it.seconds != null }) {
             // A stale estimate is neither a bus due nor the next bus's.
             return
         }
-        if (etaSeconds == null || etaSeconds >= ETA_ROLLOVER_SECONDS) {
+        if (toCome.isEmpty() || toCome.min() >= ETA_ROLLOVER_SECONDS) {
             // Once a bus has been due the estimate either jumps to the next
             // bus or disappears entirely; both mean that bus has gone.
             val only = etaArrivingVehicles.keys.singleOrNull()
@@ -440,6 +485,14 @@ internal class TripRideDetector(
             etaNearbyVehicles += nearby
         }
     }
+
+    /** [onBoardingStopFeed] for a stop only one route estimates for. */
+    fun onBoardingStopEta(
+        etaSeconds: Int?,
+        arriving: Boolean,
+        nowMs: Long,
+        buses: List<StopFeedBus> = emptyList(),
+    ) = onBoardingStopFeed(listOf(StopEstimate(source = "", seconds = etaSeconds)), arriving, nowMs, buses)
 
     private fun forgetStopArrival() {
         etaArrivingAtMs = 0L

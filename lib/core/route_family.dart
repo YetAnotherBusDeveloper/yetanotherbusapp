@@ -37,11 +37,38 @@ bool routeFamilyStopsSharePhysicalSide(StopInfo first, StopInfo second) {
 ///
 /// The selected route owns the stop identity. The earliest live ETA becomes
 /// the shared badge value while vehicle and vehicle-specific ETA lists combine.
+///
+/// [baseRouteId] and [sharedRouteIds] say which route each stop is from, the
+/// latter in the order of [sharedStops]. Given them, the merged stop also
+/// keeps what each route observed, estimate and moment together.
 StopInfo mergeRouteFamilyStopLiveData(
   StopInfo baseStop,
-  List<StopInfo> sharedStops,
-) {
+  List<StopInfo> sharedStops, {
+  String? baseRouteId,
+  List<String>? sharedRouteIds,
+}) {
   final allStops = <StopInfo>[baseStop, ...sharedStops];
+  final routeObservations = <String, StopRouteObservation>{};
+  if (baseRouteId != null &&
+      sharedRouteIds != null &&
+      sharedRouteIds.length == sharedStops.length) {
+    final routeIds = <String>[baseRouteId, ...sharedRouteIds];
+    for (var index = 0; index < allStops.length; index++) {
+      final stop = allStops[index];
+      if (stop.sec == null && stop.etaReferenceAt == null && stop.t == null) {
+        continue;
+      }
+      routeObservations.putIfAbsent(
+        routeIds[index],
+        () => StopRouteObservation(
+          routeId: routeIds[index],
+          sec: stop.sec,
+          etaReferenceAt: stop.etaReferenceAt,
+          updatedAt: stop.t,
+        ),
+      );
+    }
+  }
   final etaStops =
       allStops
           .where((stop) => effectiveStopEtaSeconds(stop) != null)
@@ -102,6 +129,7 @@ StopInfo mergeRouteFamilyStopLiveData(
     etaReferenceAt: (primaryEtaStop ?? primaryMessageStop).etaReferenceAt,
     buses: busesById.values.toList(growable: false),
     etas: etasByKey.values.toList(growable: false),
+    routeObservations: routeObservations.values.toList(growable: false),
   );
 }
 
@@ -119,29 +147,37 @@ RouteDetailData mergeRouteFamilyLiveData(
   for (final path in selected.paths) {
     final selectedStops =
         selected.stopsByPath[path.pathId] ?? const <StopInfo>[];
-    final variantStops = <StopInfo>[];
+    final variantStops = <({String routeId, StopInfo stop})>[];
     for (final variant in variants) {
       for (final variantPath in variant.paths) {
         if (directionOrdinalLabel(variantPath.pathId) !=
             directionOrdinalLabel(path.pathId)) {
           continue;
         }
-        variantStops.addAll(
-          variant.stopsByPath[variantPath.pathId] ?? const <StopInfo>[],
-        );
+        for (final stop
+            in variant.stopsByPath[variantPath.pathId] ?? const <StopInfo>[]) {
+          variantStops.add((routeId: variant.route.routeId, stop: stop));
+        }
       }
     }
     stopsByPath[path.pathId] = selectedStops
         .map((stop) {
-          final sharedStops = variantStops
+          final shared = variantStops
               .where(
-                (variantStop) =>
-                    routeFamilyStopsSharePhysicalSide(stop, variantStop),
+                (variant) =>
+                    routeFamilyStopsSharePhysicalSide(stop, variant.stop),
               )
               .toList(growable: false);
-          return sharedStops.isEmpty
+          return shared.isEmpty
               ? stop
-              : mergeRouteFamilyStopLiveData(stop, sharedStops);
+              : mergeRouteFamilyStopLiveData(
+                  stop,
+                  [for (final variant in shared) variant.stop],
+                  baseRouteId: selected.route.routeId,
+                  sharedRouteIds: [
+                    for (final variant in shared) variant.routeId,
+                  ],
+                );
         })
         .toList(growable: false);
   }

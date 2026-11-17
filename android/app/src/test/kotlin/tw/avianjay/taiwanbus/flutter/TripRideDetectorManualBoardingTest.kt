@@ -267,6 +267,14 @@ class TripRideDetectorManualBoardingTest {
         aside.onUserLocation(RideGeoPoint(latitude(0.0), 120.6041, at(35), accuracyMeters = 10f))
         assertEquals(0L, aside.snapshot(at(35)).boardingCheckId)
 
+        // Level with a point further down the route, but on another road.
+        val alongside = newDetector()
+        alongside.onBoardingStopEta(0, arriving = true, nowMs = at(0))
+        alongside.onBoardingStopEta(600, arriving = false, nowMs = at(20))
+        assertTrue(alongside.snapshot(at(20)).boardingCheckId != 0L)
+        alongside.onUserLocation(RideGeoPoint(latitude(300.0), 120.6041, at(35), accuracyMeters = 10f))
+        assertEquals(0L, alongside.snapshot(at(35)).boardingCheckId)
+
         val back = newDetector(boardingStopId = 2)
         back.onBoardingStopEta(0, arriving = true, nowMs = at(0))
         back.onBoardingStopEta(600, arriving = false, nowMs = at(20))
@@ -808,6 +816,57 @@ class TripRideDetectorManualBoardingTest {
         unflagged.onBoardingStopEta(95, arriving = false, nowMs = at(0), buses = listOf(StopFeedBus("BUS-A", 95)))
         unflagged.onBoardingStopEta(600, arriving = false, nowMs = at(20))
         assertFalse(unflagged.snapshot(at(65)).boardingPromptDue)
+    }
+
+    @Test
+    fun eachRoutesEstimateForTheStopIsReadByItself() {
+        fun feed(detector: TripRideDetector, seconds: Long, main: Int?, variant: Int?, variantIsNew: Boolean = true) =
+            detector.onBoardingStopFeed(
+                listOf(StopEstimate("MAIN", main), StopEstimate("VARIANT", variant, observedNow = variantIsNew)),
+                arriving = false,
+                nowMs = at(seconds),
+            )
+
+        // One route's estimate ran out unwatched; the other's bus is due.
+        val mixed = newDetector()
+        feed(mixed, 0, main = -1, variant = 0)
+        feed(mixed, 20, main = 600, variant = 600)
+        assertTrue("the bus that was due has left", mixed.snapshot(at(20)).boardingCheckId != 0L)
+
+        // A countdown one route was watched through is not another's.
+        val unwatched = newDetector()
+        feed(unwatched, 0, main = 100, variant = null)
+        feed(unwatched, 20, main = 80, variant = -1)
+        feed(unwatched, 40, main = 600, variant = 600)
+        assertEquals("nothing was due on either", 0L, unwatched.snapshot(at(40)).boardingCheckId)
+
+        // Nor does one route's bus still to come hide the other's at the stop.
+        val watched = newDetector()
+        feed(watched, 0, main = 300, variant = 20)
+        feed(watched, 20, main = 280, variant = -1)
+        assertEquals(0L, watched.snapshot(at(20)).boardingCheckId)
+        feed(watched, 40, main = 260, variant = 900)
+        assertTrue("the variant's bus was at the stop, and has gone", watched.snapshot(at(40)).boardingCheckId != 0L)
+
+        // A bus one route has at the stop, that route not observed again, has
+        // not left because the other route's estimate is all that is new.
+        val standing = newDetector()
+        feed(standing, 0, main = 600, variant = 20)
+        feed(standing, 20, main = 580, variant = -1)
+        feed(standing, 40, main = 560, variant = -1, variantIsNew = false)
+        assertEquals(0L, standing.snapshot(at(40)).boardingCheckId)
+        feed(standing, 60, main = 540, variant = 900)
+        assertTrue(standing.snapshot(at(60)).boardingCheckId != 0L)
+
+        // A route not observed again still has its bus due: the other moving
+        // on is not that bus leaving, and it is not that bus arriving again.
+        val held = newDetector()
+        feed(held, 0, main = 600, variant = 0)
+        feed(held, 100, main = 500, variant = 0, variantIsNew = false)
+        assertEquals(0L, held.snapshot(at(100)).boardingCheckId)
+        // Had it been due all over again at 100 s, this would be inside the window.
+        feed(held, 200, main = 400, variant = 900)
+        assertEquals("the arrival it opened has long lapsed", 0L, held.snapshot(at(200)).boardingCheckId)
     }
 
     @Test

@@ -2010,6 +2010,33 @@ class StopEta {
   final String? updatedAt;
 }
 
+/// What one route of a family observed of a stop the family shares: its
+/// estimate, and the moment the backend worked it out for.
+///
+/// A merged stop shows the soonest estimate of them all. That is a badge, not
+/// an observation: the routes are observed at different moments, and one
+/// route's estimate says nothing of another's bus.
+class StopRouteObservation {
+  const StopRouteObservation({
+    required this.routeId,
+    this.sec,
+    this.etaReferenceAt,
+    this.updatedAt,
+  });
+
+  final String routeId;
+  final int? sec;
+  final String? etaReferenceAt;
+  final String? updatedAt;
+
+  /// As [stopRealtimeObservedAt] is for a stop.
+  DateTime? observedAt({DateTime? now}) {
+    final clock = now ?? DateTime.now();
+    return _parseStopRealtimeUpdatedAt(etaReferenceAt, clock) ??
+        _parseStopRealtimeUpdatedAt(updatedAt, clock);
+  }
+}
+
 class StopInfo {
   const StopInfo({
     required this.routeKey,
@@ -2027,6 +2054,7 @@ class StopInfo {
     this.etaReferenceAt,
     this.buses = const [],
     this.etas = const [],
+    this.routeObservations = const [],
   });
 
   factory StopInfo.fromMap(Map<String, Object?> map) {
@@ -2066,6 +2094,10 @@ class StopInfo {
   final List<BusVehicle> buses;
   final List<StopEta> etas;
 
+  /// For a stop merged from the routes of a family: what each of them
+  /// observed. Empty for a stop of one route, whose own fields say it.
+  final List<StopRouteObservation> routeObservations;
+
   TransitName get transitName => TransitName(
     zh: stopName,
     en: stopNameEn,
@@ -2079,6 +2111,7 @@ class StopInfo {
     String? etaReferenceAt,
     List<BusVehicle>? buses,
     List<StopEta>? etas,
+    List<StopRouteObservation>? routeObservations,
   }) {
     return StopInfo(
       routeKey: routeKey,
@@ -2096,6 +2129,7 @@ class StopInfo {
       etaReferenceAt: etaReferenceAt ?? this.etaReferenceAt,
       buses: buses ?? this.buses,
       etas: etas ?? this.etas,
+      routeObservations: routeObservations ?? this.routeObservations,
     );
   }
 }
