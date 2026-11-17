@@ -190,28 +190,60 @@ void main() {
           StopRouteObservation(
             routeId: 'TXG500',
             sec: -1,
+            isArriving: true,
             etaReferenceAt: earlierReference,
           ),
           StopRouteObservation(
             routeId: 'TXG5002',
             sec: 60,
+            msg: '進站中',
             etaReferenceAt: reference,
           ),
         ],
+        etas: const [
+          StopEta(
+            sec: -1,
+            vehicleId: 'EAL-5389',
+            isArriving: true,
+            routeIds: ['TXG500'],
+          ),
+          StopEta(
+            sec: 60,
+            vehicleId: 'KKA-0002',
+            routeIds: ['TXG500', 'TXG5002'],
+          ),
+          StopEta(sec: 900, vehicleId: 'KKA-0003'),
+        ],
       ),
     );
+    // Which route had a bus arriving goes with the rest of what it observed.
     expect(merged['observations'], [
       {
         'source': 'TXG500',
         'eta': -1,
         'atMs': (earlier.millisecondsSinceEpoch ~/ 1000) * 1000,
+        'arriving': true,
+        'message': null,
       },
       {
         'source': 'TXG5002',
         'eta': 60,
         'atMs': (observedAt.millisecondsSinceEpoch ~/ 1000) * 1000,
+        'arriving': false,
+        'message': '進站中',
       },
     ]);
+    // And each bus says which route lists it, where that is known.
+    final mergedEtas = (merged['etas']! as List).cast<Map<String, Object?>>();
+    expect(
+      [for (final eta in mergedEtas) eta['routes']],
+      [
+        ['TXG500'],
+        ['TXG500', 'TXG5002'],
+        null,
+      ],
+    );
+    expect(mergedEtas.last.containsKey('routes'), isFalse);
   });
 
   test('session carries when its initial position was measured', () {

@@ -60,7 +60,8 @@ class TripMonitorStop {
         )?.millisecondsSinceEpoch,
         // A stop merged from the routes of a family: what each of them
         // observed. The soonest estimate above is the badge; these are what
-        // the feed said, each with the moment it said it.
+        // the feed said — an estimate, a bus arriving — each with the moment
+        // it said it.
         if (stop.routeObservations.isNotEmpty)
           'observations': [
             for (final observation in stop.routeObservations)
@@ -70,6 +71,8 @@ class TripMonitorStop {
                 'atMs': observation
                     .observedAt(now: now)
                     ?.millisecondsSinceEpoch,
+                'arriving': observation.isArriving,
+                'message': observation.msg,
               },
           ],
         'message': stop.msg,
@@ -98,6 +101,9 @@ class TripMonitorStop {
                 'observedEta': eta.sec,
                 'message': eta.msg,
                 'is_arriving': eta.isArriving,
+                // Which routes of the family list it: what is said of the
+                // bus is as old as their observations.
+                if (eta.routeIds.isNotEmpty) 'routes': eta.routeIds,
               },
         ],
       },

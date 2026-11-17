@@ -44,12 +44,15 @@ internal data class RideBusReport(
  * A stop shared by the routes of a family has an estimate from each, observed
  * at different moments. [source] says whose this is. [observedNow] is false
  * for one that has not been observed again since the detector was last told
- * of it: it still stands, and says nothing new.
+ * of it: it still stands, and says nothing new. [arriving] is that route's
+ * feed saying outright that a bus is arriving at the stop — which is that
+ * route's to say, and as old as the rest of what it observed.
  */
 internal data class StopEstimate(
     val source: String,
     val seconds: Int?,
     val observedNow: Boolean = true,
+    val arriving: Boolean = false,
 )
 
 /**
@@ -66,6 +69,12 @@ internal data class StopFeedBus(
     val etaSeconds: Int?,
     /** The feed flags it as arriving at the stop. */
     val arriving: Boolean = false,
+    /**
+     * False when the route that says this of the bus has not been observed
+     * again; see [StopEstimate.observedNow]. It is then not the bus being
+     * seen at the stop once more.
+     */
+    val observedNow: Boolean = true,
 )
 
 internal enum class BoardingEvidence {
@@ -385,12 +394,12 @@ internal class TripRideDetector(
      * a vehicle has left — the only departure signal there is when that
      * vehicle has no position feed.
      *
-     * [estimates] is the stop's estimate from each route that serves it —
-     * one, unless the route has a family — [arriving] whether the feed says
-     * outright that a bus is arriving, and [buses] what it says of each bus
-     * heading for the stop.
+     * [estimates] is what each route that serves the stop says of it — one,
+     * unless the route has a family: its estimate, and whether its feed says
+     * outright that a bus is arriving. [buses] is what the feed says of each
+     * bus heading for the stop.
      *
-     * A bus is due when the feed flags one as arriving, or an estimate is
+     * A bus is due when a route flags one as arriving, or its estimate is
      * within half a minute. An estimate that has run out — the backend counts
      * it down to −1 and leaves it there — says a bus was due only as the end
      * of a countdown this detector watched from that same source: in recorded
@@ -399,12 +408,13 @@ internal class TripRideDetector(
      * itself, with no estimate before it, it is a stop nobody is counting
      * down to, and no bus.
      *
-     * Each route's estimate is judged by itself, and any one of them makes a
+     * What each route says is judged by itself, and any one of them makes a
      * bus due: the soonest of them is not "the stop's estimate", and one
-     * route's run-out estimate must not hide another's bus. One that was not
-     * observed again this time opens nothing and renews nothing — that would
-     * be its bus arriving twice — but while it still has a bus due, the others
-     * moving on is not that bus leaving.
+     * route's run-out estimate must not hide another's bus. A route that was
+     * not observed again this time opens nothing and renews nothing, by its
+     * estimate, its flag or the buses it lists — that would be its bus
+     * arriving twice — but while it still has a bus due, the others moving on
+     * is not that bus leaving.
      *
      * Which bus left is said only when the feed leaves one possibility. It
      * must have placed exactly one named bus at the stop; none it did not
@@ -414,17 +424,20 @@ internal class TripRideDetector(
      */
     fun onBoardingStopFeed(
         estimates: List<StopEstimate>,
-        arriving: Boolean,
         nowMs: Long,
         buses: List<StopFeedBus> = emptyList(),
     ) {
-        var busDue = arriving
+        var busDue = false
         var busStillDue = false
         estimates.forEach { estimate ->
-            val seconds = estimate.seconds ?: return@forEach
+            val seconds = estimate.seconds
             val liveAtMs = etaLiveAtMs[estimate.source]
-            val due = seconds in 0..ETA_ARRIVING_SECONDS ||
-                (seconds < 0 && liveAtMs != null && nowMs - liveAtMs <= ETA_RAN_OUT_MAX_MS)
+            val due = estimate.arriving || (
+                seconds != null && (
+                    seconds in 0..ETA_ARRIVING_SECONDS ||
+                        (seconds < 0 && liveAtMs != null && nowMs - liveAtMs <= ETA_RAN_OUT_MAX_MS)
+                    )
+                )
             if (due && estimate.observedNow) {
                 busDue = true
             } else if (due) {
@@ -432,12 +445,15 @@ internal class TripRideDetector(
             }
         }
         estimates.forEach { estimate ->
-            if (estimate.observedNow &&
-                (arriving || (estimate.seconds != null && estimate.seconds in 0 until ETA_ROLLOVER_SECONDS))
+            if (estimate.observedNow && (
+                    estimate.arriving ||
+                        (estimate.seconds != null && estimate.seconds in 0 until ETA_ROLLOVER_SECONDS)
+                    )
             ) {
                 etaLiveAtMs[estimate.source] = nowMs
             }
         }
+        val arriving = estimates.any { it.observedNow && it.arriving }
         val nearby = buses.filter { bus ->
             bus.vehicleId != null &&
                 (bus.arriving || bus.etaSeconds == null || bus.etaSeconds < ETA_ROLLOVER_SECONDS)
@@ -448,7 +464,9 @@ internal class TripRideDetector(
                 forgetStopArrival()
             }
             etaArrivingAtMs = nowMs
-            val there = buses.filter { it.arriving || (it.etaSeconds != null && it.etaSeconds <= 0) }
+            val there = buses.filter {
+                it.observedNow && (it.arriving || (it.etaSeconds != null && it.etaSeconds <= 0))
+            }
             there.mapNotNull { it.vehicleId }.forEach { vehicleId ->
                 etaArrivingVehicles.getOrPut(vehicleId) { StopPresence(sinceMs = nowMs) }.untilMs = nowMs
             }
@@ -492,7 +510,11 @@ internal class TripRideDetector(
         arriving: Boolean,
         nowMs: Long,
         buses: List<StopFeedBus> = emptyList(),
-    ) = onBoardingStopFeed(listOf(StopEstimate(source = "", seconds = etaSeconds)), arriving, nowMs, buses)
+    ) = onBoardingStopFeed(
+        listOf(StopEstimate(source = "", seconds = etaSeconds, arriving = arriving)),
+        nowMs,
+        buses,
+    )
 
     private fun forgetStopArrival() {
         etaArrivingAtMs = 0L
@@ -654,14 +676,25 @@ internal class TripRideDetector(
      * rider has done since it was given, which may be long before it is
      * delivered. It changes nothing.
      *
+     * Counting the departures reported so far ([noteDepartures]) can itself
+     * have the rider asked afresh, about a bus that has left long enough
+     * after the question was put. The answer was given to the question as it
+     * stood: it is said of the buses that one covered, and the new question,
+     * with the bus it is about, stays to be answered. A bus that leaves too
+     * soon after the question to be asked about separately joins it, and is
+     * answered for with the rest.
+     *
      * Returns whether the answer was acted on.
      */
     fun declineBoarding(nowMs: Long, answeredCheckId: Long? = null): Boolean {
         if (answeredCheckId != null && answeredCheckId != pendingCheckSinceMs) {
             return false
         }
+        val answered = pendingCheckSinceMs
+        val coveredWhenAnswered = pendingDepartures.toList()
         noteDepartures(nowMs)
-        val askedAbout = pendingDepartures.toList()
+        val askedAfresh = pendingCheckSinceMs != answered
+        val askedAbout = if (askedAfresh) coveredWhenAnswered else pendingDepartures.toList()
         val rejected = if (askedAbout.isEmpty()) {
             listOfNotNull(trackedVehicleId)
         } else {
@@ -677,7 +710,11 @@ internal class TripRideDetector(
         declinedDepartures += askedAbout
         declinedRideAtMs = if (askedAbout.isEmpty()) nowMs else 0L
         rejected.forEach { rejectedAt[it] = nowMs }
-        clearPendingCheck()
+        if (askedAfresh) {
+            pendingDepartures.removeAll(coveredWhenAnswered)
+        } else {
+            clearPendingCheck()
+        }
         return true
     }
 

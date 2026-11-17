@@ -99,6 +99,15 @@ class RouteTripMonitorService : Service() {
     private val boardingStopObservations = HashMap<String, StopObservation>()
 
     /**
+     * Under detectorLock: when the latest observation of the boarding stop
+     * the detector has been told of was made, for each route — kept for the
+     * whole trip. [boardingStopObservations] lets go of an observation once
+     * it is too old to stand, and it is then no less one already told: the
+     * backend can go on answering with it.
+     */
+    private val boardingStopObservationsToldAtMs = HashMap<String, Long>()
+
+    /**
      * Under detectorLock: when the latest observation taken up so far was
      * made, for each stop and each route that estimates for it — whether the
      * route screen sent it or the monitor fetched it. What the screen sends is
@@ -393,6 +402,7 @@ class RouteTripMonitorService : Service() {
                             tripId = maxOf(tripId + 1, System.currentTimeMillis())
                             latestRide = RideSnapshot()
                             boardingStopObservations.clear()
+                            boardingStopObservationsToldAtMs.clear()
                             stopObservationsTaken.clear()
                             // It starts knowing nothing, so both feeds are due
                             // at once, and the last trip's failures are not its
@@ -937,6 +947,13 @@ class RouteTripMonitorService : Service() {
      * family route uses that same interval/back-off policy independently, and
      * is fetched independently: a variant that fails, or hangs, silences only
      * itself. A feed with a request already out is not asked for again.
+     *
+     * A feed is marked as asked for under the lock the trip is replaced under,
+     * and only for the trip still being tracked. A refresh reads its trip
+     * before it gets here, and the rider can have moved on in between: the
+     * new trip starts with nothing asked for, and a mark put on its feeds for
+     * the old one would never come off, since whatever a request brings back
+     * for a trip that is over is dropped along with its bookkeeping.
      */
     private fun requestLiveData(trip: TrackedTrip) {
         val session = trip.session
@@ -945,26 +962,31 @@ class RouteTripMonitorService : Service() {
             return
         }
         val nowElapsed = SystemClock.elapsedRealtime()
-        val (wantsStops, busRouteIdsDue) = synchronized(refreshLock) {
-            val stopsDue = !liveStopFetchInFlight && nowElapsed >= liveStopBackoffUntilMs && (
-                cachedLiveRouteIds != routeIds ||
-                    cachedLivePathId != session.pathId ||
-                    nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
-                )
-            if (stopsDue) {
-                liveStopFetchInFlight = true
+        val (wantsStops, busRouteIdsDue) = synchronized(detectorLock) {
+            if (detector !== trip.detector) {
+                return
             }
-            val busesDue = routeIds.filter { routeId ->
-                val state = busFeedRefreshByRoute[routeId]
-                state == null || (state.request == null && nowElapsed >= state.retryAtElapsedMs &&
-                    (state.fetchedAtElapsedMs == null ||
-                        nowElapsed - state.fetchedAtElapsedMs >= LIVE_BUS_REFRESH_INTERVAL_MS))
-            }.associateWith { Any() }
-            busesDue.forEach { (routeId, request) ->
-                busFeedRefreshByRoute[routeId] =
-                    (busFeedRefreshByRoute[routeId] ?: BusFeedRefresh()).copy(request = request)
+            synchronized(refreshLock) {
+                val stopsDue = !liveStopFetchInFlight && nowElapsed >= liveStopBackoffUntilMs && (
+                    cachedLiveRouteIds != routeIds ||
+                        cachedLivePathId != session.pathId ||
+                        nowElapsed - cachedLiveFetchedAtMs >= LIVE_STOP_REFRESH_INTERVAL_MS
+                    )
+                if (stopsDue) {
+                    liveStopFetchInFlight = true
+                }
+                val busesDue = routeIds.filter { routeId ->
+                    val state = busFeedRefreshByRoute[routeId]
+                    state == null || (state.request == null && nowElapsed >= state.retryAtElapsedMs &&
+                        (state.fetchedAtElapsedMs == null ||
+                            nowElapsed - state.fetchedAtElapsedMs >= LIVE_BUS_REFRESH_INTERVAL_MS))
+                }.associateWith { Any() }
+                busesDue.forEach { (routeId, request) ->
+                    busFeedRefreshByRoute[routeId] =
+                        (busFeedRefreshByRoute[routeId] ?: BusFeedRefresh()).copy(request = request)
+                }
+                stopsDue to busesDue
             }
-            stopsDue to busesDue
         }
         if (wantsStops) {
             fetchInBackground(
@@ -1127,7 +1149,12 @@ class RouteTripMonitorService : Service() {
      * A stop the routes of a family share has an observation from each, made
      * at different moments. Each is news, or not, by itself; the detector is
      * told when any is, and is given the others as they last stood — for as
-     * long as that was recent — marked as nothing new.
+     * long as that was recent — marked as nothing new. That goes for all a
+     * route says of the stop: its estimate, its flagging a bus as arriving,
+     * and the buses it lists.
+     *
+     * An observation that has stood too long is let go of, and stays one
+     * already told: fetched again, it is not news.
      */
     private fun feedBoardingEta(
         target: TripRideDetector,
@@ -1139,19 +1166,24 @@ class RouteTripMonitorService : Service() {
         val liveStop = liveStops[boardingStopId] ?: return
         val now = System.currentTimeMillis()
         val told = boardingStopObservations
+        val toldAtMs = boardingStopObservationsToldAtMs
         val news = liveStop.observations.filter { observation ->
             val atMs = observation.atMs
             if (atMs == null) {
                 !fromTheApp
             } else {
-                atMs > (told[observation.source]?.atMs ?: 0L) && (!fromTheApp || observation.wasMadeRecently(now))
+                atMs > (toldAtMs[observation.source] ?: 0L) && (!fromTheApp || observation.wasMadeRecently(now))
             }
         }
         if (news.isEmpty()) {
             return
         }
-        news.forEach { told[it.source] = it }
+        news.forEach { observation ->
+            told[observation.source] = observation
+            observation.atMs?.let { toldAtMs[observation.source] = it }
+        }
         told.values.retainAll { it in news || it.wasMadeRecently(now) }
+        val sourcesObservedNow = news.map { it.source }.toSet()
         // With no estimate for the stop, the first bus's own stands for it.
         val firstBus = liveStop.etaEntries.firstOrNull { !it.listedOnly }?.observedSeconds
             .takeIf { liveStop.observations.size == 1 }
@@ -1160,31 +1192,27 @@ class RouteTripMonitorService : Service() {
                 source = observation.source,
                 seconds = observation.seconds ?: firstBus.takeIf { observation in news },
                 observedNow = observation in news,
+                arriving = observation.arriving,
             )
         }
         // The detector is told what the feed says of each bus, and decides for
         // itself which of them that places at the stop. Being listed for the
         // stop — on an ETA entry, or in `buses` — is a bus on its way to it,
-        // possibly a quarter of an hour out.
+        // possibly a quarter of an hour out. And what is said of a bus by
+        // routes none of which was observed again is what was said before.
         val buses = liveStop.etaEntries.map { entry ->
             StopFeedBus(
                 vehicleId = normalizeVehicleId(entry.vehicleId),
                 etaSeconds = entry.observedSeconds.takeUnless { entry.listedOnly },
                 arriving = entry.isArriving,
+                observedNow = entry.sources.any(sourcesObservedNow::contains),
             )
         } + liveStop.vehicleIds
             .mapNotNull(::normalizeVehicleId)
             .filter { id -> liveStop.etaEntries.none { normalizeVehicleId(it.vehicleId) == id } }
             .map { StopFeedBus(vehicleId = it, etaSeconds = null) }
         synchronized(detectorLock) {
-            target.onBoardingStopFeed(
-                estimates = estimates,
-                arriving = liveStop.etaEntries.any { it.isArriving } ||
-                    liveStop.message?.contains("進站") == true ||
-                    liveStop.message?.contains("到站") == true,
-                nowMs = now,
-                buses = buses,
-            )
+            target.onBoardingStopFeed(estimates = estimates, nowMs = now, buses = buses)
         }
     }
 
@@ -2387,6 +2415,7 @@ class RouteTripMonitorService : Service() {
             detector = null
             latestRide = RideSnapshot()
             boardingStopObservations.clear()
+            boardingStopObservationsToldAtMs.clear()
             stopObservationsTaken.clear()
         }
         synchronized(refreshLock) {
@@ -2894,7 +2923,14 @@ data class LiveStopState(
      * counts [seconds] down between refreshes; that is not the feed saying
      * anything.
      */
-    val observations: List<StopObservation> = listOf(StopObservation(source = "", seconds = seconds, atMs = null)),
+    val observations: List<StopObservation> = listOf(
+        StopObservation(
+            source = "",
+            seconds = seconds,
+            atMs = null,
+            arriving = etaEntries.any { it.isArriving } || saysABusIsArriving(message),
+        ),
+    ),
 ) {
     /** When the backend last observed anything of this stop; null when unknown. */
     val observedAtMs: Long?
@@ -2902,12 +2938,18 @@ data class LiveStopState(
 
 }
 
-/** One route's estimate for a stop as the backend gave it, and when it made the observation. */
+/** Whether a stop's [message] is the feed saying a bus is pulling in. */
+internal fun saysABusIsArriving(message: String?): Boolean =
+    message != null && (message.contains("進站") || message.contains("到站"))
+
+/** What one route said of a stop as the backend gave it, and when it made the observation. */
 data class StopObservation(
     val source: String,
     val seconds: Int?,
     /** Epoch milliseconds; null when unknown. */
     val atMs: Long?,
+    /** That route's feed says outright that a bus is arriving: by a vehicle's flag, or its message. */
+    val arriving: Boolean = false,
 ) {
     /** Whether the backend made this observation within the last minute and a half. */
     fun wasMadeRecently(nowMs: Long): Boolean =
@@ -2933,6 +2975,12 @@ data class LiveEtaEntry(
      * [seconds] and [message] are the stop's, for display.
      */
     val listedOnly: Boolean = false,
+    /**
+     * The routes whose feeds say this of the vehicle; see
+     * [StopObservation.source]. More than one where routes of a family list
+     * the same bus alike.
+     */
+    val sources: Set<String> = setOf(""),
 )
 
 data class TrackingSnapshot(

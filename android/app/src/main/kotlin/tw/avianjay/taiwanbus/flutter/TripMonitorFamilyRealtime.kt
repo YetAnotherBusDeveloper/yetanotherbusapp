@@ -134,7 +134,9 @@ private fun liveStops(
  * has since been counted down for display, and `observedAtMs`, when the
  * backend made the observation. From the backend itself that moment is
  * `eta_reference_at`, in seconds. Where the screen has merged the routes of a
- * family into the stop, `observations` lists what each of them observed.
+ * family into the stop, `observations` lists what each of them observed —
+ * its estimate, when, and whether it had a bus arriving — and each entry of
+ * `etas` names the `routes` that listed it.
  *
  * [source] is the route this stop's own estimate is from.
  */
@@ -147,6 +149,10 @@ internal fun parseTripMonitorLiveStop(stop: JSONObject, source: String = ""): Li
             vehicleId = vehicle(eta, "plate", "vehicle_id", "id"),
             isArriving = eta.optBoolean("is_arriving", false),
             observedSeconds = if (eta.has("observedEta")) integer(eta.opt("observedEta")) else seconds,
+            sources = eta.optJSONArray("routes")
+                ?.let { routes -> (0 until routes.length()).mapNotNull { routes.optString(it).takeIf(String::isNotEmpty) } }
+                ?.takeIf { it.isNotEmpty() }?.toSet()
+                ?: setOf(source),
         ).takeIf { it.seconds != null || it.message != null || it.vehicleId != null }
     }
     val buses = stop.optJSONArray("buses").objects()
@@ -157,11 +163,14 @@ internal fun parseTripMonitorLiveStop(stop: JSONObject, source: String = ""): Li
             source = text(observation, "source") ?: source,
             seconds = integer(observation.opt("eta")),
             atMs = long(observation.opt("atMs")),
+            arriving = observation.optBoolean("arriving", false) ||
+                saysABusIsArriving(text(observation, "message")),
         )
     }
+    val message = text(stop, "message")
     return LiveStopState(
         seconds = seconds,
-        message = text(stop, "message"),
+        message = message,
         vehicleIds = (buses + etas.mapNotNull { it.vehicleId }).distinct(),
         etaEntries = etas,
         observations = merged.ifEmpty {
@@ -171,6 +180,7 @@ internal fun parseTripMonitorLiveStop(stop: JSONObject, source: String = ""): Li
                     seconds = if (stop.has("observedEta")) integer(stop.opt("observedEta")) else seconds,
                     atMs = long(stop.opt("observedAtMs"))
                         ?: long(stop.opt("eta_reference_at"))?.let { it * 1_000L },
+                    arriving = etas.any { it.isArriving } || saysABusIsArriving(message),
                 ),
             )
         },
@@ -185,8 +195,16 @@ private fun mergeStops(stops: List<LiveStopState>): LiveStopState {
         // necessarily this one's, and says nothing of where this one is.
         stop.etaEntries + stop.vehicleIds
             .filter { id -> stop.etaEntries.none { it.vehicleId == id } }
-            .map { LiveEtaEntry(stop.seconds, stop.message, it, listedOnly = true) }
-    }.distinct().sortedBy { it.seconds?.takeIf { seconds -> seconds >= 0 } ?: Int.MAX_VALUE }
+            .map {
+                LiveEtaEntry(
+                    stop.seconds, stop.message, it, listedOnly = true,
+                    sources = stop.observations.map { observation -> observation.source }.toSet(),
+                )
+            }
+        // One entry for a bus two routes say the same of, listed by both.
+    }.groupBy { it.copy(sources = emptySet()) }
+        .map { (entry, listings) -> entry.copy(sources = listings.flatMap { it.sources }.toSet()) }
+        .sortedBy { it.seconds?.takeIf { seconds -> seconds >= 0 } ?: Int.MAX_VALUE }
     return LiveStopState(
         seconds = earliest?.seconds,
         message = if (earliest == null) stops.firstNotNullOfOrNull { it.message } else null,
@@ -196,7 +214,8 @@ private fun mergeStops(stops: List<LiveStopState>): LiveStopState {
         // stays as each route observed it, estimate and moment together: the
         // soonest estimate with the latest moment would be an observation
         // nobody made, and one route's estimate at -1 — a bus at the stop, or
-        // a stop nobody is counting down to — says nothing of another's.
+        // a stop nobody is counting down to — says nothing of another's. Nor
+        // does one route's bus arriving make it another's, or as recent.
         observations = stops.flatMap { it.observations }.distinctBy { it.source },
     )
 }

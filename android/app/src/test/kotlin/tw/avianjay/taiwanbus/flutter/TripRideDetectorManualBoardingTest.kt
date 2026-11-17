@@ -823,7 +823,6 @@ class TripRideDetectorManualBoardingTest {
         fun feed(detector: TripRideDetector, seconds: Long, main: Int?, variant: Int?, variantIsNew: Boolean = true) =
             detector.onBoardingStopFeed(
                 listOf(StopEstimate("MAIN", main), StopEstimate("VARIANT", variant, observedNow = variantIsNew)),
-                arriving = false,
                 nowMs = at(seconds),
             )
 
@@ -867,6 +866,64 @@ class TripRideDetectorManualBoardingTest {
         // Had it been due all over again at 100 s, this would be inside the window.
         feed(held, 200, main = 400, variant = 900)
         assertEquals("the arrival it opened has long lapsed", 0L, held.snapshot(at(200)).boardingCheckId)
+    }
+
+    @Test
+    fun aBusOneRouteFlagsAsArrivingIsThatRoutesToSay() {
+        // The variant flags its bus as arriving; [variantIsNew] is whether it
+        // was observed again. The route itself only ever has a bus far off.
+        fun feed(
+            detector: TripRideDetector,
+            seconds: Long,
+            main: Int?,
+            variant: Int?,
+            variantArriving: Boolean,
+            variantIsNew: Boolean = true,
+        ) = detector.onBoardingStopFeed(
+            listOf(
+                StopEstimate("MAIN", main),
+                StopEstimate("VARIANT", variant, observedNow = variantIsNew, arriving = variantArriving),
+            ),
+            nowMs = at(seconds),
+            buses = listOfNotNull(
+                StopFeedBus("BUS-V", variant, arriving = true, observedNow = variantIsNew).takeIf { variantArriving },
+            ),
+        )
+
+        // Flagged once, then not observed again while the route itself is:
+        // the bus is neither arriving again, nor gone.
+        val held = newDetector()
+        feed(held, 0, main = 600, variant = -1, variantArriving = true)
+        feed(held, 100, main = 500, variant = -1, variantArriving = true, variantIsNew = false)
+        assertEquals(0L, held.snapshot(at(100)).boardingCheckId)
+        // Had it arrived all over again at 100 s, this would be inside the window.
+        feed(held, 200, main = 400, variant = 900, variantArriving = false)
+        assertEquals("the arrival it opened has long lapsed", 0L, held.snapshot(at(200)).boardingCheckId)
+
+        // Observed again without the flag, it has left; and it is the one bus
+        // the feed placed at the stop.
+        val left = newDetector()
+        feed(left, 0, main = 600, variant = -1, variantArriving = true)
+        feed(left, 20, main = 580, variant = -1, variantArriving = true, variantIsNew = false)
+        feed(left, 40, main = 560, variant = 900, variantArriving = false)
+        val asked = left.snapshot(at(85))
+        assertTrue(asked.boardingPromptDue)
+        left.confirmBoardedByUser(at(90), asked.boardingCheckId)
+        assertEquals("BUS-V", left.snapshot(at(90)).trackedVehicleId)
+
+        // One route's flag is not a countdown watched on another. The route
+        // itself, run out with nothing seen counting down to it, has no bus
+        // due of its own, and does not keep the variant's at the stop.
+        val unwatched = newDetector()
+        feed(unwatched, 0, main = 600, variant = -1, variantArriving = true)
+        feed(unwatched, 20, main = -1, variant = 900, variantArriving = false)
+        assertTrue("the flagged bus has left", unwatched.snapshot(at(20)).boardingCheckId != 0L)
+
+        // A flag with no estimate beside it is a bus due all the same.
+        val flagOnly = newDetector()
+        feed(flagOnly, 0, main = 600, variant = null, variantArriving = true)
+        feed(flagOnly, 20, main = 580, variant = null, variantArriving = false)
+        assertTrue(flagOnly.snapshot(at(20)).boardingCheckId != 0L)
     }
 
     @Test

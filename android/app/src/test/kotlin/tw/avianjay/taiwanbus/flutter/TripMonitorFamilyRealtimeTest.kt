@@ -163,6 +163,95 @@ class TripMonitorFamilyRealtimeTest {
             ),
             stop.observations,
         )
+        assertEquals(
+            "a bus listed with no estimate of its own is listed by its route all the same",
+            mapOf("MAIN-001" to setOf("TXG500"), "FAMILY-001" to setOf("TXG501")),
+            stop.etaEntries.associate { it.vehicleId to it.sources },
+        )
+    }
+
+    @Test
+    fun aBusOneRouteHasArrivingAtASharedStopIsThatRoutesToSay() {
+        fun arriving(snapshot: JSONObject, plate: String) = snapshot.apply {
+            getJSONArray("paths").getJSONObject(0).getJSONArray("stops").getJSONObject(0)
+                .put("eta", -1)
+                .put("etas", org.json.JSONArray("""[{"plate":"$plate","eta":-1,"is_arriving":true}]"""))
+        }
+        val client = TripMonitorFamilyRealtime { path ->
+            if (path.startsWith("batchroutes/")) {
+                batch(
+                    live("1", 600, "MAIN-001").observedAt(1_794_376_374L).apply {
+                        getJSONArray("paths").getJSONObject(0).getJSONArray("stops").getJSONObject(0)
+                            .put("etas", org.json.JSONArray("""[{"plate":"MAIN-001","eta":600,"is_arriving":false}]"""))
+                    },
+                    arriving(live("ALIAS", -1, "EAL-5389").observedAt(1_794_376_354L), "EAL-5389"),
+                )
+            } else {
+                topology("ALIAS")
+            }
+        }
+        val stop = client.fetch(session()).getValue(1)
+        assertEquals(
+            listOf(
+                StopObservation("TXG500", 600, 1_794_376_374_000L, arriving = false),
+                StopObservation("TXG501", -1, 1_794_376_354_000L, arriving = true),
+            ),
+            stop.observations,
+        )
+        assertEquals(
+            "and each bus is listed by the route that listed it",
+            mapOf("MAIN-001" to setOf("TXG500"), "EAL-5389" to setOf("TXG501")),
+            stop.etaEntries.associate { it.vehicleId to it.sources },
+        )
+    }
+
+    @Test
+    fun aBusTwoRoutesListAlikeIsOneBusListedByBoth() {
+        fun listing(stopId: String) = live(stopId, 40, "KKA-0002").apply {
+            getJSONArray("paths").getJSONObject(0).getJSONArray("stops").getJSONObject(0)
+                .put("etas", org.json.JSONArray("""[{"plate":"KKA-0002","eta":40,"is_arriving":true}]"""))
+        }
+        val client = TripMonitorFamilyRealtime { path ->
+            if (path.startsWith("batchroutes/")) batch(listing("1"), listing("ALIAS")) else topology("ALIAS")
+        }
+        val entry = client.fetch(session()).getValue(1).etaEntries.single()
+        assertEquals(setOf("TXG500", "TXG501"), entry.sources)
+    }
+
+    @Test
+    fun aStopSaysABusIsArrivingByAVehiclesFlagOrItsMessage() {
+        fun stop(json: String) = parseTripMonitorLiveStop(JSONObject(json), source = "TXG500").observations.single()
+        assertTrue(stop("""{"eta":-1,"etas":[{"plate":"AAA-001","eta":-1,"is_arriving":true}]}""").arriving)
+        assertTrue(stop("""{"eta":null,"message":"進站中"}""").arriving)
+        assertTrue(stop("""{"eta":null,"message":"即將到站"}""").arriving)
+        assertFalse(stop("""{"eta":40,"message":"末班車已過","etas":[{"plate":"AAA-001","eta":40}]}""").arriving)
+    }
+
+    @Test
+    fun whatTheScreenMergedSaysWhichRouteSaidWhat() {
+        val merged = parseTripMonitorLiveStop(
+            JSONObject(
+                """{"eta":600,"observedEta":600,"observedAtMs":1794376374123,
+                    "observations":[
+                        {"source":"TXG500","eta":600,"atMs":1794376374123,"arriving":false,"message":null},
+                        {"source":"TXG501","eta":-1,"atMs":1794376354000,"arriving":true,"message":null},
+                        {"source":"TXG502","eta":null,"atMs":1794376364000,"arriving":false,"message":"進站中"}
+                    ],
+                    "etas":[
+                        {"plate":"MAIN-001","eta":600,"observedEta":600,"is_arriving":false,"routes":["TXG500"]},
+                        {"plate":"EAL-5389","eta":-1,"observedEta":-1,"is_arriving":true,
+                            "routes":["TXG501","TXG502"]},
+                        {"plate":"OLD-001","eta":700,"observedEta":700,"is_arriving":false}
+                    ]}""",
+            ),
+            source = "TXG500",
+        )
+        assertEquals(listOf(false, true, true), merged.observations.map { it.arriving })
+        assertEquals(
+            "an entry that names no route is the session's own",
+            listOf(setOf("TXG500"), setOf("TXG501", "TXG502"), setOf("TXG500")),
+            merged.etaEntries.map { it.sources },
+        )
     }
 
     private fun JSONObject.observedAt(seconds: Long) = apply {

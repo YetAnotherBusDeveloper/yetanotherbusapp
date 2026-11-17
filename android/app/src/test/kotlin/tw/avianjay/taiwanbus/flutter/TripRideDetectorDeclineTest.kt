@@ -273,6 +273,62 @@ class TripRideDetectorDeclineTest {
         assertTrue(asked.declineBoarding(at(85), answeredCheckId = question.boardingCheckId))
     }
 
+    @Test
+    fun notYetIsNotSaidOfABusThatHasTheRiderAskedAfreshAsItIsCounted() {
+        val detector = newDetector()
+        detector.leaveTheStop(DECLINED_BUS, fromSeconds = 0)
+        val asked = detector.snapshot(at(80)).boardingCheckId
+        assertTrue(asked != 0L)
+
+        // Two minutes on, the next bus pulls in, and drives off: the report of
+        // it past the stop comes in, and before anything looks at it the
+        // rider's "not yet" to the question on screen is delivered.
+        val next = busRun(NEXT_BUS, 140L to 10.0, 160L to 30.0, 180L to 150.0)
+        for (seconds in listOf(140L, 160L)) {
+            detector.onBusReports(next.reportsAt(at(seconds)))
+            detector.snapshot(at(seconds))
+        }
+        detector.onBusReports(next.reportsAt(at(180)))
+        assertTrue("it is the answer to the question it was given to", detector.declineBoarding(at(181), asked))
+
+        // Counting that departure has the rider asked afresh, and the answer
+        // was given before: it is about the bus that had left, not this one.
+        val afresh = detector.snapshot(at(181))
+        assertTrue("the next bus is still to be asked about", afresh.boardingCheckId != 0L)
+        assertTrue(afresh.boardingCheckId != asked)
+        assertFalse(afresh.boardingPromptDue)
+        assertTrue(detector.snapshot(at(225)).boardingPromptDue)
+
+        // The bus the answer was about is set aside all the same, so "yes" to
+        // the new question can only mean the next one.
+        assertTrue(detector.confirmBoardedByUser(at(230), afresh.boardingCheckId))
+        assertEquals(NEXT_BUS, detector.snapshot(at(230)).trackedVehicleId)
+    }
+
+    @Test
+    fun notYetToTheQuestionABusHasJoinedIsSaidOfThatBusToo() {
+        val detector = newDetector()
+        detector.leaveTheStop(DECLINED_BUS, fromSeconds = 0)
+        val asked = detector.snapshot(at(45)).boardingCheckId
+
+        // The next bus leaves within a minute and a half of the first: too
+        // soon to ask again, so it is one more bus the question is about.
+        val next = busRun(NEXT_BUS, 60L to 10.0, 80L to 30.0, 100L to 150.0)
+        for (seconds in listOf(60L, 80L)) {
+            detector.onBusReports(next.reportsAt(at(seconds)))
+            detector.snapshot(at(seconds))
+        }
+        detector.onBusReports(next.reportsAt(at(100)))
+        assertTrue(detector.declineBoarding(at(101), asked))
+
+        assertEquals("both were asked about, and the rider is on neither", 0L, detector.snapshot(at(101)).boardingCheckId)
+        // The stop feed reports the second one's leaving in its turn, by
+        // name: it is a bus the rider has answered for, and not asked about.
+        detector.onBoardingStopEta(-1, arriving = true, nowMs = at(102), buses = listOf(StopFeedBus(NEXT_BUS, -1, arriving = true)))
+        detector.onBoardingStopEta(600, arriving = false, nowMs = at(122))
+        assertEquals(0L, detector.snapshot(at(122)).boardingCheckId)
+    }
+
     /** Two buses nose to tail for a minute, and the phone keeping pace with both. */
     private fun TripRideDetector.keepPaceWithTwoBuses(): RideSnapshot {
         val positions = arrayOf(0L to 0.0, 20L to 100.0, 40L to 200.0, 60L to 300.0)

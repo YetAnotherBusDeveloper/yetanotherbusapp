@@ -40,7 +40,8 @@ bool routeFamilyStopsSharePhysicalSide(StopInfo first, StopInfo second) {
 ///
 /// [baseRouteId] and [sharedRouteIds] say which route each stop is from, the
 /// latter in the order of [sharedStops]. Given them, the merged stop also
-/// keeps what each route observed, estimate and moment together.
+/// keeps what each route observed — estimate, a bus arriving, and the moment
+/// together — and which route lists each vehicle.
 StopInfo mergeRouteFamilyStopLiveData(
   StopInfo baseStop,
   List<StopInfo> sharedStops, {
@@ -49,10 +50,13 @@ StopInfo mergeRouteFamilyStopLiveData(
 }) {
   final allStops = <StopInfo>[baseStop, ...sharedStops];
   final routeObservations = <String, StopRouteObservation>{};
-  if (baseRouteId != null &&
-      sharedRouteIds != null &&
-      sharedRouteIds.length == sharedStops.length) {
-    final routeIds = <String>[baseRouteId, ...sharedRouteIds];
+  final routeIds =
+      baseRouteId != null &&
+          sharedRouteIds != null &&
+          sharedRouteIds.length == sharedStops.length
+      ? <String>[baseRouteId, ...sharedRouteIds]
+      : null;
+  if (routeIds != null) {
     for (var index = 0; index < allStops.length; index++) {
       final stop = allStops[index];
       if (stop.sec == null && stop.etaReferenceAt == null && stop.t == null) {
@@ -63,6 +67,8 @@ StopInfo mergeRouteFamilyStopLiveData(
         () => StopRouteObservation(
           routeId: routeIds[index],
           sec: stop.sec,
+          msg: stop.msg,
+          isArriving: stop.etas.any((eta) => eta.isArriving),
           etaReferenceAt: stop.etaReferenceAt,
           updatedAt: stop.t,
         ),
@@ -85,7 +91,8 @@ StopInfo mergeRouteFamilyStopLiveData(
   );
   final busesById = <String, BusVehicle>{};
   final etasByKey = <String, StopEta>{};
-  for (final stop in allStops) {
+  for (var index = 0; index < allStops.length; index++) {
+    final stop = allStops[index];
     if (isStopRealtimeStale(stop)) continue;
     for (final bus in stop.buses) {
       busesById.putIfAbsent(
@@ -97,18 +104,26 @@ StopInfo mergeRouteFamilyStopLiveData(
       final key =
           '${eta.vehicleId}:${eta.sec}:${eta.msg}:${eta.source}:${eta.estimated}'
           ':${eta.isArriving}';
-      etasByKey.putIfAbsent(
-        key,
-        () => StopEta(
-          sec: eta.sec,
-          msg: eta.msg,
-          vehicleId: eta.vehicleId,
-          source: eta.source,
-          estimated: eta.estimated,
-          isArriving: eta.isArriving,
-          etaReferenceAt: eta.etaReferenceAt ?? stop.etaReferenceAt,
-          updatedAt: eta.updatedAt ?? stop.t,
-        ),
+      final listedBy = eta.routeIds.isNotEmpty
+          ? eta.routeIds
+          : [if (routeIds != null) routeIds[index]];
+      final known = etasByKey[key];
+      etasByKey[key] = StopEta(
+        sec: eta.sec,
+        msg: eta.msg,
+        vehicleId: eta.vehicleId,
+        source: eta.source,
+        estimated: eta.estimated,
+        isArriving: eta.isArriving,
+        // One entry for a bus two routes say the same of, as the first of
+        // them observed it, and listed by both.
+        etaReferenceAt:
+            known?.etaReferenceAt ?? eta.etaReferenceAt ?? stop.etaReferenceAt,
+        updatedAt: known?.updatedAt ?? eta.updatedAt ?? stop.t,
+        routeIds: <String>{
+          ...?known?.routeIds,
+          ...listedBy,
+        }.toList(growable: false),
       );
     }
   }

@@ -154,20 +154,50 @@ void main() {
   });
 
   test('a merged stop keeps what each route observed, and when', () {
+    // Moments ago: a stop observed long ago lends no vehicles.
+    final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    String reference(int offsetSeconds) =>
+        (nowSeconds - 5 + offsetSeconds).toString();
     final merged = mergeRouteFamilyStopLiveData(
       stop(
         rawStopId: '500-main',
         name: '捷運文心櫻花站',
         lat: 24.171000,
         lon: 120.653000,
-      ).copyWith(sec: -1, t: '1794376354', etaReferenceAt: '1794376354'),
+      ).copyWith(
+        sec: -1,
+        t: reference(-20),
+        etaReferenceAt: reference(-20),
+        etas: const [StopEta(sec: -1, vehicleId: 'EAL-5389', isArriving: true)],
+      ),
       [
         stop(
           rawStopId: '500-extension',
           name: '捷運文心櫻花站',
           lat: 24.171015,
           lon: 120.653015,
-        ).copyWith(sec: 0, t: '1794376374', etaReferenceAt: '1794376374'),
+        ).copyWith(
+          sec: 0,
+          msg: '進站中',
+          t: reference(0),
+          etaReferenceAt: reference(0),
+          etas: const [StopEta(sec: 0, vehicleId: 'KKA-0002')],
+        ),
+        // One that lists the bus the route itself has arriving, just as it
+        // does.
+        stop(
+          rawStopId: '500-branch',
+          name: '捷運文心櫻花站',
+          lat: 24.171015,
+          lon: 120.653015,
+        ).copyWith(
+          sec: 40,
+          t: reference(-10),
+          etaReferenceAt: reference(-10),
+          etas: const [
+            StopEta(sec: -1, vehicleId: 'EAL-5389', isArriving: true),
+          ],
+        ),
         // A route with nothing to say of the stop observed nothing.
         stop(
           rawStopId: '500-other',
@@ -177,7 +207,7 @@ void main() {
         ),
       ],
       baseRouteId: 'TXG500',
-      sharedRouteIds: const ['TXG5002', 'TXG5003'],
+      sharedRouteIds: const ['TXG5002', 'TXG5003', 'TXG5004'],
     );
 
     expect(
@@ -186,10 +216,36 @@ void main() {
           '${observation.routeId} ${observation.sec} '
               '${observation.etaReferenceAt}',
       ],
-      ['TXG500 -1 1794376354', 'TXG5002 0 1794376374'],
+      [
+        'TXG500 -1 ${reference(-20)}',
+        'TXG5002 0 ${reference(0)}',
+        'TXG5003 40 ${reference(-10)}',
+      ],
+    );
+    // A bus arriving is the route's that flagged it, like its estimate; the
+    // message is passed on for the monitor to read.
+    expect(
+      [
+        for (final observation in merged.routeObservations)
+          '${observation.isArriving} ${observation.msg}',
+      ],
+      ['true null', 'false 進站中', 'true null'],
+    );
+    // And each bus stays with the routes that list it.
+    expect(
+      {for (final eta in merged.etas) eta.vehicleId: eta.routeIds},
+      {
+        'EAL-5389': ['TXG500', 'TXG5003'],
+        'KKA-0002': ['TXG5002'],
+      },
+    );
+    expect(
+      merged.etas.first.etaReferenceAt,
+      reference(-20),
+      reason: 'as the first route to list it observed it',
     );
     // And they stay with the stop when its live data is carried over.
-    expect(merged.copyWith(msg: '').routeObservations, hasLength(2));
+    expect(merged.copyWith(msg: '').routeObservations, hasLength(3));
   });
 
   test(

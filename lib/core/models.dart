@@ -1995,11 +1995,17 @@ class StopEta {
     this.isArriving = false,
     this.etaReferenceAt,
     this.updatedAt,
+    this.routeIds = const [],
   });
 
   final int? sec;
   final String? msg;
   final String? vehicleId;
+
+  /// On a stop merged from the routes of a family: the routes that list this
+  /// vehicle, more than one where they list it alike. What is said of the bus
+  /// is as old as their observations.
+  final List<String> routeIds;
 
   /// The feed flags this vehicle as arriving at the stop. Being listed for a
   /// stop is not that: every bus heading for it is listed, however far off.
@@ -2011,7 +2017,8 @@ class StopEta {
 }
 
 /// What one route of a family observed of a stop the family shares: its
-/// estimate, and the moment the backend worked it out for.
+/// estimate, whether it had a bus arriving, and the moment the backend worked
+/// that out for.
 ///
 /// A merged stop shows the soonest estimate of them all. That is a badge, not
 /// an observation: the routes are observed at different moments, and one
@@ -2020,12 +2027,18 @@ class StopRouteObservation {
   const StopRouteObservation({
     required this.routeId,
     this.sec,
+    this.msg,
+    this.isArriving = false,
     this.etaReferenceAt,
     this.updatedAt,
   });
 
   final String routeId;
   final int? sec;
+  final String? msg;
+
+  /// That route's feed flags a vehicle as arriving at the stop.
+  final bool isArriving;
   final String? etaReferenceAt;
   final String? updatedAt;
 
