@@ -469,7 +469,14 @@ internal class TripRideDetector(
      * always on offer, and a rider who uses it may never have seen a question —
      * one can be pending, about a bus that just left, before it is ever shown.
      *
-     * Either way this confirms the ride, not a plate. A vehicle is named only
+     * An answer to a question that is no longer the one pending — turned down
+     * since, settled by a ride detected or confirmed, or replaced by another —
+     * is not acted on at all, and false is returned: it says nothing of the
+     * buses that have left since, and a tap can be delivered after the
+     * question it was made on is over. Only "I have boarded" with no question
+     * attached is heard whatever is pending.
+     *
+     * Otherwise this confirms the ride, not a plate. A vehicle is named only
      * when the feeds leave one bus the rider can be on: in answer to the
      * question, the one bus that left while it stood ([busTheQuestionIsAbout]);
      * unprompted, the one bus standing at the stop ([identifyBoardingVehicle]).
@@ -477,10 +484,14 @@ internal class TripRideDetector(
      * the rider is not making, so anything less leaves the vehicle unknown
      * until the rider's own position picks it out.
      */
-    fun confirmBoardedByUser(nowMs: Long, answeredCheckId: Long? = null) {
+    fun confirmBoardedByUser(nowMs: Long, answeredCheckId: Long? = null): Boolean {
+        if (answeredCheckId != null && answeredCheckId != pendingCheckSinceMs) {
+            return false
+        }
         noteDepartures(nowMs)
         val identifiedVehicle = trackedVehicleId.takeIf { boarded }
-        // An answer to a question since replaced by another names nothing.
+        // Counting those departures can itself have the rider asked afresh,
+        // and an answer to the question that replaces names nothing.
         val askedAbout = if (answeredCheckId != null && answeredCheckId == pendingCheckSinceMs) {
             busTheQuestionIsAbout(nowMs)
         } else {
@@ -501,6 +512,7 @@ internal class TripRideDetector(
         // is nearer the stop now.
         trackedVehicleId = identifiedVehicle ?: askedAbout ?: identifyBoardingVehicle(nowMs)
         clearPendingCheck()
+        return true
     }
 
     /**
@@ -585,19 +597,17 @@ internal class TripRideDetector(
      * [confirmBoardedByUser]. "Not yet" to a question that is no longer the
      * one pending — replaced by another, or settled by a ride since detected
      * or confirmed — says nothing about the buses the new one is about, and
-     * nothing about that ride: it was given before either.
+     * nothing about that ride: it was given before either. Nor about what the
+     * rider has done since it was given, which may be long before it is
+     * delivered. It changes nothing.
      *
-     * Returns whether the answer changed what is known of the ride.
+     * Returns whether the answer was acted on.
      */
     fun declineBoarding(nowMs: Long, answeredCheckId: Long? = null): Boolean {
-        noteDepartures(nowMs)
         if (answeredCheckId != null && answeredCheckId != pendingCheckSinceMs) {
-            if (!boarded) {
-                // Still true of the rider's movement so far, and of nothing else.
-                lastDeclineAtMs = nowMs
-            }
             return false
         }
+        noteDepartures(nowMs)
         val askedAbout = pendingDepartures.toList()
         val rejected = if (askedAbout.isEmpty()) {
             listOfNotNull(trackedVehicleId)
@@ -1118,10 +1128,12 @@ internal class TripRideDetector(
         }
         if (boardingStop >= 0 && usableUser != null &&
             line.metersToStop(usableUser.latitude, usableUser.longitude, boardingStop) >
-            BOARDING_STOP_ABANDONED_RADIUS_METERS
+            BOARDING_STOP_ABANDONED_RADIUS_METERS &&
+            !hasGoneOnAlongTheRoute(usableUser, boardingStop)
         ) {
-            // The user is nowhere near the stop any more, so this bus was never
-            // their ride; stop waiting for an answer.
+            // The user is nowhere near the stop any more, and not by way of
+            // the route, so this bus was never their ride; stop waiting for
+            // an answer.
             clearPendingCheck()
             return false
         }
@@ -1132,6 +1144,18 @@ internal class TripRideDetector(
         // waiting", so while the user has not moved there is nothing to ask.
         return !stayedBehind(nowMs, usableUser)
     }
+
+    /**
+     * Whether [user] is on the route, further along it than the boarding stop.
+     *
+     * That is where the bus that just left has gone, and the rider with it if
+     * they boarded. Being far from the stop is then no reason to drop the
+     * question: it is the thing the question is asking about. The rider's own
+     * progress confirms the ride only after half a kilometre of it, and if
+     * their fixes stop short of that the question is all there is left.
+     */
+    private fun hasGoneOnAlongTheRoute(user: UserSample, boardingStop: Int): Boolean =
+        user.onRoute && user.alongMeters > line.alongOfStop(boardingStop)
 
     private fun stayedBehind(nowMs: Long, user: UserSample?): Boolean {
         user ?: return false

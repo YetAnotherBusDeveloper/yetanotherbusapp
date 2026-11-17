@@ -235,6 +235,21 @@ class TripRideDetectorDeclineTest {
     }
 
     @Test
+    fun notYetToAQuestionNoLongerPendingLeavesWhatTheRiderHasDoneSinceAsEvidence() {
+        val riding = path(step(0, 0.0, 0.0, 5f), step(200, 1_000.0, 0.0, 5f))
+        val bus = busRun(NEXT_BUS, 0L to 0.0, 20L to 100.0, 40L to 200.0, 60L to 300.0)
+        val detector = newDetector()
+        detector.feed(riding, listOf(bus), 0, 20) { _, _ -> }
+        // An answer to a question long gone turns up mid-ride.
+        assertFalse(detector.declineBoarding(at(21), answeredCheckId = at(-100)))
+        var latest = RideSnapshot()
+        detector.feed(riding, listOf(bus), 40, 40) { _, snapshot -> latest = snapshot }
+
+        assertEquals("the three reports the rider kept pace with still stand", NEXT_BUS, latest.trackedVehicleId)
+        assertEquals(BoardingEvidence.BUS_CO_MOVEMENT, latest.evidence)
+    }
+
+    @Test
     fun notYetToAQuestionNoLongerPendingChangesNothing() {
         // Never asked, on a trip of its own: an answer to some other question.
         val unasked = newDetector()

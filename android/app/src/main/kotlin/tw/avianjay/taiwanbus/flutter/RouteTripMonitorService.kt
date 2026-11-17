@@ -99,7 +99,10 @@ class RouteTripMonitorService : Service() {
     private var liveStopsObservedAtMs = 0L
     private var boardingStopObservedAtMs = 0L
     private var boardingAlertSent = false
+    /** The question whose buttons the boarding prompt on screen carries; 0 when none is shown. */
     private var boardingCheckNotificationId = 0L
+    /** The question the rider has been alerted to. */
+    private var boardingCheckAlertedId = 0L
     private var destinationSetupPromptSent = false
     private var arrivalDetectedAtMs = 0L
     private var destinationAlertStage = 0
@@ -234,9 +237,18 @@ class RouteTripMonitorService : Service() {
                     return START_STICKY
                 }
                 val now = System.currentTimeMillis()
-                synchronized(detectorLock) {
-                    detector?.confirmBoardedByUser(now, answeredBoardingCheckId(intent))
-                    latestRide = detector?.snapshot(now) ?: RideSnapshot()
+                val answered = synchronized(detectorLock) {
+                    val heard = detector?.confirmBoardedByUser(now, answeredBoardingCheckId(intent)) == true
+                    if (heard) {
+                        latestRide = detector?.snapshot(now) ?: RideSnapshot()
+                    }
+                    heard
+                }
+                if (!answered) {
+                    // "Yes" to a question that is over — answered since, or
+                    // replaced. Whatever is pending now is not what it was
+                    // said of, and stays to be answered.
+                    return START_STICKY
                 }
                 boardingAlertSent = true
                 cancelBoardingCheckPrompt()
@@ -257,7 +269,9 @@ class RouteTripMonitorService : Service() {
                     // Only the bus that was asked about is set aside; the next
                     // one still gets detected and asked about in its turn.
                     val changed = detector?.declineBoarding(now, answeredBoardingCheckId(intent)) == true
-                    latestRide = detector?.snapshot(now) ?: RideSnapshot()
+                    if (changed) {
+                        latestRide = detector?.snapshot(now) ?: RideSnapshot()
+                    }
                     changed
                 }
                 if (!answered) {
@@ -1888,19 +1902,30 @@ class RouteTripMonitorService : Service() {
         snapshot: TrackingSnapshot,
     ) {
         val ride = currentRideSnapshot()
-        if (!ride.boardingPromptDue || ride.boardingCheckId == 0L) {
+        if (ride.boardingCheckId == 0L || (!ride.boardingPromptDue && snapshot.hasBoarded)) {
             // The question was answered, retired or overtaken by a detection.
-            if (snapshot.hasBoarded || ride.boardingCheckId == 0L) {
-                cancelBoardingCheckPrompt()
-            }
+            cancelBoardingCheckPrompt()
             return
         }
-        if (boardingCheckNotificationId == ride.boardingCheckId) {
+        // An answer counts only for the question pending when it arrives. So
+        // when another bus leaves and the rider is to be asked afresh, a
+        // question still on screen from before is given the new one's buttons
+        // at once, quietly, rather than left up with buttons that do nothing
+        // until the new one falls due; it then alerts when it does.
+        val alerts = ride.boardingPromptDue
+        if (alerts) {
+            if (boardingCheckAlertedId == ride.boardingCheckId) {
+                return
+            }
+        } else if (boardingCheckNotificationId == 0L || boardingCheckNotificationId == ride.boardingCheckId) {
             return
         }
         val boardingName = snapshot.boardingName ?: return
 
         boardingCheckNotificationId = ride.boardingCheckId
+        if (alerts) {
+            boardingCheckAlertedId = ride.boardingCheckId
+        }
         notificationManager.notify(
             BOARDING_CHECK_NOTIFICATION_ID,
             NotificationCompat.Builder(this, ALERT_CHANNEL_ID)
@@ -1911,6 +1936,7 @@ class RouteTripMonitorService : Service() {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setAutoCancel(true)
+                .setOnlyAlertOnce(!alerts)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setContentIntent(createOpenRoutePendingIntent(session))
                 .addAction(
@@ -1933,6 +1959,7 @@ class RouteTripMonitorService : Service() {
 
     private fun cancelBoardingCheckPrompt() {
         boardingCheckNotificationId = 0L
+        boardingCheckAlertedId = 0L
         notificationManager.cancel(BOARDING_CHECK_NOTIFICATION_ID)
     }
 

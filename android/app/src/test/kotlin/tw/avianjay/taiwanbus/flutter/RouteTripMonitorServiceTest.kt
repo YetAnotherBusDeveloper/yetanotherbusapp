@@ -857,6 +857,92 @@ class RouteTripMonitorServiceTest {
         assertEquals("BUS-B", ride(service).trackedVehicleId)
     }
 
+    /** Starts [trip] with [vehicleId] at the boarding stop, drives it off, and has the question shown. */
+    private fun raiseAQuestionAbout(vehicleId: String, trip: Map<String, Any?>): Long {
+        var busStop = stopsOf(trip).first()
+        var gpsTime = nowSeconds() - 60
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed(vehicleId, busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+            } else {
+                null
+            }
+        }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        busStop = stopsOf(trip)[1]
+        gpsTime += 20
+        ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        ReflectionHelpers.setField(
+            ReflectionHelpers.getField<Any>(service, "detector"), "pendingCheckSinceMs",
+            System.currentTimeMillis() - 45_000L,
+        )
+        refreshAndDeliverAlerts()
+        return ride(service).boardingCheckId
+    }
+
+    @Test
+    fun yesToAQuestionTheRiderHasSinceAnsweredNoIsNotActedOn() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        assertTrue(raiseAQuestionAbout("BUS-A", trip) != 0L)
+        val yes = buttonIntent(notificationId = 6023, title = "我已上車")
+        service.onStartCommand(buttonIntent(notificationId = 6023, title = "還沒上車"), 0, 2)
+        assertFalse(ride(service).hasBoarded)
+
+        // The same trip, so the button is this trip's — but its question is over.
+        service.onStartCommand(yes, 0, 3)
+
+        assertFalse("it was the answer to a question already answered", ride(service).hasBoarded)
+        assertFalse(ReflectionHelpers.getField<Boolean>(service, "boardingAlertSent"))
+    }
+
+    @Test
+    fun theQuestionOnScreenAnswersTheQuestionNowPending() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        val first = raiseAQuestionAbout("BUS-A", trip)
+        fun shownQuestion() = buttonIntent(notificationId = 6023, title = "我已上車")
+            .getLongExtra("boarding_check_id", 0L)
+        assertEquals(first, shownQuestion())
+
+        // Some minutes on, unanswered, another bus leaves: the rider is to be
+        // asked afresh, in a while. What is on screen meanwhile is still a
+        // question, and tapping it must answer the one that now stands.
+        ReflectionHelpers.setField(
+            ReflectionHelpers.getField<Any>(service, "detector"), "pendingCheckSinceMs",
+            System.currentTimeMillis() - 120_000L,
+        )
+        val staleYes = buttonIntent(notificationId = 6023, title = "我已上車")
+        var busStop = stopsOf(trip).first()
+        var gpsTime = nowSeconds() - 30
+        backend = { path ->
+            if (path.endsWith("/realtime/buses")) {
+                busFeed("BUS-B", busStop, pathId = 0, gpsTimeSeconds = gpsTime)
+            } else {
+                null
+            }
+        }
+        ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        busStop = stopsOf(trip)[1]
+        gpsTime += 20
+        ShadowSystemClock.advanceBy(20, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        val afresh = ride(service).boardingCheckId
+        assertTrue("asked afresh", afresh != 0L && afresh != staleYes.getLongExtra("boarding_check_id", 0L))
+        assertFalse("but not yet due to be", ride(service).boardingPromptDue)
+
+        assertEquals("the buttons on screen are the new question's", afresh, shownQuestion())
+        service.onStartCommand(staleYes, 0, 2)
+        assertFalse("a tap that was already on its way answers nothing", ride(service).hasBoarded)
+        service.onStartCommand(buttonIntent(notificationId = 6023, title = "我已上車"), 0, 3)
+        assertTrue(ride(service).hasBoarded)
+    }
+
     @Test
     fun notYetToAQuestionSettledSinceLeavesTheRideAndItsAlertsAlone() {
         val trip = threeStopSession() + mapOf(
@@ -1208,10 +1294,12 @@ class RouteTripMonitorServiceTest {
 
             // The rider switches while that request is still out. Both trips
             // share stops, so everything it brings back would fit the new one.
+            // From here on the backend answers for the new trip; the request
+            // being held was asked before, and brings back the old trip's.
+            answersTheNewTrip.set(true)
             service.onStartCommand(startIntent(next), 0, 2)
             releaseOldFetch.countDown()
             awaitQueuedRefreshes()
-            answersTheNewTrip.set(true)
             fetchLiveData()
 
             assertEquals(

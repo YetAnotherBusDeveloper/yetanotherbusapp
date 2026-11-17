@@ -184,8 +184,15 @@ class TripRideDetectorManualBoardingTest {
             assertTrue("B leaving this long after must be asked about afresh", afresh != 0L && afresh != aboutA)
 
             if (boarded) {
-                detector.confirmBoardedByUser(at(125), answeredCheckId = aboutA)
-                assertUnidentified(detector.snapshot(at(125)))
+                // "Yes" to the question about A is not an answer to this one.
+                assertFalse(detector.confirmBoardedByUser(at(125), answeredCheckId = aboutA))
+                val ride = detector.snapshot(at(165))
+                assertFalse(ride.hasBoarded)
+                assertEquals("the new question still stands", afresh, ride.boardingCheckId)
+                assertTrue(ride.boardingPromptDue)
+
+                assertTrue(detector.confirmBoardedByUser(at(170), answeredCheckId = afresh))
+                assertUnidentified(detector.snapshot(at(170)))
             } else {
                 detector.declineBoarding(at(125), answeredCheckId = aboutA)
                 val ride = detector.snapshot(at(165))
@@ -197,6 +204,75 @@ class TripRideDetectorManualBoardingTest {
                 assertUnidentified(detector.snapshot(at(170)))
             }
         }
+    }
+
+    @Test
+    fun yesToAQuestionSinceTurnedDownIsNotYesToTheNext() {
+        // Asked about A, the rider says "not yet". The "yes" they had also
+        // tapped on that question arrives later, with B's question standing.
+        val detector = newDetector()
+        detector.onBoardingStopEta(0, arriving = true, nowMs = at(0), buses = listOf(atTheStop("BUS-A")))
+        detector.onBoardingStopEta(600, arriving = false, nowMs = at(20))
+        val aboutA = detector.snapshot(at(65)).boardingCheckId
+        assertTrue(aboutA != 0L)
+        assertTrue(detector.declineBoarding(at(70), answeredCheckId = aboutA))
+
+        // With nothing asked, it confirms nothing.
+        assertFalse(detector.confirmBoardedByUser(at(75), answeredCheckId = aboutA))
+        assertFalse(detector.snapshot(at(75)).hasBoarded)
+
+        detector.onBoardingStopEta(0, arriving = true, nowMs = at(200), buses = listOf(atTheStop("BUS-B")))
+        detector.onBoardingStopEta(600, arriving = false, nowMs = at(220))
+        val aboutB = detector.snapshot(at(265))
+        assertTrue(aboutB.boardingPromptDue)
+        assertFalse(detector.confirmBoardedByUser(at(266), answeredCheckId = aboutA))
+        val still = detector.snapshot(at(266))
+        assertFalse("the rider has not said they are on B", still.hasBoarded)
+        assertEquals("and B's question is still theirs to answer", aboutB.boardingCheckId, still.boardingCheckId)
+        assertTrue(still.boardingPromptDue)
+
+        // Said with no question attached, "I have boarded" is always heard.
+        assertTrue(detector.confirmBoardedByUser(at(270)))
+        assertTrue(detector.snapshot(at(270)).hasBoarded)
+    }
+
+    @Test
+    fun aRiderCarriedOnAlongTheRouteHasNotWalkedAwayFromTheQuestion() {
+        // No vehicle positions. The estimate runs out and rolls over; a
+        // quarter of a minute later the phone is 420 m down the route — too
+        // soon to be asked, and not yet far enough to be a ride by itself.
+        val detector = newDetector()
+        detector.onBoardingStopEta(0, arriving = true, nowMs = at(0))
+        detector.onBoardingStopEta(600, arriving = false, nowMs = at(20))
+        val asked = detector.snapshot(at(20)).boardingCheckId
+        assertTrue(asked != 0L)
+        detector.onUserLocation(RideGeoPoint(latitude(420.0), 120.6, at(35), accuracyMeters = 10f))
+        val onTheWay = detector.snapshot(at(35))
+        assertFalse(onTheWay.hasBoarded)
+        assertEquals("that may be the bus carrying them off", asked, onTheWay.boardingCheckId)
+
+        // The fixes stop there. The question is all that is left to ask with.
+        val later = detector.snapshot(at(65))
+        assertEquals(asked, later.boardingCheckId)
+        assertTrue(later.boardingPromptDue)
+    }
+
+    @Test
+    fun aRiderGoneFromTheStopAnyOtherWayHasWalkedAwayFromTheQuestion() {
+        // 420 m off to one side of the route; and 420 m back up it.
+        val aside = newDetector()
+        aside.onBoardingStopEta(0, arriving = true, nowMs = at(0))
+        aside.onBoardingStopEta(600, arriving = false, nowMs = at(20))
+        assertTrue(aside.snapshot(at(20)).boardingCheckId != 0L)
+        aside.onUserLocation(RideGeoPoint(latitude(0.0), 120.6041, at(35), accuracyMeters = 10f))
+        assertEquals(0L, aside.snapshot(at(35)).boardingCheckId)
+
+        val back = newDetector(boardingStopId = 2)
+        back.onBoardingStopEta(0, arriving = true, nowMs = at(0))
+        back.onBoardingStopEta(600, arriving = false, nowMs = at(20))
+        assertTrue(back.snapshot(at(20)).boardingCheckId != 0L)
+        back.onUserLocation(RideGeoPoint(latitude(80.0), 120.6, at(35), accuracyMeters = 10f))
+        assertEquals(0L, back.snapshot(at(35)).boardingCheckId)
     }
 
     @Test
