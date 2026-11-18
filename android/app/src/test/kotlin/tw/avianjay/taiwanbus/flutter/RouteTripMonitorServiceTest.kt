@@ -1174,6 +1174,66 @@ class RouteTripMonitorServiceTest {
     }
 
     @Test
+    fun aBusTheFeedOnlyFlagsAsArrivingIsABusAtTheStop() {
+        val trip = threeStopSession() + mapOf(
+            "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,
+        )
+        // All the feed has of the bus is that one is arriving: no estimate
+        // for the stop, and on the entry no estimate and no plate.
+        val flaggedOnly = """{"paths":[{"pathid":0,"stops":[{"stopid":"1","eta":null,"message":"","buses":[],""" +
+            """"etas":[{"plate":null,"eta":null,"is_arriving":true,"source":"tdx","estimated":false}]}]}]}"""
+        var stopFeed = flaggedOnly
+        backend = { path -> if (path.endsWith("/realtime/buses")) "[]" else stopFeed }
+        service.onStartCommand(startIntent(trip), 0, 1)
+        refreshAndDeliverAlerts()
+        assertTrue(
+            "a bus is at the stop",
+            ReflectionHelpers.getField<Long>(detectorOrNull(), "etaArrivingAtMs") != 0L,
+        )
+        assertEquals(0L, ride(service).boardingCheckId)
+
+        stopFeed = realStopFeed(onTheWay = listOf("BBB-002" to 811))
+        ShadowSystemClock.advanceBy(25, TimeUnit.SECONDS)
+        refreshAndDeliverAlerts()
+        assertTrue("and has left", ride(service).boardingCheckId != 0L)
+        answerTheQuestionWithYes()
+
+        assertTrue(ride(service).hasBoarded)
+        assertNull("the feed never said which bus it was", ride(service).trackedVehicleId)
+    }
+
+    @Test
+    fun aBusTheScreensCopyOnlyFlagsAsArrivingIsABusAtTheStop() {
+        val trip = threeStopSession() + mapOf("boardingStopId" to 1)
+        // As the route screen passes such an entry on.
+        val flaggedOnly = mapOf(
+            "eta" to null,
+            "observedEta" to null,
+            "observedAtMs" to observedJustNow(),
+            "message" to null,
+            "buses" to emptyList<Any>(),
+            "etas" to listOf(
+                mapOf(
+                    "plate" to null, "eta" to null, "observedEta" to null, "message" to null,
+                    "is_arriving" to true,
+                ),
+            ),
+        )
+        service.onStartCommand(appUpdate(trip, flaggedOnly), 0, 1)
+        refreshRide()
+        assertTrue(
+            "a bus is at the stop",
+            ReflectionHelpers.getField<Long>(detectorOrNull(), "etaArrivingAtMs") != 0L,
+        )
+        assertEquals(0L, ride(service).boardingCheckId)
+
+        service.onStartCommand(appUpdate(trip, appStop(eta = 811, observedAtMs = observedJustNow())), 0, 2)
+        refreshRide()
+
+        assertTrue("and has left", ride(service).boardingCheckId != 0L)
+    }
+
+    @Test
     fun busesStillOnTheirWayAreNotBusesAtTheStop() {
         val trip = threeStopSession() + mapOf(
             "routeId" to "TXG1", "boardingStopId" to 1, "destinationStopId" to 3,

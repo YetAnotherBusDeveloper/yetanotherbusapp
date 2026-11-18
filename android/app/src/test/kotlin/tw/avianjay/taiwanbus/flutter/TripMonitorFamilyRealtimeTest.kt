@@ -228,6 +228,30 @@ class TripMonitorFamilyRealtimeTest {
     }
 
     @Test
+    fun anEntrySayingOnlyThatABusIsArrivingIsStillABusArriving() {
+        // No estimate, no message, no plate: the flag is all the entry says.
+        val stop = parseTripMonitorLiveStop(
+            JSONObject(
+                """{"eta":null,"message":"","buses":[],"etas":[
+                    {"plate":null,"eta":null,"is_arriving":true,"source":"tdx","estimated":false},
+                    {"plate":null,"eta":null,"is_arriving":false,"source":"tdx","estimated":false},
+                    {}
+                ]}""",
+            ),
+            source = "TXG500",
+        )
+
+        assertTrue(stop.observations.single().arriving)
+        val entry = stop.etaEntries.single()
+        assertTrue("an entry that says nothing at all is still none", entry.isArriving)
+        assertNull(entry.vehicleId)
+        assertNull(entry.seconds)
+        assertNull(entry.observedSeconds)
+        assertEquals(setOf("TXG500"), entry.sources)
+        assertEquals(emptyList<String>(), stop.vehicleIds)
+    }
+
+    @Test
     fun whatTheScreenMergedSaysWhichRouteSaidWhat() {
         val merged = parseTripMonitorLiveStop(
             JSONObject(

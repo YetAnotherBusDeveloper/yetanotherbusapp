@@ -3709,7 +3709,12 @@ class BusRepository {
         estimated: _truthyPayloadValue(rawEta['estimated']),
         isArriving: _truthyPayloadValue(rawEta['is_arriving']),
       );
-      if (eta.sec == null && eta.msg == null && eta.vehicleId == null) {
+      // The flag alone is something said of a bus: one at the stop that the
+      // feed neither names nor has an estimate for.
+      if (eta.sec == null &&
+          eta.msg == null &&
+          eta.vehicleId == null &&
+          !eta.isArriving) {
         continue;
       }
       result.add(eta);

@@ -93,6 +93,7 @@ void main() {
                   StopEta(sec: -1, vehicleId: 'AAA-001', isArriving: true),
                   StopEta(sec: -1, isArriving: true),
                   StopEta(sec: 811, vehicleId: 'BBB-002'),
+                  StopEta(isArriving: true),
                 ],
               ),
             ).toMap()['liveData']
@@ -119,6 +120,14 @@ void main() {
         'observedEta': 811,
         'message': null,
         'is_arriving': false,
+      },
+      // The flag by itself, with nothing else said of the bus.
+      {
+        'plate': null,
+        'eta': null,
+        'observedEta': null,
+        'message': null,
+        'is_arriving': true,
       },
     ]);
   });

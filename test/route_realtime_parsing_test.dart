@@ -132,4 +132,81 @@ void main() {
       );
     },
   );
+
+  test('an entry saying only that a bus is arriving is kept', () async {
+    final updatedAt = DateTime.now();
+    final client = MockClient((request) async {
+      final path = request.url.path;
+      if (path.endsWith('/api/v1/routes/TXG307/stops')) {
+        return http.Response(
+          jsonEncode({
+            'routeid': 'TXG307',
+            'name': '307',
+            'paths': [
+              {
+                'pathid': 0,
+                'name': 'Outbound',
+                'stops': [
+                  {
+                    'stopid': 'STOP2',
+                    'seq': 2,
+                    'name': 'Stop 2',
+                    'lat': 24.1006,
+                    'lon': 120.6500,
+                  },
+                ],
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (path.endsWith('/api/v1/routes/TXG307/realtime')) {
+        return http.Response(
+          jsonEncode({
+            'routeid': 'TXG307',
+            'paths': [
+              {
+                'pathid': 0,
+                'stops': [
+                  {
+                    'stopid': 'STOP2',
+                    'eta': null,
+                    'message': '',
+                    'updated_at': updatedAt.toIso8601String(),
+                    'eta_reference_at': updatedAt.toIso8601String(),
+                    'buses': const [],
+                    // No estimate, no message, no plate: the flag is all the
+                    // first says. The others say nothing at all.
+                    'etas': [
+                      {'plate': null, 'eta': null, 'is_arriving': true},
+                      {'plate': null, 'eta': null, 'is_arriving': false},
+                      <String, Object?>{},
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('not found', 404);
+    });
+
+    final detail = await BusRepository(client: client).getCompleteBusInfo(
+      307,
+      provider: BusProvider.txg,
+      routeIdHint: 'TXG307',
+      routeNameHint: '307',
+    );
+
+    final eta = detail.stopsByPath[0]!.single.etas.single;
+    expect(eta.isArriving, isTrue);
+    expect(eta.sec, isNull);
+    expect(eta.msg, isNull);
+    expect(eta.vehicleId, isNull);
+  });
 }

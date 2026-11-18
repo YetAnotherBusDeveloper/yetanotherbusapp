@@ -153,7 +153,9 @@ internal fun parseTripMonitorLiveStop(stop: JSONObject, source: String = ""): Li
                 ?.let { routes -> (0 until routes.length()).mapNotNull { routes.optString(it).takeIf(String::isNotEmpty) } }
                 ?.takeIf { it.isNotEmpty() }?.toSet()
                 ?: setOf(source),
-        ).takeIf { it.seconds != null || it.message != null || it.vehicleId != null }
+            // The flag alone is something said of a bus: one at the stop that
+            // the feed neither names nor has an estimate for.
+        ).takeIf { it.seconds != null || it.message != null || it.vehicleId != null || it.isArriving }
     }
     val buses = stop.optJSONArray("buses").objects()
         .mapNotNull { vehicle(it, "id", "vehicle_id", "plate") }
