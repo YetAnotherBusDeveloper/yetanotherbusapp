@@ -2,6 +2,9 @@ package tw.avianjay.taiwanbus.flutter
 
 import android.content.Context
 
+/** On board with nowhere to get off: the monitor pauses and asks the rider to choose a stop. */
+internal const val PAUSE_REASON_BOARDED_NO_DESTINATION = "boarded_no_destination"
+
 object AppRuntimeStateStore {
     private const val PREFERENCES_NAME = "app_runtime_state"
     private const val KEY_APP_IN_FOREGROUND = "app_in_foreground"
@@ -12,6 +15,7 @@ object AppRuntimeStateStore {
     private const val KEY_PAUSED_DESTINATION_STOP_ID = "trip_monitor_paused_destination_stop_id"
     private const val KEY_PAUSED_REASON = "trip_monitor_paused_reason"
     private const val KEY_PAUSED_AT_MS = "trip_monitor_paused_at_ms"
+    private const val KEY_PAUSED_VEHICLE_ID = "trip_monitor_paused_vehicle_id"
 
     fun setAppInForeground(context: Context, value: Boolean) {
         preferences(context).edit()
@@ -23,10 +27,17 @@ object AppRuntimeStateStore {
         return preferences(context).getBoolean(KEY_APP_IN_FOREGROUND, false)
     }
 
+    /**
+     * [rideVehicleId] is the bus the paused ride had been identified as being
+     * on, when it had: the detector that knew it is gone once the monitor
+     * pauses, and with no phone fix that bus is all a resumed ride has to tell
+     * how far it has got.
+     */
     fun savePausedTripMonitor(
         context: Context,
         session: TrackingSession,
         reason: String,
+        rideVehicleId: String? = null,
     ) {
         preferences(context).edit()
             .putString(KEY_PAUSED_PROVIDER, session.provider)
@@ -36,6 +47,7 @@ object AppRuntimeStateStore {
             .putInt(KEY_PAUSED_DESTINATION_STOP_ID, session.destinationStopId ?: -1)
             .putString(KEY_PAUSED_REASON, reason)
             .putLong(KEY_PAUSED_AT_MS, System.currentTimeMillis())
+            .putString(KEY_PAUSED_VEHICLE_ID, rideVehicleId)
             .apply()
     }
 
@@ -48,6 +60,7 @@ object AppRuntimeStateStore {
             .remove(KEY_PAUSED_DESTINATION_STOP_ID)
             .remove(KEY_PAUSED_REASON)
             .remove(KEY_PAUSED_AT_MS)
+            .remove(KEY_PAUSED_VEHICLE_ID)
             .apply()
     }
 
@@ -74,6 +87,9 @@ object AppRuntimeStateStore {
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() },
             pausedAtMs = preferences.getLong(KEY_PAUSED_AT_MS, 0L),
+            rideVehicleId = preferences.getString(KEY_PAUSED_VEHICLE_ID, null)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() },
         )
     }
 
@@ -98,14 +114,29 @@ data class TripMonitorPauseState(
     val destinationStopId: Int?,
     val reason: String?,
     val pausedAtMs: Long,
+    /** The bus the paused ride was identified as being on; null when it was not. */
+    val rideVehicleId: String? = null,
 ) {
+    /**
+     * Whether [session] is the trip that was paused.
+     *
+     * A ride paused to ask for a destination, with no boarding stop chosen, is
+     * that ride whichever boarding stop the session names. The route screen
+     * fills in the stop nearest the rider when none is chosen, and that moves
+     * down the route as the bus does; read as another trip, it would start
+     * the monitor afresh, waiting at a stop the rider is riding past, and the
+     * ride could no longer be picked up when they choose where to get off.
+     */
     fun matches(session: TrackingSession): Boolean {
         return provider == session.provider &&
             routeKey == session.routeKey &&
             pathId == session.pathId &&
-            boardingStopId == session.boardingStopId &&
+            (boardingStopId == session.boardingStopId || awaitsADestinationFromAnyStop) &&
             destinationStopId == session.destinationStopId
     }
+
+    private val awaitsADestinationFromAnyStop: Boolean
+        get() = reason == PAUSE_REASON_BOARDED_NO_DESTINATION && boardingStopId == null
 
     fun toMap(): Map<String, Any?> {
         return mapOf(

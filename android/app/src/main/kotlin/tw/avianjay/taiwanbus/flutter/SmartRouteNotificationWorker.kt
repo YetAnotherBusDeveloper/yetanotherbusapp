@@ -369,6 +369,7 @@ internal object SmartRouteNotificationSupport {
                 bestStop = SmartNearestStop(
                     pathId = stop.pathId,
                     stopId = stop.stopId,
+                    launchStopId = stop.launchStopId,
                     stopName = stop.stopName,
                     distanceMeters = distance,
                 )
@@ -452,7 +453,9 @@ internal object SmartRouteNotificationSupport {
                 provider = profile.provider,
                 routeKey = profile.routeKey,
                 pathId = nearestStop.pathId,
-                stopId = nearestStop.stopId,
+                // Full-width: Flutter matches this against its own stop ids, and
+                // the folded key would select nothing there.
+                stopId = nearestStop.launchStopId,
             ),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -620,9 +623,15 @@ internal object SmartRouteNotificationSupport {
             arrayOf(routeKey.toString()),
         ).use { cursor ->
             while (cursor.moveToNext()) {
+                // stop_id is a TEXT column and 高雄 ids exceed Int. It is needed
+                // twice, as two different numbers: folded, to key the live
+                // feed; and at full width, for the notification tap that goes
+                // back into Flutter, whose stop models hold the unfolded id.
+                val storedStopId = cursor.getString(1)
                 result += SmartRouteStop(
                     pathId = cursor.getInt(0),
-                    stopId = cursor.getInt(1),
+                    stopId = foldStopId(storedStopId),
+                    launchStopId = launchStopId(storedStopId),
                     stopName = cursor.getString(2).orEmpty(),
                     sequence = cursor.getInt(3),
                     lon = cursor.getDouble(4),
@@ -678,21 +687,7 @@ internal object SmartRouteNotificationSupport {
         return result
     }
 
-    private fun parseStopId(raw: Any?): Int {
-        if (raw is Number) {
-            return raw.toInt()
-        }
-        val text = raw?.toString()?.trim().orEmpty()
-        val parsed = text.toIntOrNull()
-        if (parsed != null) {
-            return parsed
-        }
-        var hash = 17
-        for (char in text) {
-            hash = (hash * 31 + char.code) and 0x7fffffff
-        }
-        return hash
-    }
+    private fun parseStopId(raw: Any?): Int = foldStopId(raw)
 
     private fun toIntOrNull(raw: Any?): Int? {
         return when (raw) {
@@ -801,7 +796,10 @@ internal data class SmartRouteData(
 
 internal data class SmartRouteStop(
     val pathId: Int,
+    /** Folded, as the live feeds are: only usable for looking up ETAs. */
     val stopId: Int,
+    /** Full-width, as Flutter holds it: what a notification tap may carry. */
+    val launchStopId: Long,
     val stopName: String,
     val sequence: Int,
     val lon: Double,
@@ -811,6 +809,7 @@ internal data class SmartRouteStop(
 internal data class SmartNearestStop(
     val pathId: Int,
     val stopId: Int,
+    val launchStopId: Long,
     val stopName: String,
     val distanceMeters: Double,
 )

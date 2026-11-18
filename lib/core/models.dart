@@ -1992,17 +1992,62 @@ class StopEta {
     this.vehicleId,
     this.source = 'tdx',
     this.estimated = false,
+    this.isArriving = false,
     this.etaReferenceAt,
     this.updatedAt,
+    this.routeIds = const [],
   });
 
   final int? sec;
   final String? msg;
   final String? vehicleId;
+
+  /// On a stop merged from the routes of a family: the routes that list this
+  /// vehicle, more than one where they list it alike. What is said of the bus
+  /// is as old as their observations.
+  final List<String> routeIds;
+
+  /// The feed flags this vehicle as arriving at the stop. Being listed for a
+  /// stop is not that: every bus heading for it is listed, however far off.
+  final bool isArriving;
   final String source;
   final bool estimated;
   final String? etaReferenceAt;
   final String? updatedAt;
+}
+
+/// What one route of a family observed of a stop the family shares: its
+/// estimate, whether it had a bus arriving, and the moment the backend worked
+/// that out for.
+///
+/// A merged stop shows the soonest estimate of them all. That is a badge, not
+/// an observation: the routes are observed at different moments, and one
+/// route's estimate says nothing of another's bus.
+class StopRouteObservation {
+  const StopRouteObservation({
+    required this.routeId,
+    this.sec,
+    this.msg,
+    this.isArriving = false,
+    this.etaReferenceAt,
+    this.updatedAt,
+  });
+
+  final String routeId;
+  final int? sec;
+  final String? msg;
+
+  /// That route's feed flags a vehicle as arriving at the stop.
+  final bool isArriving;
+  final String? etaReferenceAt;
+  final String? updatedAt;
+
+  /// As [stopRealtimeObservedAt] is for a stop.
+  DateTime? observedAt({DateTime? now}) {
+    final clock = now ?? DateTime.now();
+    return _parseStopRealtimeUpdatedAt(etaReferenceAt, clock) ??
+        _parseStopRealtimeUpdatedAt(updatedAt, clock);
+  }
 }
 
 class StopInfo {
@@ -2022,6 +2067,7 @@ class StopInfo {
     this.etaReferenceAt,
     this.buses = const [],
     this.etas = const [],
+    this.routeObservations = const [],
   });
 
   factory StopInfo.fromMap(Map<String, Object?> map) {
@@ -2061,6 +2107,10 @@ class StopInfo {
   final List<BusVehicle> buses;
   final List<StopEta> etas;
 
+  /// For a stop merged from the routes of a family: what each of them
+  /// observed. Empty for a stop of one route, whose own fields say it.
+  final List<StopRouteObservation> routeObservations;
+
   TransitName get transitName => TransitName(
     zh: stopName,
     en: stopNameEn,
@@ -2074,6 +2124,7 @@ class StopInfo {
     String? etaReferenceAt,
     List<BusVehicle>? buses,
     List<StopEta>? etas,
+    List<StopRouteObservation>? routeObservations,
   }) {
     return StopInfo(
       routeKey: routeKey,
@@ -2091,6 +2142,7 @@ class StopInfo {
       etaReferenceAt: etaReferenceAt ?? this.etaReferenceAt,
       buses: buses ?? this.buses,
       etas: etas ?? this.etas,
+      routeObservations: routeObservations ?? this.routeObservations,
     );
   }
 }
@@ -2377,6 +2429,18 @@ DateTime? stopRealtimeUpdatedAt(StopInfo stop, {DateTime? now}) {
   final clock = now ?? DateTime.now();
   return _parseStopRealtimeUpdatedAt(stop.t, clock) ??
       _parseStopRealtimeUpdatedAt(stop.etaReferenceAt, clock);
+}
+
+/// When the backend made the observation [stop]'s live data is from: the
+/// moment its estimates were worked out for, else the source's own timestamp.
+///
+/// A stop keeps its last live data while realtime is unavailable, and a
+/// placeholder has none, so this — not the moment the data is looked at —
+/// is what tells a new observation from the old one shown again.
+DateTime? stopRealtimeObservedAt(StopInfo stop, {DateTime? now}) {
+  final clock = now ?? DateTime.now();
+  return _parseStopRealtimeUpdatedAt(stop.etaReferenceAt, clock) ??
+      _parseStopRealtimeUpdatedAt(stop.t, clock);
 }
 
 bool isStopRealtimeStale(StopInfo stop, {DateTime? now}) {
