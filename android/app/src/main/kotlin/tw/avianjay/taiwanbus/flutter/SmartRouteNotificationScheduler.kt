@@ -7,23 +7,20 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
-import org.json.JSONArray
-import org.json.JSONObject
 
 object SmartRouteNotificationScheduler {
     private const val WORK_NAME = "smart_route_notification_refresh"
-    private const val MIN_TOTAL_OPENS_FOR_RECOMMENDATION = 3
-    private const val FLUTTER_PREFERENCES_NAME = "FlutterSharedPreferences"
-    private const val SETTINGS_KEY = "flutter.app_settings"
-    private const val SETTINGS_FALLBACK_KEY = "app_settings"
-    private const val ROUTE_USAGE_KEY = "flutter.route_usage_profiles"
-    private const val ROUTE_USAGE_FALLBACK_KEY = "route_usage_profiles"
-    private const val SETTINGS_NOTIFICATIONS_ENABLED_KEY = "enableSmartRouteNotifications"
 
+    /**
+     * Runs the background check only while there is something for it to do:
+     * the setting is on and the plan still holds a habit that has not lapsed.
+     */
     fun sync(context: Context, enabled: Boolean) {
-        val workManager = WorkManager.getInstance(context)
-        if (!enabled || !hasLearnedRoutes(context)) {
-            workManager.cancelUniqueWork(WORK_NAME)
+        val plan = if (enabled) SmartRouteNotificationSupport.loadPlan(context) else null
+        if (plan == null ||
+            !SmartRouteReminderRules.hasLiveSlots(plan, System.currentTimeMillis())
+        ) {
+            cancel(context)
             return
         }
 
@@ -36,51 +33,14 @@ object SmartRouteNotificationScheduler {
                 .build(),
         ).build()
 
-        workManager.enqueueUniquePeriodicWork(
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             WORK_NAME,
             ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }
 
-    fun syncFromPreferences(context: Context) {
-        sync(context, loadEnabledFromPreferences(context))
-    }
-
-    private fun loadEnabledFromPreferences(context: Context): Boolean {
-        val preferences = context.getSharedPreferences(
-            FLUTTER_PREFERENCES_NAME,
-            Context.MODE_PRIVATE,
-        )
-        val raw = preferences.getString(SETTINGS_KEY, null)
-            ?: preferences.getString(SETTINGS_FALLBACK_KEY, null)
-            ?: return false
-        return try {
-            JSONObject(raw).optBoolean(SETTINGS_NOTIFICATIONS_ENABLED_KEY, false)
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    private fun hasLearnedRoutes(context: Context): Boolean {
-        val preferences = context.getSharedPreferences(
-            FLUTTER_PREFERENCES_NAME,
-            Context.MODE_PRIVATE,
-        )
-        val raw = preferences.getString(ROUTE_USAGE_KEY, null)
-            ?: preferences.getString(ROUTE_USAGE_FALLBACK_KEY, null)
-            ?: return false
-        return try {
-            val profiles = JSONArray(raw)
-            for (index in 0 until profiles.length()) {
-                val item = profiles.optJSONObject(index) ?: continue
-                if (item.optInt("totalOpens", 0) >= MIN_TOTAL_OPENS_FOR_RECOMMENDATION) {
-                    return true
-                }
-            }
-            false
-        } catch (_: Exception) {
-            false
-        }
+    fun cancel(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
     }
 }

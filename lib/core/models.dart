@@ -1355,8 +1355,48 @@ class FavoriteUsageProfile {
   }
 }
 
+/// One visit to a route page, kept with its time so a habit can be told apart
+/// from a burst: the hourly counters on [RouteUsageProfile] cannot say which
+/// day, or which weekday, an open happened on.
+class RouteVisit {
+  const RouteVisit({required this.atMs, this.stopId});
+
+  final int atMs;
+
+  /// The stop the rider was looking at, when the screen knew one. Lets the
+  /// usual boarding stop be learned without asking for the device's location.
+  final int? stopId;
+
+  static RouteVisit? fromJson(Object? raw) {
+    if (raw is! Map) {
+      return null;
+    }
+    final atMs = (raw['t'] as num?)?.toInt() ?? 0;
+    if (atMs <= 0) {
+      return null;
+    }
+    final stopId = (raw['s'] as num?)?.toInt();
+    return RouteVisit(
+      atMs: atMs,
+      stopId: stopId != null && stopId > 0 ? stopId : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'t': atMs, if (stopId != null) 's': stopId};
+}
+
 class RouteUsageProfile {
   static const Duration selectionHistoryRetention = Duration(days: 7);
+
+  /// How far back visits are remembered. Long enough to hold eight samples of
+  /// a once-a-week trip, short enough that last semester's timetable is gone.
+  static const Duration visitHistoryRetention = Duration(days: 56);
+
+  /// Opens closer together than this are one visit: reopening a page while
+  /// waiting for a late bus is not several trips.
+  static const Duration visitMergeWindow = Duration(minutes: 20);
+
+  static const int maxVisits = 240;
 
   const RouteUsageProfile({
     required this.provider,
@@ -1370,6 +1410,8 @@ class RouteUsageProfile {
     this.hourlyOpens = const <int, int>{},
     Map<int, int> hourlySelections = const <int, int>{},
     this.selectionTimestampsMs = const <int>[],
+    this.visits = const <RouteVisit>[],
+    this.legacyAsOfMs,
   }) : _legacyTotalSelections = totalSelections,
        _legacyLastSelectedAtMs = lastSelectedAtMs,
        _legacyHourlySelections = hourlySelections;
@@ -1391,17 +1433,43 @@ class RouteUsageProfile {
       });
     }
 
+    final lastOpenedAtMs = (json['lastOpenedAtMs'] as num?)?.toInt() ?? 0;
+    final rawVisits = json['visits'];
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final List<RouteVisit> visits;
+    int? legacyAsOfMs;
+    if (rawVisits is List) {
+      visits = normalizeVisits(
+        rawVisits.map(RouteVisit.fromJson).whereType<RouteVisit>(),
+        nowMs: nowMs,
+      );
+      final storedLegacyAsOfMs = (json['legacyAsOfMs'] as num?)?.toInt() ?? 0;
+      legacyAsOfMs = storedLegacyAsOfMs > 0 ? storedLegacyAsOfMs : null;
+    } else {
+      // Written before visits were kept. The last open is the one visit whose
+      // time is known, and it also dates the hourly counters: everything in
+      // them happened no later than that.
+      visits = normalizeVisits([
+        if (lastOpenedAtMs > 0) RouteVisit(atMs: lastOpenedAtMs),
+      ], nowMs: nowMs);
+      legacyAsOfMs = lastOpenedAtMs > 0 && hourlyOpens.isNotEmpty
+          ? lastOpenedAtMs
+          : null;
+    }
+
     return RouteUsageProfile(
       provider: busProviderFromString(json['provider'] as String? ?? 'tpe'),
       routeKey: (json['routeKey'] as num?)?.toInt() ?? 0,
       pathId: (json['pathId'] as num?)?.toInt(),
       routeName: json['routeName'] as String? ?? '',
       totalOpens: (json['totalOpens'] as num?)?.toInt() ?? 0,
-      lastOpenedAtMs: (json['lastOpenedAtMs'] as num?)?.toInt() ?? 0,
+      lastOpenedAtMs: lastOpenedAtMs,
       hourlyOpens: hourlyOpens,
       selectionTimestampsMs: _decodeRecentSelectionTimestamps(
         json['selectionTimestampsMs'],
       ),
+      visits: visits,
+      legacyAsOfMs: legacyAsOfMs,
     );
   }
 
@@ -1413,6 +1481,15 @@ class RouteUsageProfile {
   final int lastOpenedAtMs;
   final Map<int, int> hourlyOpens;
   final List<int> selectionTimestampsMs;
+
+  /// Recent visits, oldest first, one per [visitMergeWindow].
+  final List<RouteVisit> visits;
+
+  /// Set only on profiles that predate [visits]: the moment up to which
+  /// [hourlyOpens] is the sole record of when the route was used. Null means
+  /// every open this profile has seen is also in [visits], so the undated
+  /// counters add nothing.
+  final int? legacyAsOfMs;
   final int _legacyTotalSelections;
   final int _legacyLastSelectedAtMs;
   final Map<int, int> _legacyHourlySelections;
@@ -1441,7 +1518,52 @@ class RouteUsageProfile {
         (key, value) => MapEntry(key.toString(), value),
       ),
       'selectionTimestampsMs': prunedSelectionTimestamps,
+      // Always written, even when empty: its presence is what tells a reader
+      // this profile no longer needs seeding from the legacy counters.
+      'visits': visitsWithin().map((visit) => visit.toJson()).toList(),
+      if (legacyAsOfMs != null) 'legacyAsOfMs': legacyAsOfMs,
     };
+  }
+
+  List<RouteVisit> visitsWithin({DateTime? now}) {
+    if (visits.isEmpty) {
+      return const <RouteVisit>[];
+    }
+    return normalizeVisits(
+      visits,
+      nowMs: (now ?? DateTime.now()).millisecondsSinceEpoch,
+    );
+  }
+
+  /// Drops visits older than [visitHistoryRetention], orders the rest, and
+  /// folds any that fall inside one [visitMergeWindow] into the first of them.
+  static List<RouteVisit> normalizeVisits(
+    Iterable<RouteVisit> visits, {
+    required int nowMs,
+  }) {
+    final cutoffMs = nowMs - visitHistoryRetention.inMilliseconds;
+    final sorted = visits.where((visit) => visit.atMs >= cutoffMs).toList()
+      ..sort((left, right) => left.atMs.compareTo(right.atMs));
+    final merged = <RouteVisit>[];
+    for (final visit in sorted) {
+      if (merged.isNotEmpty &&
+          visit.atMs - merged.last.atMs < visitMergeWindow.inMilliseconds) {
+        // Same visit. Keep its first moment, but take the stop from whichever
+        // open knew it: a list tap names the stop before the page has loaded.
+        if (merged.last.stopId == null && visit.stopId != null) {
+          merged[merged.length - 1] = RouteVisit(
+            atMs: merged.last.atMs,
+            stopId: visit.stopId,
+          );
+        }
+        continue;
+      }
+      merged.add(visit);
+    }
+    if (merged.length > maxVisits) {
+      merged.removeRange(0, merged.length - maxVisits);
+    }
+    return merged;
   }
 
   int countAtHour(int hour) => hourlyOpens[hour] ?? 0;
@@ -1511,7 +1633,11 @@ class RouteUsageProfile {
 
   int get preferredHour => preferredHourAt();
 
-  RouteUsageProfile recordOpen(DateTime openedAt, {String? routeName}) {
+  RouteUsageProfile recordOpen(
+    DateTime openedAt, {
+    String? routeName,
+    int? stopId,
+  }) {
     final hour = openedAt.hour;
     final nextHourlyOpens = <int, int>{...hourlyOpens};
     nextHourlyOpens[hour] = (nextHourlyOpens[hour] ?? 0) + 1;
@@ -1526,6 +1652,14 @@ class RouteUsageProfile {
       lastOpenedAtMs: openedAt.millisecondsSinceEpoch,
       hourlyOpens: nextHourlyOpens,
       selectionTimestampsMs: selectionTimestampsMs,
+      visits: normalizeVisits([
+        ...visits,
+        RouteVisit(
+          atMs: openedAt.millisecondsSinceEpoch,
+          stopId: stopId != null && stopId > 0 ? stopId : null,
+        ),
+      ], nowMs: openedAt.millisecondsSinceEpoch),
+      legacyAsOfMs: legacyAsOfMs,
     );
   }
 
@@ -1545,6 +1679,8 @@ class RouteUsageProfile {
       lastOpenedAtMs: lastOpenedAtMs,
       hourlyOpens: hourlyOpens,
       selectionTimestampsMs: nextSelectionTimestamps,
+      visits: visits,
+      legacyAsOfMs: legacyAsOfMs,
     );
   }
 
@@ -1557,6 +1693,8 @@ class RouteUsageProfile {
       totalOpens: totalOpens,
       lastOpenedAtMs: lastOpenedAtMs,
       hourlyOpens: hourlyOpens,
+      visits: visits,
+      legacyAsOfMs: legacyAsOfMs,
     );
   }
 
@@ -1570,6 +1708,8 @@ class RouteUsageProfile {
       lastOpenedAtMs: lastOpenedAtMs,
       hourlyOpens: hourlyOpens,
       selectionTimestampsMs: selectionTimestampsWithin(now: now),
+      visits: visits,
+      legacyAsOfMs: legacyAsOfMs,
     );
   }
 
@@ -1603,6 +1743,7 @@ class SmartRouteSuggestion {
     this.favorite,
     this.favoriteStop,
     this.favoritePath,
+    this.learnedStop,
   });
 
   final RouteUsageProfile profile;
@@ -1611,12 +1752,20 @@ class SmartRouteSuggestion {
   final RouteDetailData? detail;
   final StopInfo? nearestStop;
   final PathInfo? nearestPath;
+
+  /// Distance to the stop that is shown when it is not a favorite: the
+  /// [learnedStop] if there is one, otherwise the [nearestStop].
   final double? distanceMeters;
   final FavoriteStop? favorite;
   final StopInfo? favoriteStop;
   final PathInfo? favoritePath;
 
-  StopInfo? get recommendedStop => favoriteStop ?? nearestStop;
+  /// The stop this route is usually opened at around this time. Only set when
+  /// it should be shown ahead of [nearestStop] — that is, when the rider is
+  /// not already standing at some other stop of the route.
+  final StopInfo? learnedStop;
+
+  StopInfo? get recommendedStop => favoriteStop ?? learnedStop ?? nearestStop;
   PathInfo? get recommendedPath => favoritePath ?? nearestPath;
 }
 

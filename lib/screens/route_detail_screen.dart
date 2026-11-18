@@ -25,6 +25,7 @@ import '../core/models.dart';
 import '../core/refresh_backoff.dart';
 import '../core/route_detail_launch_bridge.dart';
 import '../core/samsung_live_notification_prompt_service.dart';
+import '../core/smart_route_service.dart';
 import '../core/stop_route_merge.dart';
 import '../core/trip_monitor_notifications.dart';
 import '../core/twbusforum.dart';
@@ -559,6 +560,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
               detail.route,
               provider: widget.provider,
               pathId: _currentPathId,
+              stopId: _usageStopHint(),
             ),
           );
         });
@@ -3135,6 +3137,38 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   StopInfo? _resolvedBoardingStop() {
     return _findStopById(_currentPathStops, _boardingStopId) ??
         _currentBoardingCandidateStop();
+  }
+
+  /// The stop this visit should be remembered against, if any.
+  ///
+  /// The stop the page was opened on, or one the rider picked, is taken as
+  /// given. The nearest stop is only a guess at where they will board, and is
+  /// trusted only when they are close enough to be heading for it: the
+  /// nearest stop to somebody reading the timetable from across town says
+  /// nothing about their habits.
+  int? _usageStopHint() {
+    final opened = _findStopById(_currentPathStops, widget.initialStopId);
+    if (opened != null) {
+      return opened.stopId;
+    }
+    final stop = _resolvedBoardingStop();
+    if (stop == null) {
+      return null;
+    }
+    if (_currentBoardingCandidateStop()?.stopId != stop.stopId) {
+      return stop.stopId;
+    }
+    final position = _lastPosition;
+    if (position == null || (stop.lat == 0 && stop.lon == 0)) {
+      return null;
+    }
+    final distance = Geolocator.distanceBetween(
+      position.latitude,
+      position.longitude,
+      stop.lat,
+      stop.lon,
+    );
+    return distance <= SmartRouteService.atStopMeters ? stop.stopId : null;
   }
 
   String? _buildDesktopDiscordArrivalStatus(AppSettings settings) {

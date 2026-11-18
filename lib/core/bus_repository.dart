@@ -4928,6 +4928,30 @@ class BusRepository {
     return null;
   }
 
+  /// The routeids behind [routeKeys], for those of them the local database
+  /// lists. The reverse of [routeKeyForRouteId], done for many keys in the
+  /// one pass over the provider's routes that a single key would take.
+  Future<Map<int, String>> routeIdsForRouteKeys(
+    BusProvider provider,
+    Set<int> routeKeys,
+  ) async {
+    if (routeKeys.isEmpty) {
+      return const <int, String>{};
+    }
+    final rows = await _loadMetadataPathRows(provider: provider);
+    final routeIds = <int, String>{};
+    for (final row in rows) {
+      if (row.routeId.isEmpty) {
+        continue;
+      }
+      final routeKey = _routeKeyForRouteId(row.routeId);
+      if (routeKeys.contains(routeKey)) {
+        routeIds.putIfAbsent(routeKey, () => row.routeId);
+      }
+    }
+    return routeIds;
+  }
+
   /// The stable client-side key for a routeid.
   ///
   /// Route detail is addressed by [routeKey], but anything that arrives from

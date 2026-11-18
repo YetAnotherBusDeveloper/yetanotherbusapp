@@ -30,6 +30,7 @@ import 'haptic_feedback_service.dart';
 import 'ios_widget_integration.dart';
 import 'live_activity_service.dart';
 import 'models.dart';
+import 'smart_route_plan.dart';
 import 'smart_route_service.dart';
 import 'storage_service.dart';
 import 'wear_os_integration.dart';
@@ -155,6 +156,10 @@ class AppController extends ChangeNotifier {
   bool _pendingChangeDrivenAccountSync = false;
   int _recommendationRevision = 0;
   String? _cachedSmartRouteSignature;
+
+  /// Route ids already looked up for the reminder plan, by provider and
+  /// route key. They do not change, so one lookup per route is enough.
+  final Map<String, String> _smartRouteIds = <String, String>{};
   Object? _lastRecommendationRoutes;
   Object? _lastRecommendationFavorites;
   Object? _lastRecommendationUsage;
@@ -506,11 +511,7 @@ class AppController extends ChangeNotifier {
       () => _syncWearOsSnapshot(requestRefresh: false),
     );
     _attachWearOsEventStream();
-    await _runNonCriticalStartupTask(
-      () => AndroidHomeIntegration.syncSmartRouteNotifications(
-        _settings.enableSmartRouteNotifications,
-      ),
-    );
+    await _runNonCriticalStartupTask(_syncSmartRouteNotifications);
     await _runNonCriticalStartupTask(
       () => desktopDiscordPresenceService.refresh(settings: _settings),
     );
@@ -1290,9 +1291,7 @@ class AppController extends ChangeNotifier {
     await AndroidHomeIntegration.updateFavoriteWidgetAutoRefreshMinutes(
       _settings.favoriteWidgetAutoRefreshMinutes,
     );
-    await AndroidHomeIntegration.syncSmartRouteNotifications(
-      _settings.enableSmartRouteNotifications,
-    );
+    await _syncSmartRouteNotifications();
     await desktopDiscordPresenceService.refresh(settings: _settings);
     await _syncWearOsSnapshot(requestRefresh: false);
   }
@@ -2224,8 +2223,73 @@ class AppController extends ChangeNotifier {
   Future<void> updateEnableSmartRouteNotifications(bool value) async {
     _settings = _settings.copyWith(enableSmartRouteNotifications: value);
     await _persistSettings();
-    await AndroidHomeIntegration.syncSmartRouteNotifications(value);
+    await _syncSmartRouteNotifications();
     notifyListeners();
+  }
+
+  /// Works out when a reminder is worth sending and hands that to the
+  /// platform, which only has to follow it.
+  ///
+  /// The plan is written before the scheduler is told anything, because the
+  /// scheduler decides whether to run at all by looking for one.
+  Future<void> _syncSmartRouteNotifications() async {
+    final enabled = _settings.enableSmartRouteNotifications;
+    if (AndroidHomeIntegration.supportsSmartRouteNotifications) {
+      if (enabled) {
+        await ensureRecommendationDataReady();
+        final now = DateTime.now();
+        await _resolveSmartRouteIds(now);
+        await storage.saveSmartRoutePlan(
+          SmartRoutePlanner.build(
+            profiles: _routeUsageProfiles,
+            routeIdOf: (profile) => _smartRouteIds[_smartRouteIdKey(profile)],
+            reminders: SmartRouteReminder.parseLog(
+              await AndroidHomeIntegration.loadSmartRouteReminderLog(),
+            ),
+            favoriteProfiles: _favoriteUsageProfiles,
+            favorites: _favoriteGroups.values
+                .expand((group) => group)
+                .whereType<FavoriteStop>(),
+            now: now,
+          ).toJson(),
+        );
+      } else {
+        await storage.clearSmartRoutePlan();
+      }
+    }
+    await AndroidHomeIntegration.syncSmartRouteNotifications(enabled);
+  }
+
+  static String _smartRouteIdKey(RouteUsageProfile profile) =>
+      '${profile.provider.name}:${profile.routeKey}';
+
+  /// Looks up the route ids the plan will need. Only the route key is kept
+  /// with the usage history, and the background worker cannot reverse it.
+  ///
+  /// A route that cannot be found is asked about again next time rather than
+  /// remembered as missing: its database may simply not be downloaded yet.
+  Future<void> _resolveSmartRouteIds(DateTime now) async {
+    final wanted = <BusProvider, Set<int>>{};
+    for (final profile in _routeUsageProfiles) {
+      if (!_smartRouteIds.containsKey(_smartRouteIdKey(profile)) &&
+          SmartRoutePlanner.isCandidate(profile, now)) {
+        (wanted[profile.provider] ??= <int>{}).add(profile.routeKey);
+      }
+    }
+    for (final entry in wanted.entries) {
+      try {
+        final routeIds = await repository.routeIdsForRouteKeys(
+          entry.key,
+          entry.value,
+        );
+        routeIds.forEach((routeKey, routeId) {
+          _smartRouteIds['${entry.key.name}:$routeKey'] = routeId;
+        });
+      } catch (_) {
+        // No database for that provider right now; its routes are left out
+        // of this plan and tried again with the next one.
+      }
+    }
   }
 
   Future<void> updateKeepScreenAwakeOnRouteDetail(bool value) async {
@@ -3062,6 +3126,8 @@ class AppController extends ChangeNotifier {
       profiles: const [],
       destinationChoices: const [],
     );
+    // Which routes a reminder went out for, and when, was learned too.
+    await AndroidHomeIntegration.forgetSmartRouteReminders();
   }
 
   Future<void> clearRouteSelectionHistory() async {
@@ -3254,11 +3320,17 @@ class AppController extends ChangeNotifier {
         );
   }
 
+  /// Records that a route page was open long enough to count as a use.
+  ///
+  /// [stopId] is the stop the rider was looking at, if the page knew one. It
+  /// is what lets a reminder watch the right stop without the device's
+  /// location.
   Future<void> recordRouteVisit(
     RouteSummary route, {
     required BusProvider provider,
     DateTime? openedAt,
     int? pathId,
+    int? stopId,
   }) async {
     final timestamp = openedAt ?? DateTime.now();
     await ensureRouteHistoryReady();
@@ -3267,16 +3339,18 @@ class AppController extends ChangeNotifier {
       provider: provider,
       routeKey: route.routeKey,
       pathId: pathId,
-      record: (profile) =>
-          profile.recordOpen(timestamp, routeName: route.routeName),
-      create: () => RouteUsageProfile(
+      record: (profile) => profile.recordOpen(
+        timestamp,
+        routeName: route.routeName,
+        stopId: stopId,
+      ),
+      create: () => _newlyOpenedRouteProfile(
         provider: provider,
         routeKey: route.routeKey,
         pathId: pathId,
         routeName: route.routeName,
-        totalOpens: 1,
-        lastOpenedAtMs: timestamp.millisecondsSinceEpoch,
-        hourlyOpens: <int, int>{timestamp.hour: 1},
+        timestamp: timestamp,
+        stopId: stopId,
       ),
     );
     await _persistSmartRouteProfiles(
@@ -3290,8 +3364,27 @@ class AppController extends ChangeNotifier {
       timestamp: timestamp,
       selection: false,
       pathId: pathId,
+      stopId: stopId,
     );
     await analytics.logRouteVisit(provider: provider, routeKey: route.routeKey);
+  }
+
+  RouteUsageProfile _newlyOpenedRouteProfile({
+    required BusProvider provider,
+    required int routeKey,
+    required int? pathId,
+    required String routeName,
+    required DateTime timestamp,
+    required int? stopId,
+  }) {
+    return RouteUsageProfile(
+      provider: provider,
+      routeKey: routeKey,
+      pathId: pathId,
+      routeName: routeName,
+      totalOpens: 0,
+      lastOpenedAtMs: 0,
+    ).recordOpen(timestamp, stopId: stopId);
   }
 
   List<RouteUsageProfile> _buildUpdatedRouteUsageProfiles({
@@ -3402,9 +3495,7 @@ class AppController extends ChangeNotifier {
     if (stopVisitsChanged) {
       await storage.saveStopVisitProfiles(_stopVisitProfiles);
     }
-    await AndroidHomeIntegration.syncSmartRouteNotifications(
-      _settings.enableSmartRouteNotifications,
-    );
+    await _syncSmartRouteNotifications();
     unawaited(_pushSmartSuggestionToWearOsIfNeeded());
     notifyListeners();
   }
@@ -4029,6 +4120,7 @@ class AppController extends ChangeNotifier {
     required DateTime timestamp,
     required bool selection,
     required int? pathId,
+    int? stopId,
   }) async {
     if (!_tracksDeviceRouteHistory) return;
     final current = _profilesFromRouteHistoryDevice(
@@ -4040,19 +4132,25 @@ class AppController extends ChangeNotifier {
       pathId: pathId,
       record: (profile) => selection
           ? profile.recordSelection(timestamp, routeName: routeName)
-          : profile.recordOpen(timestamp, routeName: routeName),
-      create: () => RouteUsageProfile(
-        provider: provider,
-        routeKey: routeKey,
-        pathId: pathId,
-        routeName: routeName.trim(),
-        totalOpens: selection ? 0 : 1,
-        lastOpenedAtMs: selection ? 0 : timestamp.millisecondsSinceEpoch,
-        hourlyOpens: selection ? const {} : {timestamp.hour: 1},
-        selectionTimestampsMs: selection
-            ? [timestamp.millisecondsSinceEpoch]
-            : const [],
-      ),
+          : profile.recordOpen(timestamp, routeName: routeName, stopId: stopId),
+      create: () => selection
+          ? RouteUsageProfile(
+              provider: provider,
+              routeKey: routeKey,
+              pathId: pathId,
+              routeName: routeName.trim(),
+              totalOpens: 0,
+              lastOpenedAtMs: 0,
+              selectionTimestampsMs: [timestamp.millisecondsSinceEpoch],
+            )
+          : _newlyOpenedRouteProfile(
+              provider: provider,
+              routeKey: routeKey,
+              pathId: pathId,
+              routeName: routeName.trim(),
+              timestamp: timestamp,
+              stopId: stopId,
+            ),
       source: current,
     );
     await _updateRouteHistoryDevicePayload(profiles: next);
@@ -4222,6 +4320,8 @@ class AppController extends ChangeNotifier {
     var lastOpenedAtMs = 0;
     final hourlyOpens = <int, int>{};
     final selections = <int>[];
+    final visits = <RouteVisit>[];
+    int? legacyAsOfMs;
     for (final profile in profiles) {
       totalOpens += profile.totalOpens;
       if (profile.lastOpenedAtMs >= lastOpenedAtMs) {
@@ -4232,6 +4332,14 @@ class AppController extends ChangeNotifier {
         hourlyOpens[hour] = (hourlyOpens[hour] ?? 0) + count;
       });
       selections.addAll(profile.selectionTimestampsWithin());
+      visits.addAll(profile.visits);
+      // The counters are summed, so they are as recent as the most recent
+      // device that still relies on them.
+      final profileLegacyAsOfMs = profile.legacyAsOfMs;
+      if (profileLegacyAsOfMs != null &&
+          (legacyAsOfMs == null || profileLegacyAsOfMs > legacyAsOfMs)) {
+        legacyAsOfMs = profileLegacyAsOfMs;
+      }
     }
     selections.sort();
     return RouteUsageProfile(
@@ -4243,6 +4351,11 @@ class AppController extends ChangeNotifier {
       lastOpenedAtMs: lastOpenedAtMs,
       hourlyOpens: hourlyOpens,
       selectionTimestampsMs: selections,
+      visits: RouteUsageProfile.normalizeVisits(
+        visits,
+        nowMs: DateTime.now().millisecondsSinceEpoch,
+      ),
+      legacyAsOfMs: legacyAsOfMs,
     );
   }
 

@@ -17,6 +17,7 @@ class StorageService {
   static const _favoriteUsageProfilesKey = 'favorite_usage_profiles';
   static const _stopVisitProfilesKey = 'stop_visit_profiles';
   static const _destinationChoiceProfilesKey = 'destination_choice_profiles';
+  static const _smartRoutePlanKey = 'smart_route_plan';
   static const _announcementLocalStateKey = 'announcement_local_state';
   static const _settingsLastModifiedAtKey = 'app_settings_last_modified_at_ms';
   static const _favoritesLastModifiedAtKey =
@@ -339,6 +340,19 @@ class StorageService {
       _stopVisitProfilesKey,
       jsonEncode(profiles.map((entry) => entry.toJson()).toList()),
     );
+  }
+
+  /// The reminder plan is read by the Android background worker straight out
+  /// of the preferences file, under this key with the plugin's `flutter.`
+  /// prefix. Renaming it means renaming it there as well.
+  Future<void> saveSmartRoutePlan(Map<String, dynamic> plan) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_smartRoutePlanKey, jsonEncode(plan));
+  }
+
+  Future<void> clearSmartRoutePlan() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_smartRoutePlanKey);
   }
 
   Future<List<DestinationChoiceProfile>> loadDestinationChoiceProfiles() async {
