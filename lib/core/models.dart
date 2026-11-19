@@ -1684,6 +1684,9 @@ class RouteUsageProfile {
     );
   }
 
+  /// Forgets the taps, and which stop each visit was at: clearing selection
+  /// history promises to clear stop usage too. When each visit was is kept,
+  /// along with the open counts it stands for.
   RouteUsageProfile clearSelections() {
     return RouteUsageProfile(
       provider: provider,
@@ -1693,7 +1696,7 @@ class RouteUsageProfile {
       totalOpens: totalOpens,
       lastOpenedAtMs: lastOpenedAtMs,
       hourlyOpens: hourlyOpens,
-      visits: visits,
+      visits: [for (final visit in visits) RouteVisit(atMs: visit.atMs)],
       legacyAsOfMs: legacyAsOfMs,
     );
   }

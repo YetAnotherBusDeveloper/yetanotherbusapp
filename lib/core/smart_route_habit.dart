@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'models.dart';
@@ -93,6 +94,97 @@ class RouteHabitEstimate {
 /// A reminder that was shown for a route: when, and the service minute it was
 /// sent for — the peak of its window — where that is known.
 typedef RouteReminderShown = ({int atMs, int? forMinute});
+
+/// A reminder the background check actually showed, as it logs them.
+///
+/// Everything that reads a habit has to be given these — the reminder plan
+/// and the home screen alike. Without them a reminder that did its job looks
+/// like a day the rider stayed home, and a tap on one like a routine that
+/// moved earlier; see [RouteHabitEvidence].
+class SmartRouteReminder {
+  const SmartRouteReminder({
+    required this.provider,
+    required this.routeKey,
+    required this.pathId,
+    required this.atMs,
+    this.peakMinute,
+  });
+
+  final BusProvider provider;
+  final int routeKey;
+  final int pathId;
+  final int atMs;
+
+  /// The peak minute of the plan slot it was shown for.
+  final int? peakMinute;
+
+  bool isFor(RouteUsageProfile profile) =>
+      provider == profile.provider &&
+      routeKey == profile.routeKey &&
+      pathId == profile.pathId;
+
+  /// The ones among [reminders] that were for [profile], in the form
+  /// [RouteHabitEvidence.of] takes them.
+  static List<RouteReminderShown> shownFor(
+    RouteUsageProfile profile,
+    Iterable<SmartRouteReminder> reminders,
+  ) => [
+    for (final reminder in reminders)
+      if (reminder.isFor(profile))
+        (atMs: reminder.atMs, forMinute: reminder.peakMinute),
+  ];
+
+  /// Reads the log the platform side keeps. Anything unreadable is skipped:
+  /// a lost entry only makes the model a little more cautious.
+  static List<SmartRouteReminder> parseLog(String? raw) {
+    if (raw == null || raw.trim().isEmpty) {
+      return const <SmartRouteReminder>[];
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } catch (_) {
+      return const <SmartRouteReminder>[];
+    }
+    if (decoded is! List) {
+      return const <SmartRouteReminder>[];
+    }
+    final providers = BusProvider.values.asNameMap();
+    final reminders = <SmartRouteReminder>[];
+    for (final entry in decoded) {
+      if (entry is! Map) {
+        continue;
+      }
+      // The name the plan gave the worker, and nothing looser: a reminder
+      // that cannot be placed must not be pinned on some other city's route.
+      final provider = providers[entry['provider']];
+      final routeKey = entry['routeKey'];
+      final pathId = entry['pathId'];
+      final atMs = entry['atMs'];
+      final peakMinute = entry['peakMinute'];
+      if (provider == null ||
+          routeKey is! int ||
+          pathId is! int ||
+          atMs is! int ||
+          atMs <= 0) {
+        continue;
+      }
+      reminders.add(
+        SmartRouteReminder(
+          provider: provider,
+          routeKey: routeKey,
+          pathId: pathId,
+          atMs: atMs,
+          peakMinute:
+              peakMinute is int && peakMinute >= 0 && peakMinute < 24 * 60
+              ? peakMinute
+              : null,
+        ),
+      );
+    }
+    return reminders;
+  }
+}
 
 /// The times a route was used, arranged for [RouteHabitModel].
 class RouteHabitEvidence {

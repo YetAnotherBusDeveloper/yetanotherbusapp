@@ -160,6 +160,11 @@ class AppController extends ChangeNotifier {
   /// Route ids already looked up for the reminder plan, by provider and
   /// route key. They do not change, so one lookup per route is enough.
   final Map<String, String> _smartRouteIds = <String, String>{};
+
+  /// The reminder plan being rebuilt, if one is, and whether what it is
+  /// built from has changed since that rebuild began.
+  Future<void>? _smartRoutePlanSync;
+  bool _smartRoutePlanStale = false;
   Object? _lastRecommendationRoutes;
   Object? _lastRecommendationFavorites;
   Object? _lastRecommendationUsage;
@@ -801,6 +806,9 @@ class AppController extends ChangeNotifier {
     if (scheduleSync) {
       _scheduleChangeDrivenAccountSync();
     }
+    // A reminder with no stop of its own watches the route's favourite, so
+    // one that is gone must not be watched any more.
+    await _refreshSmartRoutePlan();
   }
 
   Future<void> _loadAccountSyncLocalState() async {
@@ -846,6 +854,9 @@ class AppController extends ChangeNotifier {
     await storage.saveHistory(_history);
     await storage.saveRouteUsageProfiles(_routeUsageProfiles);
     await storage.saveDestinationChoiceProfiles(_destinationChoiceProfiles);
+    // The plan was made from the merged history, other devices' routes and
+    // all. Those are not this device's to be reminded of any more.
+    await _refreshSmartRoutePlan();
   }
 
   Future<void> setAccountSyncEnabled(
@@ -1291,7 +1302,9 @@ class AppController extends ChangeNotifier {
     await AndroidHomeIntegration.updateFavoriteWidgetAutoRefreshMinutes(
       _settings.favoriteWidgetAutoRefreshMinutes,
     );
-    await _syncSmartRouteNotifications();
+    // Not allowed to fail the rest: applying a synced document still has its
+    // bookkeeping to do after this.
+    await _refreshSmartRoutePlan(evenIfDisabled: true);
     await desktopDiscordPresenceService.refresh(settings: _settings);
     await _syncWearOsSnapshot(requestRefresh: false);
   }
@@ -2230,35 +2243,119 @@ class AppController extends ChangeNotifier {
   /// Works out when a reminder is worth sending and hands that to the
   /// platform, which only has to follow it.
   ///
+  /// Called whenever something the plan is built from changes. Rebuilds run
+  /// one at a time, and one that finds its inputs changed while it was
+  /// waiting writes nothing: the rebuild queued behind it will. Otherwise a
+  /// rebuild started before the rider cleared their history could finish
+  /// after the clearing and write the old plan back.
+  ///
+  /// The returned future completes once a rebuild that started after this
+  /// call has finished.
+  Future<void> _syncSmartRouteNotifications() {
+    _smartRoutePlanStale = true;
+    // Started as a microtask so the drain is recorded before any of it runs:
+    // a drain that somehow finished at once would otherwise clear the field
+    // before it was set, and leave every later call waiting on a finished
+    // drain instead of starting a rebuild.
+    return _smartRoutePlanSync ??= Future<void>.microtask(
+      _drainSmartRoutePlanSyncs,
+    );
+  }
+
+  Future<void> _drainSmartRoutePlanSyncs() async {
+    try {
+      while (true) {
+        _smartRoutePlanStale = false;
+        try {
+          await _syncSmartRouteNotificationsOnce();
+        } catch (_) {
+          // A rebuild that has been overtaken does not get the last word,
+          // failure included: the one after it may well succeed.
+          if (!_smartRoutePlanStale) rethrow;
+        }
+        if (!_smartRoutePlanStale) return;
+      }
+    } finally {
+      // Cleared in the same step as the last check of the flag, so no call
+      // can join a drain that has already decided to stop.
+      _smartRoutePlanSync = null;
+    }
+  }
+
+  /// Rebuilds the reminder plan after a change made for some other reason —
+  /// favourites, a database, logging out, synced settings. That change has
+  /// already happened and is not to be reported as failed because the plan
+  /// could not follow it; a rebuild that fails leaves no plan rather than an
+  /// outdated one.
+  ///
+  /// With reminders off there is no plan to keep up to date, unless the
+  /// change may be the one that turned them off: [evenIfDisabled].
+  Future<void> _refreshSmartRoutePlan({bool evenIfDisabled = false}) async {
+    if (!evenIfDisabled && !_settings.enableSmartRouteNotifications) {
+      return;
+    }
+    try {
+      await _syncSmartRouteNotifications();
+    } catch (_) {
+      // See above.
+    }
+  }
+
   /// The plan is written before the scheduler is told anything, because the
   /// scheduler decides whether to run at all by looking for one.
-  Future<void> _syncSmartRouteNotifications() async {
+  Future<void> _syncSmartRouteNotificationsOnce() async {
     final enabled = _settings.enableSmartRouteNotifications;
     if (AndroidHomeIntegration.supportsSmartRouteNotifications) {
-      if (enabled) {
-        await ensureRecommendationDataReady();
-        final now = DateTime.now();
-        await _resolveSmartRouteIds(now);
-        await storage.saveSmartRoutePlan(
-          SmartRoutePlanner.build(
+      try {
+        if (enabled) {
+          await ensureRecommendationDataReady();
+          final now = DateTime.now();
+          await _resolveSmartRouteIds(now);
+          final reminders = await _loadSmartRouteReminders();
+          if (_smartRoutePlanStale) {
+            return;
+          }
+          // Read only now, after the last wait, so the plan is of what is
+          // current rather than of what was when this rebuild began.
+          final plan = SmartRoutePlanner.build(
             profiles: _routeUsageProfiles,
             routeIdOf: (profile) => _smartRouteIds[_smartRouteIdKey(profile)],
-            reminders: SmartRouteReminder.parseLog(
-              await AndroidHomeIntegration.loadSmartRouteReminderLog(),
-            ),
+            reminders: reminders,
             favoriteProfiles: _favoriteUsageProfiles,
             favorites: _favoriteGroups.values
                 .expand((group) => group)
                 .whereType<FavoriteStop>(),
             now: now,
-          ).toJson(),
-        );
-      } else {
-        await storage.clearSmartRoutePlan();
+          );
+          await storage.saveSmartRoutePlan(plan.toJson());
+        } else {
+          await storage.clearSmartRoutePlan();
+        }
+      } catch (_) {
+        // A plan that could not be brought up to date is one about routes,
+        // stops or a history that may no longer be the rider's. None at all
+        // is the safer thing to leave behind.
+        try {
+          await storage.clearSmartRoutePlan();
+          await AndroidHomeIntegration.syncSmartRouteNotifications(enabled);
+        } catch (_) {
+          // The error worth reporting is the first one.
+        }
+        rethrow;
       }
+    }
+    if (_smartRoutePlanStale) {
+      return;
     }
     await AndroidHomeIntegration.syncSmartRouteNotifications(enabled);
   }
+
+  /// The reminders the background check has shown, for anything that reads
+  /// a habit; see [SmartRouteReminder]. None where there is no such check.
+  Future<List<SmartRouteReminder>> _loadSmartRouteReminders() async =>
+      SmartRouteReminder.parseLog(
+        await AndroidHomeIntegration.loadSmartRouteReminderLog(),
+      );
 
   static String _smartRouteIdKey(RouteUsageProfile profile) =>
       '${profile.provider.name}:${profile.routeKey}';
@@ -2595,9 +2692,11 @@ class AppController extends ChangeNotifier {
     }
     _downloadingDatabase = true;
     notifyListeners();
+    var downloadedAny = false;
     try {
       for (final provider in targets) {
         await repository.downloadDatabase(provider);
+        downloadedAny = true;
         _databaseReadyByProvider = {
           ..._databaseReadyByProvider,
           provider: true,
@@ -2614,6 +2713,12 @@ class AppController extends ChangeNotifier {
     } finally {
       _downloadingDatabase = false;
       notifyListeners();
+      if (downloadedAny) {
+        // Routes that could not be named without the database were left out
+        // of the reminder plan. Nothing else would put them back before the
+        // app is next used, which for a reminder may be too late.
+        await _refreshSmartRoutePlan();
+      }
     }
   }
 
@@ -3120,14 +3225,37 @@ class AppController extends ChangeNotifier {
     _favoriteUsageProfiles = const [];
     _stopVisitProfiles = const [];
     _destinationChoiceProfiles = const [];
-    await _persistSmartRouteProfiles();
-    await storage.saveDestinationChoiceProfiles(const []);
-    await _updateRouteHistoryDevicePayload(
-      profiles: const [],
-      destinationChoices: const [],
+    // Each step removes part of what was learned, so each is tried whatever
+    // becomes of the others; the first failure is reported once all have
+    // been. The reminder log goes before the plan is rebuilt, so the new
+    // plan is not made from it.
+    final failures = <(Object, StackTrace)>[];
+    Future<void> attempt(Future<void> Function() step) async {
+      try {
+        await step();
+      } catch (error, stackTrace) {
+        failures.add((error, stackTrace));
+      }
+    }
+
+    await attempt(() => storage.saveRouteUsageProfiles(const []));
+    await attempt(() => storage.saveFavoriteUsageProfiles(const []));
+    await attempt(() => storage.saveStopVisitProfiles(const []));
+    await attempt(() => storage.saveDestinationChoiceProfiles(const []));
+    await attempt(
+      () => _updateRouteHistoryDevicePayload(
+        profiles: const [],
+        destinationChoices: const [],
+      ),
     );
     // Which routes a reminder went out for, and when, was learned too.
-    await AndroidHomeIntegration.forgetSmartRouteReminders();
+    await attempt(AndroidHomeIntegration.forgetSmartRouteReminders);
+    await attempt(_syncSmartRouteNotifications);
+    unawaited(_pushSmartSuggestionToWearOsIfNeeded());
+    notifyListeners();
+    if (failures.isNotEmpty) {
+      Error.throwWithStackTrace(failures.first.$1, failures.first.$2);
+    }
   }
 
   Future<void> clearRouteSelectionHistory() async {
@@ -3495,7 +3623,7 @@ class AppController extends ChangeNotifier {
     if (stopVisitsChanged) {
       await storage.saveStopVisitProfiles(_stopVisitProfiles);
     }
-    await _syncSmartRouteNotifications();
+    await _refreshSmartRoutePlan();
     unawaited(_pushSmartSuggestionToWearOsIfNeeded());
     notifyListeners();
   }
@@ -3554,6 +3682,7 @@ class AppController extends ChangeNotifier {
           .expand((group) => group)
           .whereType<FavoriteStop>()
           .where((favorite) => favorite.provider == _settings.provider),
+      reminders: await _loadSmartRouteReminders(),
       now: now ?? DateTime.now(),
       position: position,
     );
@@ -3584,6 +3713,7 @@ class AppController extends ChangeNotifier {
           .expand((group) => group)
           .whereType<FavoriteStop>()
           .where((favorite) => favorite.provider == _settings.provider),
+      reminders: await _loadSmartRouteReminders(),
       now: now ?? DateTime.now(),
       position: position,
       limit: limit,

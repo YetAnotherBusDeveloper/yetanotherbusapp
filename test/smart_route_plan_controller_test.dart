@@ -1,14 +1,24 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:taiwanbus_flutter/core/account_sync_models.dart';
+import 'package:taiwanbus_flutter/core/account_sync_service.dart';
+import 'package:taiwanbus_flutter/core/app_analytics.dart';
+import 'package:taiwanbus_flutter/core/app_build_info.dart';
 import 'package:taiwanbus_flutter/core/app_controller.dart';
+import 'package:taiwanbus_flutter/core/app_update_installer.dart';
+import 'package:taiwanbus_flutter/core/app_update_service.dart';
+import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
+import 'package:taiwanbus_flutter/core/storage_service.dart';
 
-import 'support/ad_test_controller.dart';
 import 'support/route_usage_fixtures.dart';
 
 class _Repository extends BusRepository {
@@ -16,12 +26,16 @@ class _Repository extends BusRepository {
   final List<String> lookups = [];
   bool databaseMissing = false;
 
+  /// While set, lookups wait for it: a rebuild can be held mid-way.
+  Completer<void>? gate;
+
   @override
   Future<Map<int, String>> routeIdsForRouteKeys(
     BusProvider provider,
     Set<int> routeKeys,
   ) async {
     lookups.add('${provider.name}:${(routeKeys.toList()..sort()).join(',')}');
+    await gate?.future;
     if (databaseMissing) {
       throw DatabaseNotReadyException('尚未下載路線資料庫。');
     }
@@ -29,6 +43,83 @@ class _Repository extends BusRepository {
       for (final routeKey in routeKeys)
         if (routeKey != 404) routeKey: '${provider.prefix}$routeKey',
     };
+  }
+
+  @override
+  Future<void> downloadDatabase(BusProvider provider) async {
+    databaseMissing = false;
+  }
+
+  @override
+  Future<bool> databaseExists(BusProvider provider) async => !databaseMissing;
+
+  @override
+  Future<RouteDetailData> getCompleteBusInfo(
+    int routeKey, {
+    required BusProvider provider,
+    String? routeIdHint,
+    String? routeNameHint,
+  }) async => RouteDetailData(
+    route: RouteSummary(
+      sourceProvider: provider.name,
+      hashMd5: '',
+      routeKey: routeKey,
+      routeId: '${provider.prefix}$routeKey',
+      routeName: '307',
+      officialRouteName: '307',
+      description: '',
+      category: '',
+      sequence: 0,
+      rtrip: 0,
+    ),
+    paths: [PathInfo(routeKey: routeKey, pathId: 0, name: '往市區')],
+    stopsByPath: {
+      0: [
+        StopInfo(
+          routeKey: routeKey,
+          pathId: 0,
+          stopId: 1,
+          stopName: '站',
+          sequence: 1,
+          lon: 120.3,
+          lat: 22.6,
+          sec: 300,
+        ),
+      ],
+    },
+    hasLiveData: true,
+  );
+}
+
+/// Logging out without asking a server about it.
+class _OfflineAuthService extends AuthService {
+  @override
+  Future<void> logout() async {}
+}
+
+/// Fails to write the reminder plan while [failPlan] is set.
+class _Storage extends StorageService {
+  bool failPlan = false;
+  bool failProfiles = false;
+
+  /// Every plan written, in order.
+  final List<Map<String, dynamic>> savedPlans = [];
+
+  @override
+  Future<void> saveSmartRoutePlan(Map<String, dynamic> plan) async {
+    if (failPlan) {
+      throw StateError('disk full');
+    }
+    savedPlans.add(plan);
+    await super.saveSmartRoutePlan(plan);
+  }
+
+  @override
+  Future<void> saveRouteUsageProfiles(List<RouteUsageProfile> profiles) async {
+    if (failProfiles) {
+      throw StateError('disk full');
+    }
+    await super.saveRouteUsageProfiles(profiles);
   }
 }
 
@@ -57,6 +148,7 @@ void main() {
   void seed({
     List<RouteUsageProfile> profiles = const [],
     bool notifications = false,
+    Map<String, Object> extra = const {},
   }) {
     SharedPreferences.setMockInitialValues({
       'flutter.route_usage_profiles': jsonEncode([
@@ -66,6 +158,7 @@ void main() {
         ...AppSettings.defaults().toJson(),
         'enableSmartRouteNotifications': notifications,
       }),
+      ...extra,
     });
   }
 
@@ -76,8 +169,39 @@ void main() {
     return raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
   }
 
-  Future<AppController> start(_Repository repository) async {
-    final controller = await createAdTestController(repository: repository);
+  Future<List<Map<String, dynamic>>> storedSlots() async =>
+      ((await storedPlan())!['slots'] as List).cast<Map<String, dynamic>>();
+
+  Future<AppController> start(
+    _Repository repository, {
+    StorageService? storage,
+    AuthService? authService,
+  }) async {
+    const buildInfo = AppBuildInfo(
+      version: '1.0.0',
+      buildNumber: '1',
+      gitSha: 'test',
+      defaultUpdateChannel: AppUpdateChannel.release,
+    );
+    final client = MockClient((_) async => http.Response('{}', 200));
+    final previousPlatform = debugDefaultTargetPlatformOverride;
+    final AppAnalytics analytics;
+    try {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      analytics = await AppAnalytics.initialize();
+    } finally {
+      debugDefaultTargetPlatformOverride = previousPlatform;
+    }
+    final controller = AppController(
+      repository: repository,
+      storage: storage ?? StorageService(),
+      analytics: analytics,
+      buildInfo: buildInfo,
+      appUpdateService: AppUpdateService(buildInfo: buildInfo, client: client),
+      appUpdateInstaller: createAppUpdateInstaller(),
+      authService: authService ?? AuthService(),
+      accountSyncService: AccountSyncService(client: client),
+    );
     addTearDown(controller.dispose);
     await controller.initializeForFirstFrame();
     return controller;
@@ -405,5 +529,251 @@ void main() {
     await controller.clearRouteUsageProfiles();
 
     expect(homeCalls, isEmpty);
+  });
+
+  test(
+    'a rebuild overtaken by clearing the history does not write it back',
+    () async {
+      seed(profiles: [commute()], notifications: true);
+      final repository = _Repository();
+      final storage = _Storage();
+      final controller = await start(repository, storage: storage);
+      await controller.updateEnableSmartRouteNotifications(true);
+      expect(await storedSlots(), isNotEmpty);
+
+      // A rebuild that has read the history and is waiting on the platform
+      // when the rider clears it.
+      final logRequested = Completer<void>();
+      final releaseLog = Completer<String?>();
+      messenger.setMockMethodCallHandler(_homeChannel, (call) async {
+        homeCalls.add(call);
+        if (call.method == 'getSmartRouteReminderLog' &&
+            !logRequested.isCompleted) {
+          logRequested.complete();
+          return releaseLog.future;
+        }
+        return null;
+      });
+      final slowRebuild = controller.updateEnableSmartRouteNotifications(true);
+      await logRequested.future;
+      homeCalls.clear();
+      final plansBefore = storage.savedPlans.length;
+      final clearing = controller.clearRouteUsageProfiles();
+      // Until the clearing has done all it can without the rebuild.
+      for (
+        var turn = 0;
+        turn < 100 &&
+            !homeCalls.any(
+              (call) => call.method == 'forgetSmartRouteReminders',
+            );
+        turn++
+      ) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      await Future<void>.delayed(Duration.zero);
+      releaseLog.complete('[]');
+      await slowRebuild;
+      await clearing;
+
+      expect(await storedSlots(), isEmpty);
+      // Only the rebuild that began after the clearing wrote anything: the
+      // overtaken one, made from a reminder log read before the clearing,
+      // never reached the worker even for a moment.
+      expect(storage.savedPlans.length - plansBefore, 1);
+      final methods = homeCalls.map((call) => call.method).toList();
+      // The reminder log went before the plan that was written after it.
+      expect(
+        methods.indexOf('forgetSmartRouteReminders'),
+        lessThan(methods.lastIndexOf('getSmartRouteReminderLog')),
+      );
+      expect(syncedStates().last, isTrue);
+    },
+  );
+
+  test('clearing goes on past a step that fails, then reports it', () async {
+    seed(profiles: [commute()], notifications: true);
+    final storage = _Storage();
+    final controller = await start(_Repository(), storage: storage);
+    await controller.updateEnableSmartRouteNotifications(true);
+    expect(await storedSlots(), isNotEmpty);
+    homeCalls.clear();
+
+    storage.failProfiles = true;
+    await expectLater(controller.clearRouteUsageProfiles(), throwsStateError);
+
+    // The steps after the failed one were still taken.
+    expect(
+      homeCalls.map((call) => call.method),
+      contains('forgetSmartRouteReminders'),
+    );
+    expect(await storedSlots(), isEmpty);
+  });
+
+  test(
+    'a failed plan write leaves no plan and still clears everything',
+    () async {
+      seed(profiles: [commute()], notifications: true);
+      final storage = _Storage();
+      final controller = await start(_Repository(), storage: storage);
+      await controller.updateEnableSmartRouteNotifications(true);
+      expect(await storedSlots(), isNotEmpty);
+      homeCalls.clear();
+
+      storage.failPlan = true;
+      await expectLater(controller.clearRouteUsageProfiles(), throwsStateError);
+
+      expect(controller.routeUsageProfiles, isEmpty);
+      expect(await StorageService().loadRouteUsageProfiles(), isEmpty);
+      expect(
+        homeCalls.map((call) => call.method),
+        contains('forgetSmartRouteReminders'),
+      );
+      // What was there is gone rather than left to remind of a cleared
+      // history.
+      expect(await storedPlan(), isNull);
+      expect(syncedStates(), isNotEmpty);
+    },
+  );
+
+  test('a favourite removed is no longer a stop to watch', () async {
+    // A route opened without a stop, whose only favourite is what a
+    // reminder would watch.
+    seed(
+      profiles: [
+        profileWithVisits(
+          daysBefore(DateTime.now(), count: 15, hour: 7, minute: 40),
+          provider: BusProvider.khh,
+        ),
+      ],
+      notifications: true,
+    );
+    final controller = await start(_Repository());
+    const favorite = FavoriteStop(
+      provider: BusProvider.khh,
+      routeKey: 101,
+      pathId: 0,
+      stopId: 4004,
+    );
+    await controller.addFavoriteStop(favorite);
+    expect((await storedSlots()).map((slot) => slot['stopId']).toSet(), {4004});
+
+    await controller.removeFavoriteStop(
+      AppController.defaultFavoriteGroupName,
+      favorite,
+    );
+
+    expect((await storedSlots()).map((slot) => slot['stopId']).toSet(), {null});
+  });
+
+  test(
+    'routes left out for want of a database come back once it is downloaded',
+    () async {
+      seed(profiles: [commute()], notifications: true);
+      final repository = _Repository()..databaseMissing = true;
+      final controller = await start(repository);
+      await controller.updateEnableSmartRouteNotifications(true);
+      expect(await storedSlots(), isEmpty);
+      homeCalls.clear();
+
+      await controller.downloadProviderDatabases([BusProvider.khh]);
+
+      expect((await storedSlots()).map((slot) => slot['routeId']).toSet(), {
+        'KHH101',
+      });
+      expect(syncedStates(), [true]);
+    },
+  );
+
+  test('logging out takes other devices\' routes out of the plan', () async {
+    final otherDevicesRoute = commute(routeKey: 202);
+    final ownRoute = commute();
+    seed(
+      profiles: [ownRoute, otherDevicesRoute],
+      notifications: true,
+      extra: {
+        'flutter.auth_token': 'token',
+        'flutter.auth_account_id': 'account',
+        'flutter.auth_device_id': 'device',
+        // What this device contributed before it was merged with others.
+        'flutter.account_sync_state:account': jsonEncode(
+          AccountSyncLocalState.empty()
+              .copyWith(
+                routeHistoryDevicePayload: {
+                  'modifiedAtMs': 1,
+                  'history': const [],
+                  'routeUsageProfiles': [ownRoute.toJson()],
+                },
+              )
+              .toJson(),
+        ),
+      },
+    );
+    final controller = await start(
+      _Repository(),
+      authService: _OfflineAuthService(),
+    );
+    await controller.updateEnableSmartRouteNotifications(true);
+    expect((await storedSlots()).map((slot) => slot['routeKey']).toSet(), {
+      101,
+      202,
+    });
+
+    await controller.logoutAuth();
+
+    expect(controller.routeUsageProfiles.map((profile) => profile.routeKey), [
+      101,
+    ]);
+    expect((await storedSlots()).map((slot) => slot['routeKey']).toSet(), {
+      101,
+    });
+  });
+
+  test('the home screen reads the reminders already shown', () async {
+    // Every weekday a reminder went out at 07:26 for a habit centred on
+    // 07:40, and the rider opened the route from it at 07:27. Read without
+    // the reminders, the habit looks like 07:27.
+    final ask = daysBefore(
+      DateTime.now(),
+      count: 1,
+      hour: 7,
+      minute: 35,
+    ).single;
+    final days = daysBefore(ask, count: 10, hour: 7, minute: 27);
+    seed(
+      profiles: [profileWithVisits(days, provider: BusProvider.khh)],
+      extra: {
+        'flutter.app_settings': jsonEncode({
+          ...AppSettings.defaults().toJson(),
+          'provider': 'khh',
+        }),
+      },
+    );
+    final log = jsonEncode([
+      for (final day in days)
+        {
+          'provider': 'khh',
+          'routeKey': 101,
+          'pathId': 0,
+          'atMs': day
+              .subtract(const Duration(minutes: 1))
+              .millisecondsSinceEpoch,
+          'peakMinute': 220,
+        },
+    ]);
+    final controller = await start(_Repository());
+    Future<String> reason({required bool withLog}) async {
+      messenger.setMockMethodCallHandler(_homeChannel, (call) async {
+        homeCalls.add(call);
+        return call.method == 'getSmartRouteReminderLog' && withLog
+            ? log
+            : null;
+      });
+      return (await controller.getSmartRouteSuggestions(
+        now: ask,
+      )).single.reason;
+    }
+
+    expect(await reason(withLog: false), '你平日常在 07:25 左右查看這條路線。');
+    expect(await reason(withLog: true), '你平日常在 07:40 左右查看這條路線。');
   });
 }

@@ -240,6 +240,27 @@ class SmartRouteReminderRulesTest {
     }
 
     @Test
+    fun aReminderGoesOutOnlyIfThePlanAsItIsNowStillHasItDue() {
+        val now = at(8, 7, 40)
+        val read = slot()
+        fun stillDue(plan: SmartRoutePlan?) =
+            SmartRouteReminderRules.stillDue(plan, read, now, taipei)
+
+        assertEquals(read, stillDue(plan(read)))
+        // Cleared, switched off, or rebuilt without the route.
+        assertNull(stillDue(null))
+        assertNull(stillDue(plan()))
+        assertNull(stillDue(plan(slot(routeKey = 202))))
+        // The route was opened while the check was waiting on the feed.
+        assertNull(stillDue(plan(slot(lastActivityAtMs = at(8, 7, 35)))))
+        // The stop it looked up is no longer the one to watch.
+        assertNull(stillDue(plan(slot(stopId = 2002L))))
+        // Rebuilt with the same habit: the new plan's slot is what goes out.
+        val rebuilt = slot(confidence = 0.95, validUntilMs = at(23, 4, 0))
+        assertEquals(rebuilt, stillDue(plan(rebuilt)))
+    }
+
+    @Test
     fun remindersKeepApartAndStopAfterSixInADay() {
         val now = at(8, 7, 40)
         val today = 2026098L
@@ -589,6 +610,96 @@ class SmartRouteReminderRulesTest {
         assertNull(SmartRouteReminderRules.parseLiveStop("[]", 0, "1", feedTime))
         assertNull(SmartRouteReminderRules.parseLiveStop("{}", 0, "1", feedTime))
         assertNull(SmartRouteReminderRules.parseLiveStop("""{"paths": 3}""", 0, "1", feedTime))
+    }
+
+    private fun referencedFeed(reference: String, eta: Int = 190) = """
+        {"paths": [{"pathid": 0, "stops": [
+          {"stopid": "1", "eta": $eta, "message": null, "eta_reference_at": $reference,
+           "etas": [{"eta": $eta}, {"eta": 900}, {"eta": 0}, {"eta": -1}]}
+        ]}]}
+    """.trimIndent()
+
+    @Test
+    fun anEstimateIsCountedDownFromWhenItWasMade() {
+        // The backend serves a cached response as it was: 190 s made fifteen
+        // seconds ago is 175 s now, under the three minutes it takes to be
+        // catchable.
+        val live = SmartRouteReminderRules.parseLiveStop(
+            referencedFeed("${feedTime / 1000 - 15}"),
+            0,
+            "1",
+            feedTime,
+        )!!
+
+        assertEquals(175, live.sec)
+        // A bus at the stop or with no estimate stays as the feed said.
+        assertEquals(listOf(175, 885, 0, -1), live.arrivals)
+        assertEquals(feedTime, live.asOfMs)
+        assertEquals(
+            SmartEtaDecision(etaSeconds = 885, followingEtaSeconds = null),
+            SmartRouteReminderRules.decide(live, distanceMeters = null),
+        )
+    }
+
+    @Test
+    fun theReferenceIsReadInEveryFormTheBackendWritesIt() {
+        val fifteenSecondsAgo = feedTime - 15_000
+        listOf(
+            "${fifteenSecondsAgo / 1000}",
+            "$fifteenSecondsAgo",
+            "\"${fifteenSecondsAgo / 1000}\"",
+            "\"${java.time.Instant.ofEpochMilli(fifteenSecondsAgo)}\"",
+            "\"${java.time.Instant.ofEpochMilli(fifteenSecondsAgo).atOffset(java.time.ZoneOffset.ofHours(8))}\"",
+        ).forEach { reference ->
+            assertEquals(
+                reference,
+                175,
+                SmartRouteReminderRules.parseLiveStop(referencedFeed(reference), 0, "1", feedTime)?.sec,
+            )
+        }
+    }
+
+    @Test
+    fun withoutAReferenceTheEstimateIsTakenAsOfNow() {
+        listOf("null", "\"\"", "\"soon\"", "12").forEach { reference ->
+            assertEquals(
+                reference,
+                190,
+                SmartRouteReminderRules.parseLiveStop(referencedFeed(reference), 0, "1", feedTime)?.sec,
+            )
+        }
+        // Nor does a device clock behind the server's add time to it.
+        assertEquals(
+            190,
+            SmartRouteReminderRules.parseLiveStop(
+                referencedFeed("${feedTime / 1000 + 20}"),
+                0,
+                "1",
+                feedTime,
+            )?.sec,
+        )
+    }
+
+    @Test
+    fun anEstimateMadeTooLongAgoIsNoEstimate() {
+        val fiveMinutes = 5 * 60L
+
+        assertNotNull(
+            SmartRouteReminderRules.parseLiveStop(
+                referencedFeed("${feedTime / 1000 - fiveMinutes}", eta = 900),
+                0,
+                "1",
+                feedTime,
+            ),
+        )
+        assertNull(
+            SmartRouteReminderRules.parseLiveStop(
+                referencedFeed("${feedTime / 1000 - fiveMinutes - 1}", eta = 900),
+                0,
+                "1",
+                feedTime,
+            ),
+        )
     }
 
     // --- whether there is a bus worth mentioning ----------------------------

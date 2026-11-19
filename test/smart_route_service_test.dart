@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
+import 'package:taiwanbus_flutter/core/smart_route_habit.dart';
 import 'package:taiwanbus_flutter/core/smart_route_service.dart';
 
 import 'support/route_usage_fixtures.dart';
@@ -256,16 +257,42 @@ void main() {
       expect(updated.selectionCountAtHour(18, now: now), 2);
     });
 
-    test('clearing selections keeps the visits', () {
+    test('clearing selections keeps the visits but not their stops', () {
       final now = DateTime.now();
       final profile = profileWithVisits([
+        now.subtract(const Duration(days: 2)),
         now.subtract(const Duration(days: 1)),
       ], stopId: 1001).recordSelection(now);
 
       final cleared = profile.clearSelections();
 
       expect(cleared.totalSelectionsAt(now: now), 0);
-      expect(cleared.visits.single.stopId, 1001);
+      // Stop usage was promised gone; when the route was opened was not.
+      expect(
+        cleared.visits.map((visit) => visit.atMs),
+        profile.visits.map((visit) => visit.atMs),
+      );
+      expect(cleared.visits.map((visit) => visit.stopId), [null, null]);
+      expect(cleared.toJson()['visits'], everyElement(isNot(contains('s'))));
+    });
+
+    test('a stop learned before clearing selections is not used after', () {
+      final now = DateTime(2026, 4, 8, 7, 40);
+      final profile = commute(stopId: 1001, before: now);
+      expect(SmartRouteService.learnedStopId(profile, now), 1001);
+
+      final cleared = profile.clearSelections();
+
+      expect(SmartRouteService.learnedStopId(cleared, now), isNull);
+      expect(
+        SmartRouteService.chooseBoardingStopId(
+          profile: cleared,
+          favoriteProfiles: const [],
+          favorites: const [],
+          at: now,
+        ),
+        isNull,
+      );
     });
 
     test('visits and their stops survive being saved and loaded', () {
@@ -496,6 +523,71 @@ void main() {
       );
       expect(ranked.first.estimate.supportDays, 10);
     });
+
+    test('a stop learned before selections were cleared is gone after', () {
+      final now = DateTime(2026, 4, 8, 7, 40);
+      final profile = commute(stopId: 1001, before: now);
+      expect(SmartRouteService.learnedStopId(profile, now), 1001);
+
+      final cleared = profile.clearSelections();
+
+      expect(SmartRouteService.learnedStopId(cleared, now), isNull);
+      expect(
+        SmartRouteService.chooseBoardingStopId(
+          profile: cleared,
+          favoriteProfiles: const [],
+          favorites: const [],
+          at: now,
+        ),
+        isNull,
+      );
+    });
+
+    test('a reminder tapped early does not move the habit earlier', () {
+      // Each weekday a reminder went out at 07:26 for a habit centred on
+      // 07:40, and the route was opened from it at 07:27. An hour later the
+      // habit is still around 07:40, and still recommended.
+      final now = DateTime(2026, 4, 8, 8, 37);
+      final opens = daysBefore(now, count: 10, hour: 7, minute: 27);
+      final profile = profileWithVisits(opens);
+      final reminders = [
+        for (final open in opens)
+          SmartRouteReminder(
+            provider: BusProvider.nwt,
+            routeKey: 101,
+            pathId: 0,
+            atMs: open
+                .subtract(const Duration(minutes: 1))
+                .millisecondsSinceEpoch,
+            peakMinute: 220,
+          ),
+        // Another route's reminders are not this one's.
+        SmartRouteReminder(
+          provider: BusProvider.nwt,
+          routeKey: 102,
+          pathId: 0,
+          atMs: now.millisecondsSinceEpoch,
+          peakMinute: 300,
+        ),
+      ];
+
+      expect(SmartRouteService.rankProfile(profile, now), isNull);
+      final ranking = SmartRouteService.rankProfile(
+        profile,
+        now,
+        reminders: reminders,
+      );
+      expect(ranking?.fromHabit, isTrue);
+      expect(ranking!.estimate.supportDays, 10);
+      expect(
+        SmartRouteService.chooseProfileForTime(
+          [profile],
+          now,
+          reminders: reminders,
+        )?.routeKey,
+        101,
+      );
+    });
   });
 
   group('a profile from before visits were kept', () {
@@ -603,6 +695,58 @@ void main() {
       expect(atFirst, greaterThan(0.9));
       expect(halfway, closeTo(atFirst / 2, 1e-9));
       expect(handedOver, 0);
+    });
+
+    test('is not handed over by use at other times of day', () {
+      // Upgraded with a long morning record, then used only in the evening
+      // for a week: those evenings say nothing about the mornings.
+      final evenings = daysBefore(thisMorning, count: 6, hour: 18, minute: 0);
+      final profile = RouteUsageProfile.fromJson({
+        'provider': 'nwt',
+        'routeKey': 101,
+        'pathId': 0,
+        'routeName': '307',
+        'totalOpens': 8,
+        'lastOpenedAtMs': evenings.first
+            .subtract(const Duration(hours: 11))
+            .millisecondsSinceEpoch,
+        'hourlyOpens': const {'7': 6, '8': 2},
+      });
+      var upgraded = profile;
+      for (final evening in evenings) {
+        upgraded = upgraded.recordOpen(evening);
+      }
+
+      final ranking = SmartRouteService.rankProfile(upgraded, thisMorning);
+
+      // Counted as handed over, the counters would be worth nothing and the
+      // morning route would not be recommended at all.
+      expect(ranking, isNotNull);
+      expect(ranking!.fromHabit, isFalse);
+      expect(
+        ranking.score,
+        greaterThanOrEqualTo(SmartRouteService.minProbabilityForRecommendation),
+      );
+    });
+
+    test('is handed over by use around the same time of day', () {
+      final mornings = daysBefore(
+        thisMorning,
+        count: SmartRouteService.legacyHandoverDays,
+        hour: 7,
+        minute: 20,
+        weekdays: const {1, 2, 3, 4, 5, 6, 7},
+      );
+      var upgraded = legacy(
+        lastOpened: mornings.first.subtract(const Duration(days: 1)),
+      );
+      for (final morning in mornings) {
+        upgraded = upgraded.recordOpen(morning);
+      }
+
+      final ranking = SmartRouteService.rankProfile(upgraded, thisMorning);
+
+      expect(ranking?.fromHabit, isTrue);
     });
 
     test('counters alone do not qualify a profile that has visits', () {

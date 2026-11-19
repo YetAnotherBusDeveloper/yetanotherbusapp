@@ -250,6 +250,7 @@ void _screenTest(
   int initialFrameCount = 5,
   RouteDetailData? Function()? recentDetail,
   RouteDetailData? Function()? initialTopology,
+  int? initialStopId,
 }) {
   testWidgets(name, (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -274,6 +275,7 @@ void _screenTest(
               routeIdHint: 'TPE500',
               routeNameHint: '標題提示',
               initialPathId: 1,
+              initialStopId: initialStopId,
               initialTopologyFuture: initialTopology == null
                   ? null
                   : Future<RouteDetailData?>.value(initialTopology()),
@@ -384,6 +386,32 @@ void main() {
       ),
       isNull,
     );
+  });
+
+  test('a visit is remembered at the stop the rider chose, if any', () {
+    int? stopFor({
+      int? picked,
+      int? opened,
+      int? nearest = 9,
+      double? nearestDistance = 50,
+    }) => usageStopIdFor(
+      pickedStopId: picked,
+      openedStopId: opened,
+      nearestStopId: nearest,
+      nearestDistanceMeters: nearestDistance,
+    );
+
+    // Opened on stop 3, then stop 7 picked before the visit was counted: 7
+    // is what the rider said.
+    expect(stopFor(picked: 7, opened: 3), 7);
+    // A pick that is also the nearest stop is still a pick, however far.
+    expect(stopFor(picked: 9, nearestDistance: 5000), 9);
+    // Otherwise the stop the page was opened on.
+    expect(stopFor(opened: 3), 3);
+    // The nearest stop only when the rider is close enough to board there.
+    expect(stopFor(nearestDistance: 400), 9);
+    expect(stopFor(nearestDistance: 401), isNull);
+    expect(stopFor(nearestDistance: null), isNull);
   });
 
   _screenTest('shows Chinese route, path, and stop names without overflow', (
@@ -885,6 +913,57 @@ void main() {
     expect(sessions.length, greaterThan(sentWhilePaused));
     expect(sessions.last['destinationStopId'], 5);
   });
+
+  _screenTest(
+    'a visit is remembered at the boarding stop picked, not the one opened on',
+    (tester, repository) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      GeolocatorPlatform.instance = _BackgroundLocation();
+      const channel = MethodChannel(
+        'tw.avianjay.taiwanbus.flutter/trip_monitor',
+      );
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method == 'isTripMonitorPaused' ? false : null,
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        );
+      });
+      final controller = AppControllerScope.read(
+        tester.element(find.byType(RouteDetailScreen)),
+      );
+      await controller.updateEnableRouteBackgroundMonitor(true);
+      repository.topologyRequests.single.complete(_detail());
+      repository.primaryRequests.single.complete(_detail(eta: 300));
+      await _frames(tester, 8);
+      repository.familyRequests.single.completer.complete(
+        repository.familyRequests.single.selected,
+      );
+      await _frames(tester);
+
+      // Opened on stop 3; stop 5 chosen before the visit is counted.
+      await tester.tap(find.byTooltip('背景乘車提醒'));
+      await _frames(tester);
+      await tester.tap(find.text('變更上車站'));
+      await _frames(tester);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomSheet),
+          matching: find.text('返程站5'),
+        ),
+      );
+      await _frames(tester, 8);
+      await tester.pump(const Duration(seconds: 10));
+      await _frames(tester, 8);
+
+      final visit = controller.routeUsageProfiles.single.visits.single;
+      expect(visit.stopId, 5);
+    },
+    initialStopId: 3,
+  );
 
   _screenTest('a new refresh rejects late family results', (
     tester,

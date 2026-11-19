@@ -71,6 +71,35 @@ StopInfo? resolveLearnedDestinationStop({
       : null;
 }
 
+/// The stop a visit to a route should be remembered against, if any.
+///
+/// A stop the rider chose comes first, whatever else is known: it is the one
+/// they have said they board at, even when it also happens to be the nearest.
+/// Next the stop the page was opened on. The nearest stop is only a guess at
+/// where they will board, and is trusted only when they are close enough to
+/// be heading for it: the nearest stop to somebody reading the timetable
+/// from across town says nothing about their habits.
+@visibleForTesting
+int? usageStopIdFor({
+  required int? pickedStopId,
+  required int? openedStopId,
+  required int? nearestStopId,
+  required double? nearestDistanceMeters,
+}) {
+  if (pickedStopId != null) {
+    return pickedStopId;
+  }
+  if (openedStopId != null) {
+    return openedStopId;
+  }
+  if (nearestStopId == null ||
+      nearestDistanceMeters == null ||
+      nearestDistanceMeters > SmartRouteService.atStopMeters) {
+    return null;
+  }
+  return nearestStopId;
+}
+
 class RouteDetailScreen extends StatefulWidget {
   const RouteDetailScreen({
     required this.routeKey,
@@ -205,6 +234,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   int? _requestedDestinationStopId;
   int? _boardingStopId;
   String? _boardingStopName;
+
+  /// The boarding stop the rider chose themselves. [_boardingStopId] is also
+  /// filled in from the nearest stop and from the stop the page was opened
+  /// on, and only this tells a choice apart from those.
+  int? _riderPickedBoardingStopId;
   int? _destinationStopId;
   String? _destinationStopName;
   bool _hasExplicitDestinationRequest = false;
@@ -2703,6 +2737,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       }
       _boardingStopId = stop.stopId;
       _boardingStopName = stop.stopName;
+      _riderPickedBoardingStopId = stop.stopId;
     });
     await _applyLearnedDestinationIfPossible();
     await _configureBackgroundTripMonitorIfNeeded();
@@ -2798,6 +2833,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       }
       _boardingStopId = null;
       _boardingStopName = null;
+      _riderPickedBoardingStopId = null;
     });
     await _configureBackgroundTripMonitorIfNeeded();
     if (!mounted) {
@@ -3139,36 +3175,30 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         _currentBoardingCandidateStop();
   }
 
-  /// The stop this visit should be remembered against, if any.
-  ///
-  /// The stop the page was opened on, or one the rider picked, is taken as
-  /// given. The nearest stop is only a guess at where they will board, and is
-  /// trusted only when they are close enough to be heading for it: the
-  /// nearest stop to somebody reading the timetable from across town says
-  /// nothing about their habits.
+  /// The stop this visit should be remembered against, if any; see
+  /// [usageStopIdFor].
   int? _usageStopHint() {
-    final opened = _findStopById(_currentPathStops, widget.initialStopId);
-    if (opened != null) {
-      return opened.stopId;
-    }
-    final stop = _resolvedBoardingStop();
-    if (stop == null) {
-      return null;
-    }
-    if (_currentBoardingCandidateStop()?.stopId != stop.stopId) {
-      return stop.stopId;
-    }
+    final nearest = _currentBoardingCandidateStop();
     final position = _lastPosition;
-    if (position == null || (stop.lat == 0 && stop.lon == 0)) {
-      return null;
-    }
-    final distance = Geolocator.distanceBetween(
-      position.latitude,
-      position.longitude,
-      stop.lat,
-      stop.lon,
+    return usageStopIdFor(
+      pickedStopId: _findStopById(
+        _currentPathStops,
+        _riderPickedBoardingStopId,
+      )?.stopId,
+      openedStopId: _findStopById(_currentPathStops, _requestedStopId)?.stopId,
+      nearestStopId: nearest?.stopId,
+      nearestDistanceMeters:
+          nearest == null ||
+              position == null ||
+              (nearest.lat == 0 && nearest.lon == 0)
+          ? null
+          : Geolocator.distanceBetween(
+              position.latitude,
+              position.longitude,
+              nearest.lat,
+              nearest.lon,
+            ),
     );
-    return distance <= SmartRouteService.atStopMeters ? stop.stopId : null;
   }
 
   String? _buildDesktopDiscordArrivalStatus(AppSettings settings) {

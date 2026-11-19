@@ -233,6 +233,42 @@ void main() {
     }
   });
 
+  test('each provider has a cap of its own', () {
+    // The background check only acts on the provider in use. Fifteen routes
+    // in one city, each surer than the one route in the other, must not
+    // leave that one without a slot.
+    final now = DateTime(2026, 4, 8, 5);
+    final plan = SmartRoutePlanner.build(
+      profiles: [
+        for (var index = 0; index < 15; index++)
+          profileWithVisits(
+            daysBefore(now, count: 15, hour: 6 + index, minute: 0),
+            routeKey: 100 + index,
+            provider: BusProvider.tpe,
+          ),
+        profileWithVisits(
+          daysBefore(now, count: 4, hour: 7, minute: 40),
+          routeKey: 500,
+          provider: BusProvider.khh,
+        ),
+      ],
+      routeIdOf: routeIdOf,
+      now: now,
+    );
+
+    expect(
+      plan.slots.where((slot) => slot.provider == BusProvider.tpe).length,
+      SmartRoutePlanner.maxSlots,
+    );
+    expect(
+      plan.slots
+          .where((slot) => slot.provider == BusProvider.khh)
+          .map((slot) => slot.routeKey)
+          .toSet(),
+      {500},
+    );
+  });
+
   test('a plan drawn up before the usual time does not count today out', () {
     // An evening trip made on Monday, Tuesday and Wednesday. On Thursday
     // morning the evening is still to come; by Thursday night it was missed.

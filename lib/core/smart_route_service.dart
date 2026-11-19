@@ -74,21 +74,27 @@ class SmartRouteService {
 
   static RouteUsageProfile? chooseProfileForTime(
     Iterable<RouteUsageProfile> profiles,
-    DateTime now,
-  ) {
-    final ranked = rankProfilesForTime(profiles, now);
+    DateTime now, {
+    Iterable<SmartRouteReminder> reminders = const <SmartRouteReminder>[],
+  }) {
+    final ranked = rankProfilesForTime(profiles, now, reminders: reminders);
     return ranked.isEmpty ? null : ranked.first.profile;
   }
 
   /// Every profile worth recommending at [now], best first, one per route
   /// and direction.
+  ///
+  /// [reminders] are the ones the background check has shown; see
+  /// [SmartRouteReminder].
   static List<SmartRouteRanking> rankProfilesForTime(
     Iterable<RouteUsageProfile> profiles,
-    DateTime now,
-  ) {
+    DateTime now, {
+    Iterable<SmartRouteReminder> reminders = const <SmartRouteReminder>[],
+  }) {
+    final reminderList = reminders.toList(growable: false);
     final ranked = <SmartRouteRanking>[];
     for (final profile in profiles) {
-      final ranking = rankProfile(profile, now);
+      final ranking = rankProfile(profile, now, reminders: reminderList);
       if (ranking != null) {
         ranked.add(ranking);
       }
@@ -122,21 +128,29 @@ class SmartRouteService {
   /// recommended at all.
   static SmartRouteRanking? rankProfile(
     RouteUsageProfile profile,
-    DateTime now,
-  ) {
+    DateTime now, {
+    Iterable<SmartRouteReminder> reminders = const <SmartRouteReminder>[],
+  }) {
     if (profile.pathId == null) {
       return null;
     }
-    final evidence = RouteHabitEvidence.of(profile, now);
+    final evidence = RouteHabitEvidence.of(
+      profile,
+      now,
+      reminders: SmartRouteReminder.shownFor(profile, reminders),
+    );
     final estimate = evidence.estimateNow(now);
     final habitScore =
         estimate.supportDays >= minSupportDaysForRecommendation &&
             estimate.probability >= minProbabilityForRecommendation
         ? estimate.probability
         : 0.0;
+    // Handed over only as dated use builds up around this time of day. Use
+    // at other times says nothing about whether the counters for this one
+    // are still needed.
     final legacyScore =
         legacyWeight *
-        legacyStrength(profile, now, datedDays: evidence.dayCount);
+        legacyStrength(profile, now, datedDays: estimate.supportDays);
     final baseScore = math.max(habitScore, legacyScore);
     if (baseScore < minProbabilityForRecommendation) {
       return null;
@@ -159,8 +173,9 @@ class SmartRouteService {
   /// [now], 0..1.
   ///
   /// They carry a profile across the upgrade to visit history and then step
-  /// aside: they fade as the moment they describe recedes, and again as dated
-  /// days accumulate to replace them.
+  /// aside: they fade as the moment they describe recedes, and again as
+  /// [datedDays] — days of dated use around the time of [now] — accumulate
+  /// to replace them.
   static double legacyStrength(
     RouteUsageProfile profile,
     DateTime now, {
@@ -483,6 +498,7 @@ class SmartRouteService {
     Iterable<FavoriteUsageProfile> favoriteProfiles =
         const <FavoriteUsageProfile>[],
     Iterable<FavoriteStop> favorites = const <FavoriteStop>[],
+    Iterable<SmartRouteReminder> reminders = const <SmartRouteReminder>[],
     required DateTime now,
     Position? position,
   }) async {
@@ -491,6 +507,7 @@ class SmartRouteService {
       profiles: profiles,
       favoriteProfiles: favoriteProfiles,
       favorites: favorites,
+      reminders: reminders,
       now: now,
       position: position,
       limit: 1,
@@ -504,6 +521,7 @@ class SmartRouteService {
     Iterable<FavoriteUsageProfile> favoriteProfiles =
         const <FavoriteUsageProfile>[],
     Iterable<FavoriteStop> favorites = const <FavoriteStop>[],
+    Iterable<SmartRouteReminder> reminders = const <SmartRouteReminder>[],
     required DateTime now,
     Position? position,
     int limit = 3,
@@ -514,7 +532,7 @@ class SmartRouteService {
 
     final favoriteProfileList = favoriteProfiles.toList(growable: false);
     final favoriteList = favorites.toList(growable: false);
-    final ranked = rankProfilesForTime(profiles, now);
+    final ranked = rankProfilesForTime(profiles, now, reminders: reminders);
     final suggestions = <SmartRouteSuggestion>[];
     var next = 0;
     // Fetch only as many routes at once as there are places left to fill, in

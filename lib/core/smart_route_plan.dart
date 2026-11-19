@@ -1,9 +1,10 @@
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'models.dart';
 import 'smart_route_habit.dart';
 import 'smart_route_service.dart';
+
+export 'smart_route_habit.dart' show SmartRouteReminder;
 
 /// One stretch of one weekday during which a route is worth a reminder.
 class SmartRoutePlanSlot {
@@ -73,81 +74,6 @@ class SmartRoutePlanSlot {
   };
 }
 
-/// A reminder the background check actually showed, as it logs them.
-class SmartRouteReminder {
-  const SmartRouteReminder({
-    required this.provider,
-    required this.routeKey,
-    required this.pathId,
-    required this.atMs,
-    this.peakMinute,
-  });
-
-  final BusProvider provider;
-  final int routeKey;
-  final int pathId;
-  final int atMs;
-
-  /// The [SmartRoutePlanSlot.peakMinute] of the slot it was shown for.
-  final int? peakMinute;
-
-  bool isFor(RouteUsageProfile profile) =>
-      provider == profile.provider &&
-      routeKey == profile.routeKey &&
-      pathId == profile.pathId;
-
-  /// Reads the log the platform side keeps. Anything unreadable is skipped:
-  /// a lost entry only makes the model a little more cautious.
-  static List<SmartRouteReminder> parseLog(String? raw) {
-    if (raw == null || raw.trim().isEmpty) {
-      return const <SmartRouteReminder>[];
-    }
-    final Object? decoded;
-    try {
-      decoded = jsonDecode(raw);
-    } catch (_) {
-      return const <SmartRouteReminder>[];
-    }
-    if (decoded is! List) {
-      return const <SmartRouteReminder>[];
-    }
-    final providers = BusProvider.values.asNameMap();
-    final reminders = <SmartRouteReminder>[];
-    for (final entry in decoded) {
-      if (entry is! Map) {
-        continue;
-      }
-      // The name the plan gave the worker, and nothing looser: a reminder
-      // that cannot be placed must not be pinned on some other city's route.
-      final provider = providers[entry['provider']];
-      final routeKey = entry['routeKey'];
-      final pathId = entry['pathId'];
-      final atMs = entry['atMs'];
-      final peakMinute = entry['peakMinute'];
-      if (provider == null ||
-          routeKey is! int ||
-          pathId is! int ||
-          atMs is! int ||
-          atMs <= 0) {
-        continue;
-      }
-      reminders.add(
-        SmartRouteReminder(
-          provider: provider,
-          routeKey: routeKey,
-          pathId: pathId,
-          atMs: atMs,
-          peakMinute:
-              peakMinute is int && peakMinute >= 0 && peakMinute < 24 * 60
-              ? peakMinute
-              : null,
-        ),
-      );
-    }
-    return reminders;
-  }
-}
-
 /// Everything the background reminder needs to know, worked out ahead of
 /// time so the platform side never has to score a habit itself.
 class SmartRoutePlan {
@@ -195,6 +121,7 @@ class SmartRoutePlanner {
   /// quarter of an hour, so finer than this would be false precision.
   static const int gridMinutes = 10;
 
+  /// The most slots kept for any one provider; see [build].
   static const int maxSlots = 64;
 
   /// Whether [profile] has been used on enough days to be worth planning
@@ -232,11 +159,7 @@ class SmartRoutePlanner {
       final evidence = RouteHabitEvidence.of(
         profile,
         now,
-        reminders: [
-          for (final reminder in reminderList)
-            if (reminder.isFor(profile))
-              (atMs: reminder.atMs, forMinute: reminder.peakMinute),
-        ],
+        reminders: SmartRouteReminder.shownFor(profile, reminderList),
       );
       if (evidence.dayCount < minSupportDays) {
         continue;
@@ -293,17 +216,28 @@ class SmartRoutePlanner {
       }
     }
 
+    // The cap is per provider. The background check only acts on the slots
+    // of the provider in use, so one shared cap would let another city's
+    // habits crowd out every slot the rider could actually be reminded of.
     slots.sort((left, right) => right.confidence.compareTo(left.confidence));
-    final kept = slots.take(maxSlots).toList()
-      ..sort((left, right) {
-        final weekday = left.weekday.compareTo(right.weekday);
-        if (weekday != 0) return weekday;
-        final start = left.startMinute.compareTo(right.startMinute);
-        if (start != 0) return start;
-        final route = left.routeKey.compareTo(right.routeKey);
-        if (route != 0) return route;
-        return left.pathId.compareTo(right.pathId);
-      });
+    final keptPerProvider = <BusProvider, int>{};
+    final kept = <SmartRoutePlanSlot>[];
+    for (final slot in slots) {
+      final count = keptPerProvider[slot.provider] ?? 0;
+      if (count < maxSlots) {
+        keptPerProvider[slot.provider] = count + 1;
+        kept.add(slot);
+      }
+    }
+    kept.sort((left, right) {
+      final weekday = left.weekday.compareTo(right.weekday);
+      if (weekday != 0) return weekday;
+      final start = left.startMinute.compareTo(right.startMinute);
+      if (start != 0) return start;
+      final route = left.routeKey.compareTo(right.routeKey);
+      if (route != 0) return route;
+      return left.pathId.compareTo(right.pathId);
+    });
     return SmartRoutePlan(
       generatedAtMs: now.millisecondsSinceEpoch,
       slots: List.unmodifiable(kept),

@@ -1,5 +1,9 @@
 package tw.avianjay.taiwanbus.flutter
 
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeParseException
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -86,6 +90,8 @@ internal data class SmartLiveStop(
     val msg: String?,
     /** Every timed arrival the feed lists for the stop, in seconds. */
     val arrivals: List<Int> = emptyList(),
+    /** The moment the seconds above count from: when the feed was read. */
+    val asOfMs: Long = 0L,
 )
 
 /** A bus worth telling the rider about. */
@@ -257,6 +263,34 @@ internal object SmartRouteReminderRules {
         return slot.lastActivityAtMs >= windowStartMs - SEEN_BEFORE_WINDOW_MS
     }
 
+    /**
+     * [slot] as [plan] has it now, or null if [plan] no longer has it due —
+     * replaced by a plan without it, with the route opened since, or with a
+     * different stop to watch.
+     *
+     * A run of the background check reads the plan once and then waits on
+     * the location and the network. The app can rewrite the plan in that
+     * time: the rider clears what it learned, or opens the route. What goes
+     * out is decided by the plan as it is when the reminder is about to.
+     */
+    fun stillDue(
+        plan: SmartRoutePlan?,
+        slot: SmartPlanSlot,
+        nowMs: Long,
+        zone: TimeZone = TimeZone.getDefault(),
+    ): SmartPlanSlot? {
+        plan ?: return null
+        val current = dueSlots(plan, slot.provider, nowMs, zone).firstOrNull {
+            it.routeKey == slot.routeKey && it.pathId == slot.pathId
+        } ?: return null
+        // The stop already looked up was picked with the old one in mind.
+        if (current.stopId != slot.stopId) {
+            return null
+        }
+        val minute = serviceClock(nowMs, plan.dayStartHour, zone).minute
+        return current.takeUnless { wasSeenForWindow(it, nowMs, minute) }
+    }
+
     fun mayRemind(history: SmartReminderHistory, nowMs: Long, today: Long): Boolean {
         if (nowMs - history.lastAnyMs < MIN_GAP_MS) {
             return false
@@ -352,11 +386,19 @@ internal object SmartRouteReminderRules {
     }
 
     /**
-     * Reads one stop out of a `/routes/{id}/realtime` response.
+     * Reads one stop out of a `/routes/{id}/realtime` response received at
+     * [nowMs].
      *
      * Only [pathId] is searched. The same stop id can sit on both directions
      * of a route, and the other direction's bus is the one going the wrong
      * way.
+     *
+     * The seconds in the feed count from its `eta_reference_at`, which can be
+     * well before the response arrives: the backend serves a cached response
+     * without counting it down. They are counted down to [nowMs] here, so that
+     * whether a bus can still be caught is judged on how far off it is now.
+     * A feed without that field is taken to be as of [nowMs], as the rest of
+     * the app takes it.
      */
     fun parseLiveStop(
         jsonText: String,
@@ -380,20 +422,33 @@ internal object SmartRouteReminderRules {
                 if (stop["stopid"].asText() != wanted) {
                     continue
                 }
-                if (isOutdated(stop["updated_at"].asLong(), nowMs)) {
+                val referenceMs = stop["eta_reference_at"].asEpochMs()
+                if (isOutdated(stop["updated_at"].asLong(), nowMs) ||
+                    (referenceMs != null && nowMs - referenceMs > MAX_FEED_AGE_MS)
+                ) {
                     return null
                 }
+                // A reference ahead of the device's clock is that clock being
+                // behind, not an estimate from the future.
+                val elapsed = referenceMs?.let { ((nowMs - it) / 1000).toInt() }
+                    ?.coerceAtLeast(0)
+                    ?: 0
+                fun countedDown(seconds: Int?) =
+                    seconds?.let { if (it > 0) max(0, it - elapsed) else it }
                 return SmartLiveStop(
-                    sec = stop["eta"].asInt(),
+                    sec = countedDown(stop["eta"].asInt()),
                     msg = stop["message"].asText(),
                     arrivals = (stop["etas"] as? JsonArray).orEmpty().mapNotNull { eta ->
                         // An arrival that comes with a message is a status,
                         // not a time: "未發車" may still carry a timetable guess.
-                        (eta as? JsonObject)
-                            ?.takeIf { it["message"].asText() == null }
-                            ?.get("eta")
-                            .asInt()
+                        countedDown(
+                            (eta as? JsonObject)
+                                ?.takeIf { it["message"].asText() == null }
+                                ?.get("eta")
+                                .asInt(),
+                        )
                     },
+                    asOfMs = nowMs,
                 )
             }
         }
@@ -406,6 +461,9 @@ internal object SmartRouteReminderRules {
     /**
      * The first bus the rider could still catch, if it is close enough to be
      * worth saying so.
+     *
+     * [liveStop] has to have been read at the moment this is decided; see
+     * [parseLiveStop].
      *
      * A stop that carries a message instead of a time is in some state — not
      * yet departed, not served today, last bus gone — and none of those is a
@@ -525,4 +583,30 @@ internal object SmartRouteReminderRules {
         asText()?.let { it.toLongOrNull() ?: it.toDoubleOrNull()?.toLong() }
 
     private fun JsonElement?.asInt(): Int? = asLong()?.toInt()
+
+    /**
+     * A moment as the backend writes one: epoch seconds or milliseconds, or
+     * an ISO-8601 time. Null when it is none of those.
+     */
+    private fun JsonElement?.asEpochMs(): Long? {
+        val text = asText() ?: return null
+        (text.toLongOrNull() ?: text.toDoubleOrNull()?.toLong())?.let { value ->
+            return when {
+                value > 1_000_000_000_000L -> value
+                value > 1_000_000_000L -> value * 1000
+                else -> null
+            }
+        }
+        return try {
+            OffsetDateTime.parse(text).toInstant().toEpochMilli()
+        } catch (_: DateTimeParseException) {
+            try {
+                // Without an offset it is a time on the device's own clock,
+                // as Dart's DateTime.parse takes it.
+                LocalDateTime.parse(text).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            } catch (_: DateTimeParseException) {
+                null
+            }
+        }
+    }
 }

@@ -54,8 +54,9 @@ class SmartRouteNotificationWorker(
             val now = System.currentTimeMillis()
             if (!SmartRouteReminderRules.hasLiveSlots(plan, now)) {
                 // Every habit in the plan has lapsed. Nothing can fire until
-                // the app is opened and writes a new one, which reschedules.
-                SmartRouteNotificationScheduler.cancel(applicationContext)
+                // the app is opened and writes a new one, which reschedules —
+                // unless it already has, which this checks under the lock.
+                SmartRouteNotificationScheduler.cancelIfNothingLive(applicationContext)
                 return Result.success()
             }
             val dueSlots = SmartRouteReminderRules.dueSlots(plan, settings.provider, now)
@@ -94,32 +95,34 @@ class SmartRouteNotificationWorker(
                     routeId = slot.routeId,
                     pathId = slot.pathId,
                     rawStopId = choice.stop.rawStopId,
-                    nowMs = now,
                 ) ?: continue
                 val decision = SmartRouteReminderRules.decide(liveStop, choice.distanceMeters)
                     ?: continue
 
-                SmartRouteNotificationSupport.showNotification(
+                // Whether or not it went out, this run is done. The next one
+                // starts again from the plan as it is then.
+                SmartRouteNotificationSupport.remind(
                     context = applicationContext,
                     slot = slot,
                     stop = choice.stop,
-                    text = SmartRouteReminderRules.buildText(
-                        routeName = slot.routeName,
-                        pathName = routeData.pathName,
-                        stopName = choice.stop.stopName,
-                        decision = decision,
-                        distanceMeters = choice.distanceMeters,
-                        slot = slot,
-                        dayStartHour = plan.dayStartHour,
-                        nowMs = now,
-                    ),
+                    text = { current ->
+                        SmartRouteReminderRules.buildText(
+                            routeName = current.routeName,
+                            pathName = routeData.pathName,
+                            stopName = choice.stop.stopName,
+                            decision = decision,
+                            distanceMeters = choice.distanceMeters,
+                            slot = current,
+                            dayStartHour = plan.dayStartHour,
+                            // The arrival time is counted from when the feed
+                            // was read, which is what its seconds are as of.
+                            nowMs = liveStop.asOfMs,
+                        )
+                    },
                     timeoutMs = SmartRouteReminderRules.timeoutMs(decision),
-                )
-                SmartRouteNotificationSupport.saveReminder(
-                    context = applicationContext,
-                    slot = slot,
                     history = SmartRouteReminderRules.afterReminder(history, now, clock.day),
                     nowMs = now,
+                    checkedAtMs = System.currentTimeMillis(),
                 )
                 break
             }
@@ -147,7 +150,7 @@ internal object SmartRouteNotificationSupport {
     private const val REMINDER_COUNT_KEY = "reminder_count"
     private const val LAST_ROUTE_REMINDER_KEY_PREFIX = "last_route_reminder_"
     private const val REMINDER_LOG_KEY = "reminder_log"
-    private const val CHANNEL_ID = "smart_route_recommendation"
+    internal const val CHANNEL_ID = "smart_route_recommendation"
     private const val CHANNEL_NAME = "智慧推薦提醒"
     private const val CHANNEL_DESCRIPTION =
         "在你常查看某條路線的時間點附近，依常用或最近站牌的到站時間主動提醒。"
@@ -247,6 +250,49 @@ internal object SmartRouteNotificationSupport {
     /** The reminders shown so far, as JSON, for the Flutter side to read. */
     fun loadReminderLog(context: Context): String =
         notificationPreferences(context).getString(REMINDER_LOG_KEY, null) ?: "[]"
+
+    /**
+     * Shows a reminder for [slot] and records it, against the limits and in
+     * the log the Flutter side learns from — if it can still go out, and be
+     * seen, at [checkedAtMs].
+     *
+     * A run reads the plan once and then waits on the location and the
+     * network, and the app can replace the plan meanwhile: the rider clears
+     * what it learned, or opens the route. So the plan is read again here,
+     * and only what it says now goes out; see [SmartRouteReminderRules.stillDue].
+     * [text] is written for the slot as that plan has it.
+     *
+     * One that cannot be seen — this channel turned off while the app's
+     * other notifications stay on — is recorded nowhere. The habit model
+     * reads a logged reminder as one that told the rider what they would
+     * have opened the route for, and one nobody saw would excuse a day they
+     * simply did not go.
+     *
+     * Returns whether it was shown.
+     */
+    fun remind(
+        context: Context,
+        slot: SmartPlanSlot,
+        stop: SmartRouteStop,
+        text: (SmartPlanSlot) -> SmartReminderText,
+        timeoutMs: Long,
+        history: SmartReminderHistory,
+        nowMs: Long,
+        checkedAtMs: Long,
+    ): Boolean {
+        val current = SmartRouteReminderRules.stillDue(loadPlan(context), slot, checkedAtMs)
+            ?: return false
+        // Opened while this run waited: the rider is looking at the app.
+        if (AppRuntimeStateStore.isAppInForeground(context)) {
+            return false
+        }
+        if (!canPostNotifications(context)) {
+            return false
+        }
+        showNotification(context, current, stop, text(current), timeoutMs)
+        saveReminder(context, current, history, nowMs)
+        return true
+    }
 
     /**
      * Drops every trace of reminders already shown: the log, and what holds
@@ -452,11 +498,14 @@ internal object SmartRouteNotificationSupport {
         return results[0].toDouble()
     }
 
+    /**
+     * The live state of one stop, counted down to the moment the response
+     * arrived; see [SmartRouteReminderRules.parseLiveStop].
+     */
     fun fetchLiveStop(
         routeId: String,
         pathId: Int,
         rawStopId: String,
-        nowMs: Long,
     ): SmartLiveStop? {
         val encodedRouteId = URLEncoder.encode(routeId, Charsets.UTF_8.name())
         val connection = try {
@@ -480,7 +529,12 @@ internal object SmartRouteNotificationSupport {
                 val jsonText = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                     reader.readText()
                 }
-                SmartRouteReminderRules.parseLiveStop(jsonText, pathId, rawStopId, nowMs)
+                SmartRouteReminderRules.parseLiveStop(
+                    jsonText,
+                    pathId,
+                    rawStopId,
+                    System.currentTimeMillis(),
+                )
             }
         } catch (_: Exception) {
             null
@@ -489,6 +543,10 @@ internal object SmartRouteNotificationSupport {
         }
     }
 
+    /**
+     * Posts the reminder. Whether it will be seen is for the caller to have
+     * checked; see [remind].
+     */
     fun showNotification(
         context: Context,
         slot: SmartPlanSlot,
@@ -532,8 +590,20 @@ internal object SmartRouteNotificationSupport {
         )
     }
 
+    /**
+     * Whether a reminder posted now would be shown: notifications allowed
+     * for the app, and this channel not turned off on its own. With the
+     * channel off the system drops the reminder without a word.
+     */
     fun canPostNotifications(context: Context): Boolean {
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            manager.getNotificationChannel(CHANNEL_ID)?.importance ==
+            NotificationManager.IMPORTANCE_NONE
+        ) {
             return false
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
