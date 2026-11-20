@@ -2644,7 +2644,12 @@ class AppController extends ChangeNotifier {
     ];
     final remoteProviders = <BusProvider>[];
     for (final provider in BusProvider.values) {
-      if (provider == current || !provider.supportsLocalDatabase) continue;
+      if (provider == current) continue;
+      if (!provider.supportsLocalDatabase) {
+        // Intercity has no local database; it is only reachable via the API.
+        remoteProviders.add(provider);
+        continue;
+      }
       try {
         await ensureProviderDatabaseState(provider);
         if (!isDatabaseReady(provider)) {

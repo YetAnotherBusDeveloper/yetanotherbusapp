@@ -4620,7 +4620,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   String _normalizeStopRouteLookupName(String value) {
-    return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    // Same 臺→台 folding as the repository's stop search, otherwise a sibling
+    // result spelled 台北車站 is dropped for a stop named 臺北車站.
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('臺', '台')
+        .replaceAll(RegExp(r'\s+'), '');
   }
 
   // Keys ([stopRouteMergeKey]) of the entries in the related-stop-routes sheet
