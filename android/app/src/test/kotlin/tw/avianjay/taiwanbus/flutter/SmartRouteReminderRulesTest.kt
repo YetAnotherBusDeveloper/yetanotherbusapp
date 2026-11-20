@@ -221,6 +221,34 @@ class SmartRouteReminderRulesTest {
         assertFalse(SmartRouteReminderRules.hasLiveSlots(plan(), now))
     }
 
+    @Test
+    fun aCandidateThatFailedAfterThePlanChangedDoesNotHideAnotherCandidate() {
+        val now = at(8, 7, 40)
+        val attempted = setOf(101 to 0)
+
+        assertEquals(
+            listOf(202 to 0),
+            SmartRouteReminderRules.dueSlotsAfterCandidateFailure(
+                plan(slot(routeKey = 202)),
+                "khh",
+                now,
+                SmartReminderHistory(),
+                attempted,
+                taipei,
+            ).map { it.routeKey to it.pathId },
+        )
+        assertTrue(
+            SmartRouteReminderRules.dueSlotsAfterCandidateFailure(
+                plan(slot(routeKey = 202)),
+                "khh",
+                now,
+                SmartReminderHistory(countDay = 2026098L, countThatDay = 6),
+                attempted,
+                taipei,
+            ).isEmpty(),
+        )
+    }
+
     // --- holding a reminder back --------------------------------------------
 
     @Test

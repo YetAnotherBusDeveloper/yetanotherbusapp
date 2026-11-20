@@ -70,18 +70,33 @@ class SmartRouteNotificationWorker(
                 return Result.success()
             }
 
+            var activePlan = plan
+            var activeNow = now
+            var activeClock = clock
+            var activeHistory = history
+            var candidates = dueSlots
+            val attempted = mutableSetOf<Pair<Int, Int>>()
+
             // Asked for at most once, and only once a slot has got this far:
             // a fix costs battery, and most runs end before needing one.
             val currentLocation by lazy {
                 SmartRouteNotificationSupport.loadCurrentLocation(applicationContext)
             }
-            for (slot in dueSlots) {
-                if (SmartRouteReminderRules.wasSeenForWindow(slot, now, clock.minute)) continue
+            while (true) {
+                val slot = candidates.firstOrNull {
+                    attempted.add(it.routeKey to it.pathId)
+                } ?: break
+                if (SmartRouteReminderRules.wasSeenForWindow(
+                        slot,
+                        activeNow,
+                        activeClock.minute,
+                    )
+                ) continue
                 val lastForRoute = SmartRouteNotificationSupport.loadLastReminderForRoute(
                     applicationContext,
                     slot,
                 )
-                if (!SmartRouteReminderRules.mayRemindRoute(lastForRoute, now)) continue
+                if (!SmartRouteReminderRules.mayRemindRoute(lastForRoute, activeNow)) continue
                 val routeData = SmartRouteNotificationSupport.loadRouteData(
                     applicationContext,
                     slot,
@@ -99,9 +114,7 @@ class SmartRouteNotificationWorker(
                 val decision = SmartRouteReminderRules.decide(liveStop, choice.distanceMeters)
                     ?: continue
 
-                // Whether or not it went out, this run is done. The next one
-                // starts again from the plan as it is then.
-                SmartRouteNotificationSupport.remind(
+                val shown = SmartRouteNotificationSupport.remind(
                     context = applicationContext,
                     slot = slot,
                     stop = choice.stop,
@@ -113,18 +126,53 @@ class SmartRouteNotificationWorker(
                             decision = decision,
                             distanceMeters = choice.distanceMeters,
                             slot = current,
-                            dayStartHour = plan.dayStartHour,
+                            dayStartHour = activePlan.dayStartHour,
                             // The arrival time is counted from when the feed
                             // was read, which is what its seconds are as of.
                             nowMs = liveStop.asOfMs,
                         )
                     },
                     timeoutMs = SmartRouteReminderRules.timeoutMs(decision),
-                    history = SmartRouteReminderRules.afterReminder(history, now, clock.day),
-                    nowMs = now,
+                    history = SmartRouteReminderRules.afterReminder(
+                        activeHistory,
+                        activeNow,
+                        activeClock.day,
+                    ),
+                    nowMs = activeNow,
                     checkedAtMs = System.currentTimeMillis(),
                 )
-                break
+                if (shown) break
+
+                // A route can stop being due while its feed is in flight. A
+                // different candidate may still be valid, but foreground and
+                // channel checks are global and must stop the whole run.
+                if (AppRuntimeStateStore.isAppInForeground(applicationContext) ||
+                    !SmartRouteNotificationSupport.canPostNotifications(applicationContext)
+                ) {
+                    break
+                }
+                val refreshedPlan = SmartRouteNotificationSupport.loadPlan(applicationContext)
+                    ?: break
+                val refreshedNow = System.currentTimeMillis()
+                val refreshedHistory = SmartRouteNotificationSupport.loadHistory(
+                    applicationContext,
+                )
+                val refreshedCandidates =
+                    SmartRouteReminderRules.dueSlotsAfterCandidateFailure(
+                        plan = refreshedPlan,
+                        provider = settings.provider,
+                        nowMs = refreshedNow,
+                        history = refreshedHistory,
+                        attempted = attempted,
+                    )
+                activePlan = refreshedPlan
+                activeNow = refreshedNow
+                activeClock = SmartRouteReminderRules.serviceClock(
+                    refreshedNow,
+                    refreshedPlan.dayStartHour,
+                )
+                activeHistory = refreshedHistory
+                candidates = refreshedCandidates
             }
             Result.success()
         } catch (_: Exception) {

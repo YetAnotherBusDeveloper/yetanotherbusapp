@@ -1701,6 +1701,34 @@ class RouteUsageProfile {
     );
   }
 
+  /// Removes selection and stop knowledge from data that existed when the
+  /// rider cleared selection history, while retaining the visits themselves
+  /// as route-open evidence. Data made afterwards still belongs to the new
+  /// history.
+  RouteUsageProfile clearStopUsageBefore(int clearedAtMs) {
+    return RouteUsageProfile(
+      provider: provider,
+      routeKey: routeKey,
+      pathId: pathId,
+      routeName: routeName,
+      totalOpens: totalOpens,
+      lastOpenedAtMs: lastOpenedAtMs,
+      hourlyOpens: hourlyOpens,
+      selectionTimestampsMs: [
+        for (final timestamp in selectionTimestampsMs)
+          if (timestamp > clearedAtMs) timestamp,
+      ],
+      visits: [
+        for (final visit in visits)
+          RouteVisit(
+            atMs: visit.atMs,
+            stopId: visit.atMs > clearedAtMs ? visit.stopId : null,
+          ),
+      ],
+      legacyAsOfMs: legacyAsOfMs,
+    );
+  }
+
   RouteUsageProfile pruneSelectionHistory({DateTime? now}) {
     return RouteUsageProfile(
       provider: provider,

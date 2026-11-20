@@ -239,6 +239,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   /// filled in from the nearest stop and from the stop the page was opened
   /// on, and only this tells a choice apart from those.
   int? _riderPickedBoardingStopId;
+
+  /// True after the rider explicitly returns to the location-based candidate.
+  /// The candidate may be filled into [_boardingStopId] again later, but the
+  /// old opened stop must not become the visit's source again.
+  bool _boardingStopUsesCurrentLocation = false;
   int? _destinationStopId;
   String? _destinationStopName;
   bool _hasExplicitDestinationRequest = false;
@@ -1479,8 +1484,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
 
+    final requestedBoardingStop = _findStopById(
+      pathStops,
+      _requestedStopId,
+    );
     final boardingStop =
-        _findStopById(pathStops, _requestedStopId) ??
+        requestedBoardingStop ??
         _findStopById(pathStops, _boardingStopId) ??
         _findStopById(pathStops, _nearestStopByPath[resolvedPathId]);
 
@@ -1498,6 +1507,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _destinationStopName = destinationStop.stopName;
       _boardingStopId = boardingStop?.stopId;
       _boardingStopName = boardingStop?.stopName;
+      // A launch action with an explicit boarding stop replaces an earlier
+      // manual choice; do not let that stale choice win when the visit is
+      // recorded later.
+      if (requestedBoardingStop != null) {
+        _riderPickedBoardingStopId = null;
+        _boardingStopUsesCurrentLocation = false;
+      }
     });
 
     await _configureBackgroundTripMonitorIfNeeded();
@@ -2738,6 +2754,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _boardingStopId = stop.stopId;
       _boardingStopName = stop.stopName;
       _riderPickedBoardingStopId = stop.stopId;
+      _boardingStopUsesCurrentLocation = false;
     });
     await _applyLearnedDestinationIfPossible();
     await _configureBackgroundTripMonitorIfNeeded();
@@ -2834,6 +2851,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _boardingStopId = null;
       _boardingStopName = null;
       _riderPickedBoardingStopId = null;
+      _boardingStopUsesCurrentLocation = true;
     });
     await _configureBackgroundTripMonitorIfNeeded();
     if (!mounted) {
@@ -3133,6 +3151,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           setState(() {
             _boardingStopId = boardingStop.stopId;
             _boardingStopName = boardingStop.stopName;
+            _boardingStopUsesCurrentLocation = true;
           });
           unawaited(_configureBackgroundTripMonitorIfNeeded());
         }
@@ -3185,7 +3204,11 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
         _currentPathStops,
         _riderPickedBoardingStopId,
       )?.stopId,
-      openedStopId: _findStopById(_currentPathStops, _requestedStopId)?.stopId,
+      // Clearing the manual boarding stop means "use my current location";
+      // the stop that opened the page is no longer a current source.
+      openedStopId: _boardingStopUsesCurrentLocation
+          ? null
+          : _findStopById(_currentPathStops, _requestedStopId)?.stopId,
       nearestStopId: nearest?.stopId,
       nearestDistanceMeters:
           nearest == null ||

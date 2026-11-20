@@ -298,6 +298,29 @@ internal object SmartRouteReminderRules {
         return history.countDay != today || history.countThatDay < MAX_PER_DAY
     }
 
+    /**
+     * Re-reads the candidates after one candidate became invalid while its
+     * feed was being fetched. The attempted set prevents that same candidate
+     * from being retried, while a still-due route can take its place.
+     */
+    fun dueSlotsAfterCandidateFailure(
+        plan: SmartRoutePlan?,
+        provider: String,
+        nowMs: Long,
+        history: SmartReminderHistory,
+        attempted: Set<Pair<Int, Int>>,
+        zone: TimeZone = TimeZone.getDefault(),
+    ): List<SmartPlanSlot> {
+        plan ?: return emptyList()
+        val clock = serviceClock(nowMs, plan.dayStartHour, zone)
+        if (!mayRemind(history, nowMs, clock.day)) {
+            return emptyList()
+        }
+        return dueSlots(plan, provider, nowMs, zone).filterNot {
+            (it.routeKey to it.pathId) in attempted
+        }
+    }
+
     fun mayRemindRoute(lastForRouteMs: Long, nowMs: Long): Boolean =
         nowMs - lastForRouteMs >= ROUTE_COOLDOWN_MS
 

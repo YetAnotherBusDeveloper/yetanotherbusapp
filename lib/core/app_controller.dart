@@ -3279,6 +3279,7 @@ class AppController extends ChangeNotifier {
     await _updateRouteHistoryDevicePayload(
       profiles: deviceProfiles,
       destinationChoices: const [],
+      selectionHistoryClearedAtMs: DateTime.now().millisecondsSinceEpoch,
     );
   }
 
@@ -4144,8 +4145,9 @@ class AppController extends ChangeNotifier {
     required List<RouteUsageProfile> profiles,
     required List<DestinationChoiceProfile> destinationChoices,
     int? modifiedAtMs,
+    int? selectionHistoryClearedAtMs,
   }) {
-    return {
+    final payload = <String, dynamic>{
       'modifiedAtMs': modifiedAtMs ?? DateTime.now().millisecondsSinceEpoch,
       'history': history.map((entry) => entry.toJson()).toList(growable: false),
       'routeUsageProfiles': profiles
@@ -4155,6 +4157,10 @@ class AppController extends ChangeNotifier {
           .map((profile) => profile.toJson())
           .toList(growable: false),
     };
+    if (selectionHistoryClearedAtMs case final clearedAtMs?) {
+      payload['selectionHistoryClearedAtMs'] = clearedAtMs;
+    }
+    return payload;
   }
 
   List<SearchHistoryEntry> _historyFromRouteHistoryDevice(Object? value) {
@@ -4175,6 +4181,13 @@ class AppController extends ChangeNotifier {
       }
     }
     return entries;
+  }
+
+  int? _selectionHistoryClearedAtMs(Object? value) {
+    final payload = _stringMap(value);
+    final clearedAtMs = (payload?['selectionHistoryClearedAtMs'] as num?)
+        ?.toInt();
+    return clearedAtMs != null && clearedAtMs > 0 ? clearedAtMs : null;
   }
 
   List<RouteUsageProfile> _profilesFromRouteHistoryDevice(Object? value) {
@@ -4318,6 +4331,7 @@ class AppController extends ChangeNotifier {
     List<SearchHistoryEntry>? history,
     List<RouteUsageProfile>? profiles,
     List<DestinationChoiceProfile>? destinationChoices,
+    int? selectionHistoryClearedAtMs,
   }) async {
     if (!_tracksDeviceRouteHistory) return;
     final current = _accountSyncLocalState.routeHistoryDevicePayload;
@@ -4334,6 +4348,9 @@ class AppController extends ChangeNotifier {
             destinationChoices ??
             _destinationChoicesFromRouteHistoryDevice(current),
         modifiedAtMs: nowMs,
+        selectionHistoryClearedAtMs:
+            selectionHistoryClearedAtMs ??
+            _selectionHistoryClearedAtMs(current),
       ),
     );
     await _saveAccountSyncLocalState();
@@ -4367,6 +4384,20 @@ class AppController extends ChangeNotifier {
     }
     if (devices.isEmpty) return;
 
+    final localSelectionHistoryClearedAtMs = _selectionHistoryClearedAtMs(
+      _accountSyncLocalState.routeHistoryDevicePayload,
+    );
+    final remoteOwnPayload = _stringMap(devices[deviceId]);
+    final remoteSelectionHistoryClearedAtMs = _selectionHistoryClearedAtMs(
+      remoteOwnPayload,
+    );
+    int? selectionHistoryClearedAtMs = localSelectionHistoryClearedAtMs;
+    if (remoteSelectionHistoryClearedAtMs != null &&
+        (selectionHistoryClearedAtMs == null ||
+            remoteSelectionHistoryClearedAtMs > selectionHistoryClearedAtMs)) {
+      selectionHistoryClearedAtMs = remoteSelectionHistoryClearedAtMs;
+    }
+
     final historyByRoute = <String, SearchHistoryEntry>{};
     final profileParts = <String, List<RouteUsageProfile>>{};
     final destinationChoiceParts = <String, List<DestinationChoiceProfile>>{};
@@ -4379,9 +4410,13 @@ class AppController extends ChangeNotifier {
         }
       }
       for (final profile in _profilesFromRouteHistoryDevice(devicePayload)) {
+        final effectiveProfile = selectionHistoryClearedAtMs == null
+            ? profile
+            : profile.clearStopUsageBefore(selectionHistoryClearedAtMs);
         final key =
-            '${profile.provider.name}:${profile.routeKey}:${profile.pathId}';
-        (profileParts[key] ??= []).add(profile);
+            '${effectiveProfile.provider.name}:${effectiveProfile.routeKey}:'
+            '${effectiveProfile.pathId}';
+        (profileParts[key] ??= []).add(effectiveProfile);
       }
       for (final profile in _destinationChoicesFromRouteHistoryDevice(
         devicePayload,
@@ -4396,8 +4431,15 @@ class AppController extends ChangeNotifier {
 
     final ownPayload = _stringMap(devices[deviceId]);
     if (ownPayload != null) {
+      final effectiveOwnPayload = Map<String, dynamic>.from(ownPayload);
+      if (selectionHistoryClearedAtMs != null) {
+        // A response may echo an older copy of this device's bucket. Keep the
+        // local clear marker so a later merge cannot resurrect old stop ids.
+        effectiveOwnPayload['selectionHistoryClearedAtMs'] =
+            selectionHistoryClearedAtMs;
+      }
       _accountSyncLocalState = _accountSyncLocalState.copyWith(
-        routeHistoryDevicePayload: ownPayload,
+        routeHistoryDevicePayload: effectiveOwnPayload,
       );
     }
 

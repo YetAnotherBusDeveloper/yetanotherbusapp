@@ -13,8 +13,10 @@ import 'package:taiwanbus_flutter/core/account_sync_service.dart';
 import 'package:taiwanbus_flutter/core/app_analytics.dart';
 import 'package:taiwanbus_flutter/core/app_build_info.dart';
 import 'package:taiwanbus_flutter/core/app_controller.dart';
+import 'package:taiwanbus_flutter/core/app_launch_service.dart';
 import 'package:taiwanbus_flutter/core/app_route_observer.dart';
 import 'package:taiwanbus_flutter/core/app_update_installer.dart';
+import 'package:taiwanbus_flutter/core/route_detail_launch_bridge.dart';
 import 'package:taiwanbus_flutter/core/app_update_service.dart';
 import 'package:taiwanbus_flutter/core/auth_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
@@ -406,10 +408,12 @@ void main() {
     expect(stopFor(picked: 7, opened: 3), 7);
     // A pick that is also the nearest stop is still a pick, however far.
     expect(stopFor(picked: 9, nearestDistance: 5000), 9);
-    // Otherwise the stop the page was opened on.
-    expect(stopFor(opened: 3), 3);
-    // The nearest stop only when the rider is close enough to board there.
-    expect(stopFor(nearestDistance: 400), 9);
+    // A new launch action replaces an earlier manual pick, so the new
+    // opened stop is used rather than the stale picked source.
+    expect(stopFor(picked: null, opened: 3), 3);
+    // After "use my current location" clears the manual source, the old
+    // opened stop is no longer passed in and the nearby candidate wins.
+    expect(stopFor(opened: null, nearestDistance: 400), 9);
     expect(stopFor(nearestDistance: 401), isNull);
     expect(stopFor(nearestDistance: null), isNull);
   });
@@ -961,6 +965,127 @@ void main() {
 
       final visit = controller.routeUsageProfiles.single.visits.single;
       expect(visit.stopId, 5);
+    },
+    initialStopId: 3,
+  );
+
+  _screenTest(
+    'returning to the current location does not restore the opened stop',
+    (tester, repository) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      GeolocatorPlatform.instance = _BackgroundLocation();
+      const channel = MethodChannel(
+        'tw.avianjay.taiwanbus.flutter/trip_monitor',
+      );
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method == 'isTripMonitorPaused' ? false : null,
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        );
+      });
+      final controller = AppControllerScope.read(
+        tester.element(find.byType(RouteDetailScreen)),
+      );
+      await controller.updateEnableRouteBackgroundMonitor(true);
+      repository.topologyRequests.single.complete(_detail());
+      repository.primaryRequests.single.complete(_detail(eta: 300));
+      await _frames(tester, 8);
+      repository.familyRequests.single.completer.complete(
+        repository.familyRequests.single.selected,
+      );
+      await _frames(tester);
+
+      await tester.tap(find.byTooltip('背景乘車提醒'));
+      await _frames(tester);
+      await tester.tap(find.text('變更上車站'));
+      await _frames(tester);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomSheet),
+          matching: find.text('返程站5'),
+        ),
+      );
+      await _frames(tester, 8);
+
+      await tester.tap(find.byTooltip('背景乘車提醒'));
+      await _frames(tester);
+      await tester.tap(find.text('清除手動上車站'));
+      await _frames(tester, 8);
+      await tester.pump(const Duration(seconds: 10));
+      await _frames(tester, 8);
+
+      final visit = controller.routeUsageProfiles.single.visits.single;
+      expect(visit.stopId, isNull);
+    },
+    initialStopId: 3,
+  );
+
+  _screenTest(
+    'a new launch boarding stop replaces an earlier manual choice',
+    (tester, repository) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      GeolocatorPlatform.instance = _BackgroundLocation();
+      const channel = MethodChannel(
+        'tw.avianjay.taiwanbus.flutter/trip_monitor',
+      );
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method == 'isTripMonitorPaused' ? false : null,
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        );
+      });
+      final controller = AppControllerScope.read(
+        tester.element(find.byType(RouteDetailScreen)),
+      );
+      await controller.updateEnableRouteBackgroundMonitor(true);
+      repository.topologyRequests.single.complete(_detail());
+      repository.primaryRequests.single.complete(_detail(eta: 300));
+      await _frames(tester, 8);
+      repository.familyRequests.single.completer.complete(
+        repository.familyRequests.single.selected,
+      );
+      await _frames(tester);
+
+      await tester.tap(find.byTooltip('背景乘車提醒'));
+      await _frames(tester);
+      await tester.tap(find.text('變更上車站'));
+      await _frames(tester);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomSheet),
+          matching: find.text('返程站5'),
+        ),
+      );
+      await _frames(tester, 8);
+
+      expect(
+        await RouteDetailLaunchBridge.instance.tryHandle(
+          const AppLaunchAction(
+            target: AppLaunchTarget.routeDetail,
+            provider: BusProvider.tpe,
+            routeKey: 500,
+            pathId: 1,
+            stopId: 3,
+            destinationPathId: 1,
+            destinationStopId: 9,
+          ),
+        ),
+        isTrue,
+      );
+      await _frames(tester, 8);
+      await tester.pump(const Duration(seconds: 10));
+      await _frames(tester, 8);
+
+      final visit = controller.routeUsageProfiles.single.visits.single;
+      expect(visit.stopId, 3);
     },
     initialStopId: 3,
   );
