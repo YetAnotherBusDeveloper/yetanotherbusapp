@@ -4678,9 +4678,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     Object? localError;
     StackTrace? localStackTrace;
     try {
-      final results = await controller.searchRoutesByStop(
+      final results = await controller.searchRoutesByStopAcrossAllProviders(
         stop.stopName,
-        provider: widget.provider,
+        current: widget.provider,
       );
       local = results
           .where(

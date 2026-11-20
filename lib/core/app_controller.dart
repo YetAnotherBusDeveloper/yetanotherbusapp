@@ -2628,6 +2628,48 @@ class AppController extends ChangeNotifier {
     return results;
   }
 
+  /// Finds every route that serves a stop name regardless of which city
+  /// manages the route. Cities whose local database is ready are searched
+  /// locally; the rest (and the whole lookup on web) go through the API, so a
+  /// route from a neighbouring city is listed even when that city's data was
+  /// never downloaded. The [current] provider is searched first and its errors
+  /// propagate; failures for other cities are skipped.
+  Future<List<StopRouteSearchResult>> searchRoutesByStopAcrossAllProviders(
+    String query, {
+    required BusProvider current,
+  }) async {
+    if (kIsWeb) return searchRoutesByStopFromApi(query);
+    final results = <StopRouteSearchResult>[
+      ...await repository.searchRoutesByStopName(query, provider: current),
+    ];
+    final remoteProviders = <BusProvider>[];
+    for (final provider in BusProvider.values) {
+      if (provider == current || !provider.supportsLocalDatabase) continue;
+      try {
+        await ensureProviderDatabaseState(provider);
+        if (!isDatabaseReady(provider)) {
+          remoteProviders.add(provider);
+          continue;
+        }
+        results.addAll(
+          await repository.searchRoutesByStopName(query, provider: provider),
+        );
+      } catch (error) {
+        debugPrint('Stop route lookup skipped for ${provider.name}: $error');
+      }
+    }
+    if (remoteProviders.isNotEmpty) {
+      try {
+        results.addAll(
+          await searchRoutesByStopFromApi(query, providers: remoteProviders),
+        );
+      } catch (error) {
+        debugPrint('Stop route API lookup error: $error');
+      }
+    }
+    return results;
+  }
+
   Future<List<StopRouteSearchResult>> searchRoutesByStopFromApi(
     String query, {
     Iterable<BusProvider>? providers,
