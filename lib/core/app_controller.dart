@@ -120,6 +120,7 @@ class AppController extends ChangeNotifier {
   List<FavoriteUsageProfile> _favoriteUsageProfiles = const [];
   List<FavoriteUsageProfile> _stopVisitProfiles = const [];
   List<DestinationChoiceProfile> _destinationChoiceProfiles = const [];
+  int? _selectionHistoryClearedAtMs;
   int? _settingsLastModifiedAtMs;
   int? _favoriteGroupsLastModifiedAtMs;
   bool _initialized = false;
@@ -424,6 +425,8 @@ class AppController extends ChangeNotifier {
         final history = await storage.loadHistory();
         final routes = await storage.loadRouteUsageProfiles();
         final destinations = await storage.loadDestinationChoiceProfiles();
+        _selectionHistoryClearedAtMs = await storage
+            .loadSelectionHistoryClearedAtMs();
         _history = history;
         _routeUsageProfiles = routes;
         _destinationChoiceProfiles = destinations;
@@ -843,14 +846,39 @@ class AppController extends ChangeNotifier {
     if (payload == null) {
       return;
     }
+    final payloadClearedAtMs = _selectionHistoryClearMarkerFromPayload(payload);
+    int? clearedAtMs = _selectionHistoryClearedAtMs;
+    if (payloadClearedAtMs != null &&
+        (clearedAtMs == null || payloadClearedAtMs > clearedAtMs)) {
+      clearedAtMs = payloadClearedAtMs;
+      _selectionHistoryClearedAtMs = clearedAtMs;
+      await storage.saveSelectionHistoryClearedAtMs(clearedAtMs);
+    }
     _history = _historyFromRouteHistoryDevice(
       payload,
     ).take(_settings.maxHistory).toList(growable: false);
-    _routeUsageProfiles = _profilesFromRouteHistoryDevice(payload)
-      ..sort(_compareRouteUsageProfiles);
-    _destinationChoiceProfiles = _destinationChoicesFromRouteHistoryDevice(
-      payload,
-    );
+    _routeUsageProfiles =
+        _profilesFromRouteHistoryDevice(payload)
+            .map(
+              (profile) => clearedAtMs == null
+                  ? profile
+                  : profile.clearStopUsageBefore(clearedAtMs),
+            )
+            .toList()
+          ..sort(_compareRouteUsageProfiles);
+    _destinationChoiceProfiles =
+        _destinationChoicesFromRouteHistoryDevice(payload)
+            .map(
+              (profile) => clearedAtMs == null
+                  ? profile
+                  : profile.clearSelectionsBefore(clearedAtMs),
+            )
+            .where(
+              (profile) =>
+                  clearedAtMs == null ||
+                  profile.selectionTimestampsMs.isNotEmpty,
+            )
+            .toList();
     await storage.saveHistory(_history);
     await storage.saveRouteUsageProfiles(_routeUsageProfiles);
     await storage.saveDestinationChoiceProfiles(_destinationChoiceProfiles);
@@ -3271,6 +3299,12 @@ class AppController extends ChangeNotifier {
     _favoriteUsageProfiles = const [];
     _stopVisitProfiles = const [];
     _destinationChoiceProfiles = const [];
+    final clearedAtMs = math.max(
+      DateTime.now().millisecondsSinceEpoch,
+      (_selectionHistoryClearedAtMs ?? 0) + 1,
+    );
+    _selectionHistoryClearedAtMs = clearedAtMs;
+    await storage.saveSelectionHistoryClearedAtMs(clearedAtMs);
     await _persistSmartRouteProfiles();
     await storage.saveDestinationChoiceProfiles(const []);
     final deviceProfiles = _profilesFromRouteHistoryDevice(
@@ -3279,7 +3313,7 @@ class AppController extends ChangeNotifier {
     await _updateRouteHistoryDevicePayload(
       profiles: deviceProfiles,
       destinationChoices: const [],
-      selectionHistoryClearedAtMs: DateTime.now().millisecondsSinceEpoch,
+      selectionHistoryClearedAtMs: clearedAtMs,
     );
   }
 
@@ -4147,6 +4181,8 @@ class AppController extends ChangeNotifier {
     int? modifiedAtMs,
     int? selectionHistoryClearedAtMs,
   }) {
+    final effectiveSelectionHistoryClearedAtMs =
+        selectionHistoryClearedAtMs ?? _selectionHistoryClearedAtMs;
     final payload = <String, dynamic>{
       'modifiedAtMs': modifiedAtMs ?? DateTime.now().millisecondsSinceEpoch,
       'history': history.map((entry) => entry.toJson()).toList(growable: false),
@@ -4157,7 +4193,7 @@ class AppController extends ChangeNotifier {
           .map((profile) => profile.toJson())
           .toList(growable: false),
     };
-    if (selectionHistoryClearedAtMs case final clearedAtMs?) {
+    if (effectiveSelectionHistoryClearedAtMs case final clearedAtMs?) {
       payload['selectionHistoryClearedAtMs'] = clearedAtMs;
     }
     return payload;
@@ -4183,7 +4219,7 @@ class AppController extends ChangeNotifier {
     return entries;
   }
 
-  int? _selectionHistoryClearedAtMs(Object? value) {
+  int? _selectionHistoryClearMarkerFromPayload(Object? value) {
     final payload = _stringMap(value);
     final clearedAtMs = (payload?['selectionHistoryClearedAtMs'] as num?)
         ?.toInt();
@@ -4350,7 +4386,7 @@ class AppController extends ChangeNotifier {
         modifiedAtMs: nowMs,
         selectionHistoryClearedAtMs:
             selectionHistoryClearedAtMs ??
-            _selectionHistoryClearedAtMs(current),
+            _selectionHistoryClearMarkerFromPayload(current),
       ),
     );
     await _saveAccountSyncLocalState();
@@ -4384,18 +4420,31 @@ class AppController extends ChangeNotifier {
     }
     if (devices.isEmpty) return;
 
-    final localSelectionHistoryClearedAtMs = _selectionHistoryClearedAtMs(
-      _accountSyncLocalState.routeHistoryDevicePayload,
-    );
+    int? selectionHistoryClearedAtMs = _selectionHistoryClearedAtMs;
+    final localPayloadSelectionHistoryClearedAtMs =
+        _selectionHistoryClearMarkerFromPayload(
+          _accountSyncLocalState.routeHistoryDevicePayload,
+        );
     final remoteOwnPayload = _stringMap(devices[deviceId]);
-    final remoteSelectionHistoryClearedAtMs = _selectionHistoryClearedAtMs(
-      remoteOwnPayload,
-    );
-    int? selectionHistoryClearedAtMs = localSelectionHistoryClearedAtMs;
-    if (remoteSelectionHistoryClearedAtMs != null &&
-        (selectionHistoryClearedAtMs == null ||
-            remoteSelectionHistoryClearedAtMs > selectionHistoryClearedAtMs)) {
-      selectionHistoryClearedAtMs = remoteSelectionHistoryClearedAtMs;
+    final remoteSelectionHistoryClearedAtMs =
+        _selectionHistoryClearMarkerFromPayload(remoteOwnPayload);
+    for (final candidate in [
+      localPayloadSelectionHistoryClearedAtMs,
+      remoteSelectionHistoryClearedAtMs,
+    ]) {
+      if (candidate != null &&
+          (selectionHistoryClearedAtMs == null ||
+              candidate > selectionHistoryClearedAtMs)) {
+        selectionHistoryClearedAtMs = candidate;
+      }
+    }
+    if (selectionHistoryClearedAtMs != null &&
+        (_selectionHistoryClearedAtMs == null ||
+            selectionHistoryClearedAtMs > _selectionHistoryClearedAtMs!)) {
+      _selectionHistoryClearedAtMs = selectionHistoryClearedAtMs;
+      await storage.saveSelectionHistoryClearedAtMs(
+        selectionHistoryClearedAtMs,
+      );
     }
 
     final historyByRoute = <String, SearchHistoryEntry>{};
@@ -4421,11 +4470,18 @@ class AppController extends ChangeNotifier {
       for (final profile in _destinationChoicesFromRouteHistoryDevice(
         devicePayload,
       )) {
+        final effectiveProfile = selectionHistoryClearedAtMs == null
+            ? profile
+            : profile.clearSelectionsBefore(selectionHistoryClearedAtMs);
+        if (selectionHistoryClearedAtMs != null &&
+            effectiveProfile.selectionTimestampsMs.isEmpty) {
+          continue;
+        }
         final key =
-            '${profile.provider.name}:${profile.routeKey}:'
-            '${profile.departurePathId}:${profile.boardingStopId}:'
-            '${profile.destinationPathId}:${profile.destinationStopId}';
-        (destinationChoiceParts[key] ??= []).add(profile);
+            '${effectiveProfile.provider.name}:${effectiveProfile.routeKey}:'
+            '${effectiveProfile.departurePathId}:${effectiveProfile.boardingStopId}:'
+            '${effectiveProfile.destinationPathId}:${effectiveProfile.destinationStopId}';
+        (destinationChoiceParts[key] ??= []).add(effectiveProfile);
       }
     }
 

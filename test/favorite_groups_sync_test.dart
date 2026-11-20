@@ -464,6 +464,161 @@ void main() {
       expect((sentVisit.single as Map)['s'], 7);
     },
   );
+
+  test(
+    'a clear before first sync tombstones old destination choices',
+    () async {
+      final oldSelectionAt = DateTime.now()
+          .subtract(const Duration(hours: 1))
+          .millisecondsSinceEpoch;
+      final remoteChoice = DestinationChoiceProfile(
+        provider: BusProvider.tpe,
+        routeKey: 500,
+        departurePathId: 0,
+        boardingStopId: 7,
+        destinationPathId: 0,
+        destinationStopId: 12,
+        selectionTimestampsMs: [oldSelectionAt],
+      );
+      final syncService = _FakeAccountSyncService(
+        remotePreferences: {
+          'routeHistory': {
+            'version': 3,
+            'devices': {
+              'remote-device': {
+                'modifiedAtMs': 1,
+                'history': const [],
+                'routeUsageProfiles': const [],
+                'destinationChoiceProfiles': [remoteChoice.toJson()],
+              },
+            },
+          },
+        },
+      );
+      final storage = StorageService();
+      final buildInfo = AppBuildInfo(
+        version: '1.0.0',
+        buildNumber: '1',
+        gitSha: 'test',
+        defaultUpdateChannel: AppUpdateChannel.release,
+      );
+      final controller = AppController(
+        repository: BusRepository(),
+        storage: storage,
+        analytics: await AppAnalytics.initialize(),
+        buildInfo: buildInfo,
+        appUpdateService: AppUpdateService(buildInfo: buildInfo),
+        appUpdateInstaller: createAppUpdateInstaller(),
+        authService: _FakeAuthService(),
+        accountSyncService: syncService,
+      );
+      addTearDown(controller.dispose);
+      await controller.completeAuthCallback(
+        const AppLaunchAction(
+          target: AppLaunchTarget.authCallback,
+          authToken: 'test-token',
+          authAccountId: 'test-account',
+          authDeviceId: 'test-device',
+          authRole: 'user',
+          authProvider: 'test',
+          authDisplayName: 'Test User',
+        ),
+      );
+
+      await controller.clearRouteSelectionHistory();
+      await controller.setRouteHistorySyncEnabled(true);
+      await controller.setAccountSyncEnabled(true);
+
+      expect(controller.destinationChoiceProfiles, isEmpty);
+      final devices =
+          (syncService.preferencePayload!['routeHistory'] as Map)['devices']
+              as Map;
+      expect(
+        (devices['test-device'] as Map)['selectionHistoryClearedAtMs'],
+        isNotNull,
+      );
+      // The local tombstone filters the imported result; it does not erase the
+      // other device's cloud bucket from the document.
+      expect(
+        ((devices['remote-device'] as Map)['destinationChoiceProfiles']
+            as List),
+        hasLength(1),
+      );
+    },
+  );
+
+  test('logout restore applies the local clear tombstone', () async {
+    final oldAt = DateTime.now()
+        .subtract(const Duration(hours: 1))
+        .millisecondsSinceEpoch;
+    final clearedAt = DateTime.now().millisecondsSinceEpoch;
+    final routeProfile = RouteUsageProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      pathId: 0,
+      routeName: '500',
+      totalOpens: 1,
+      lastOpenedAtMs: oldAt,
+      visits: [RouteVisit(atMs: oldAt, stopId: 7)],
+    );
+    final destinationProfile = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 7,
+      destinationPathId: 0,
+      destinationStopId: 12,
+      selectionTimestampsMs: [oldAt],
+    );
+    final storage = StorageService();
+    await storage.saveAccountSyncLocalState(
+      'test-account',
+      AccountSyncLocalState.empty().copyWith(
+        routeHistorySyncEnabled: true,
+        routeHistoryModifiedAtMs: clearedAt,
+        routeHistoryDevicePayload: {
+          'modifiedAtMs': clearedAt,
+          'selectionHistoryClearedAtMs': clearedAt,
+          'history': const [],
+          'routeUsageProfiles': [routeProfile.toJson()],
+          'destinationChoiceProfiles': [destinationProfile.toJson()],
+        },
+      ),
+    );
+    final buildInfo = AppBuildInfo(
+      version: '1.0.0',
+      buildNumber: '1',
+      gitSha: 'test',
+      defaultUpdateChannel: AppUpdateChannel.release,
+    );
+    final controller = AppController(
+      repository: BusRepository(),
+      storage: storage,
+      analytics: await AppAnalytics.initialize(),
+      buildInfo: buildInfo,
+      appUpdateService: AppUpdateService(buildInfo: buildInfo),
+      appUpdateInstaller: createAppUpdateInstaller(),
+      authService: _FakeAuthService(),
+      accountSyncService: _FakeAccountSyncService(),
+    );
+    addTearDown(controller.dispose);
+    await controller.completeAuthCallback(
+      const AppLaunchAction(
+        target: AppLaunchTarget.authCallback,
+        authToken: 'test-token',
+        authAccountId: 'test-account',
+        authDeviceId: 'test-device',
+        authRole: 'user',
+        authProvider: 'test',
+        authDisplayName: 'Test User',
+      ),
+    );
+
+    await controller.logoutAuth();
+
+    expect(controller.routeUsageProfiles.single.visits.single.stopId, isNull);
+    expect(controller.destinationChoiceProfiles, isEmpty);
+  });
 }
 
 class _FakeAuthService extends AuthService {

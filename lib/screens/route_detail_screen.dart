@@ -1359,6 +1359,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       requestedPathId: requestedPathId,
       requestedStopId: requestedStopId,
     );
+    final requestedBoardingStop = detail == null || resolvedPathId == null
+        ? null
+        : _findStopById(
+            detail.stopsByPath[resolvedPathId] ?? const <StopInfo>[],
+            requestedStopId,
+          );
+    final replacesBoardingSource = requestedStopId != null &&
+        (detail == null || requestedBoardingStop != null);
 
     setState(() {
       _requestedPathId = resolvedPathId;
@@ -1371,6 +1379,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _targetInitialPathId = resolvedPathId;
       _didScrollToInitialStop = requestedStopId == null;
       _autoScrolledPathId = null;
+      if (replacesBoardingSource) {
+        _boardingStopId = requestedStopId;
+        _boardingStopName = requestedBoardingStop?.stopName;
+        _riderPickedBoardingStopId = null;
+        _boardingStopUsesCurrentLocation = false;
+      }
     });
 
     if (detail != null && _tabController != null && resolvedPathId != null) {

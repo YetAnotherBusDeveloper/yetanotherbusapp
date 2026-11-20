@@ -984,6 +984,24 @@ class DestinationChoiceProfile {
     );
   }
 
+  /// Keeps the choice itself but forgets selections made at or before a local
+  /// history clear. An empty result is no longer a learned choice.
+  DestinationChoiceProfile clearSelectionsBefore(int clearedAtMs) {
+    return DestinationChoiceProfile(
+      provider: provider,
+      routeKey: routeKey,
+      departurePathId: departurePathId,
+      boardingStopId: boardingStopId,
+      destinationPathId: destinationPathId,
+      destinationStopId: destinationStopId,
+      destinationStopName: destinationStopName,
+      selectionTimestampsMs: [
+        for (final timestamp in selectionTimestampsMs)
+          if (timestamp > clearedAtMs) timestamp,
+      ],
+    );
+  }
+
   Map<String, dynamic> toJson() => {
     'provider': provider.name,
     'routeKey': routeKey,

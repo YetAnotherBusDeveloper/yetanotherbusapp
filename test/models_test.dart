@@ -33,6 +33,24 @@ void main() {
     },
   );
 
+  test('a local clear drops old destination choice selections', () {
+    final clearedAt = DateTime(2026, 11, 20, 9).millisecondsSinceEpoch;
+    final profile = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 7,
+      destinationPathId: 0,
+      destinationStopId: 12,
+      selectionTimestampsMs: [clearedAt - 1, clearedAt + 1],
+    );
+
+    final cleared = profile.clearSelectionsBefore(clearedAt);
+
+    expect(cleared.selectionTimestampsMs, [clearedAt + 1]);
+    expect(cleared.destinationStopId, profile.destinationStopId);
+  });
+
   test('search history round trips route stop and destination identity', () {
     const entry = SearchHistoryEntry(
       provider: BusProvider.nwt,

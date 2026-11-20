@@ -1025,7 +1025,7 @@ void main() {
   );
 
   _screenTest(
-    'a new launch boarding stop replaces an earlier manual choice',
+    'a boarding-only launch replaces an earlier manual choice',
     (tester, repository) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       GeolocatorPlatform.instance = _BackgroundLocation();
@@ -1074,8 +1074,6 @@ void main() {
             routeKey: 500,
             pathId: 1,
             stopId: 3,
-            destinationPathId: 1,
-            destinationStopId: 9,
           ),
         ),
         isTrue,
