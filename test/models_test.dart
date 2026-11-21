@@ -469,6 +469,7 @@ void main() {
           syncEnabled: true,
           routeHistorySyncEnabled: true,
           routeHistoryModifiedAtMs: 1716000000100,
+          routeHistorySelectionHistoryClearedAtMs: 1716000000200,
           routeHistoryDevicePayload: const {
             'modifiedAtMs': 1716000000100,
             'history': <dynamic>[],
@@ -494,6 +495,7 @@ void main() {
     expect(restored.syncEnabled, isTrue);
     expect(restored.routeHistorySyncEnabled, isTrue);
     expect(restored.routeHistoryModifiedAtMs, 1716000000100);
+    expect(restored.routeHistorySelectionHistoryClearedAtMs, 1716000000200);
     expect(restored.routeHistoryDevicePayload?['history'], isEmpty);
     expect(restored.preferences.lastSyncedServerRevision, 4);
     expect(

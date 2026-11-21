@@ -1206,11 +1206,20 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       if (_tabController!.indexIsChanging) {
         return;
       }
+      final boardingStop = _findStopById(_currentPathStops, _boardingStopId);
+      if (_boardingStopId != null && boardingStop == null) {
+        _boardingStopId = null;
+        _boardingStopName = null;
+        if (_riderPickedBoardingStopId != null) {
+          _riderPickedBoardingStopId = null;
+          _boardingStopUsesCurrentLocation = true;
+        }
+        _resetLiveActivityRideState();
+      }
       if (_destinationStopId != null &&
           _currentPathStops.every(
             (stop) => stop.stopId != _destinationStopId,
           )) {
-        final boardingStop = _findStopById(_currentPathStops, _boardingStopId);
         _boardingStopId = boardingStop?.stopId;
         _boardingStopName = boardingStop?.stopName;
         _destinationStopId = null;
@@ -1380,10 +1389,15 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _didScrollToInitialStop = requestedStopId == null;
       _autoScrolledPathId = null;
       if (replacesBoardingSource) {
+        _resetLiveActivityRideState();
+        _resetLiveActivityDestinationState();
         _boardingStopId = requestedStopId;
         _boardingStopName = requestedBoardingStop?.stopName;
         _riderPickedBoardingStopId = null;
         _boardingStopUsesCurrentLocation = false;
+        _destinationStopId = null;
+        _destinationStopName = null;
+        _hasExplicitDestinationRequest = requestedDestinationStopId != null;
       }
     });
 

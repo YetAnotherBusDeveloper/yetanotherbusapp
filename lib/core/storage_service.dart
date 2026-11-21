@@ -17,8 +17,6 @@ class StorageService {
   static const _favoriteUsageProfilesKey = 'favorite_usage_profiles';
   static const _stopVisitProfilesKey = 'stop_visit_profiles';
   static const _destinationChoiceProfilesKey = 'destination_choice_profiles';
-  static const _selectionHistoryClearedAtKey =
-      'route_selection_history_cleared_at_ms';
   static const _smartRoutePlanKey = 'smart_route_plan';
   static const _announcementLocalStateKey = 'announcement_local_state';
   static const _settingsLastModifiedAtKey = 'app_settings_last_modified_at_ms';
@@ -392,20 +390,6 @@ class StorageService {
       _destinationChoiceProfilesKey,
       jsonEncode(profiles.map((entry) => entry.toJson()).toList()),
     );
-  }
-
-  /// The local clear boundary is kept separately from the synced device
-  /// payload, so clearing before route-history sync is first enabled still
-  /// prevents an old cloud snapshot from being imported later.
-  Future<int?> loadSelectionHistoryClearedAtMs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final value = prefs.getInt(_selectionHistoryClearedAtKey);
-    return value != null && value > 0 ? value : null;
-  }
-
-  Future<void> saveSelectionHistoryClearedAtMs(int clearedAtMs) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_selectionHistoryClearedAtKey, clearedAtMs);
   }
 
   Future<AnnouncementLocalState> loadAnnouncementLocalState() async {

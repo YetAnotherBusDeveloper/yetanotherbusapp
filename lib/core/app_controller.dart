@@ -422,14 +422,16 @@ class AppController extends ChangeNotifier {
         _favoriteGroupKinds = kinds;
         _favoriteGroupsLastModifiedAtMs = modifiedAt;
       case AppLocalData.routeHistory:
+        await ensureAccountReady();
         final history = await storage.loadHistory();
         final routes = await storage.loadRouteUsageProfiles();
         final destinations = await storage.loadDestinationChoiceProfiles();
-        _selectionHistoryClearedAtMs = await storage
-            .loadSelectionHistoryClearedAtMs();
+        _selectionHistoryClearedAtMs =
+            _accountSyncLocalState.routeHistorySelectionHistoryClearedAtMs;
         _history = history;
         _routeUsageProfiles = routes;
         _destinationChoiceProfiles = destinations;
+        await _applySelectionHistoryClearToLoadedData();
       case AppLocalData.smartUsage:
         final favorites = await storage.loadFavoriteUsageProfiles();
         final visits = await storage.loadStopVisitProfiles();
@@ -818,13 +820,19 @@ class AppController extends ChangeNotifier {
     final accountId = _authSession?.accountId.trim() ?? '';
     if (accountId.isEmpty) {
       _accountSyncLocalState = AccountSyncLocalState.empty();
+      _selectionHistoryClearedAtMs = null;
       _accountSyncSummary = null;
       _accountSyncError = null;
       return;
     }
     _accountSyncLocalState = await storage.loadAccountSyncLocalState(accountId);
+    _selectionHistoryClearedAtMs =
+        _accountSyncLocalState.routeHistorySelectionHistoryClearedAtMs;
     _accountSyncSummary = null;
     _accountSyncError = null;
+    if (routeHistoryReady) {
+      await _applySelectionHistoryClearToLoadedData();
+    }
   }
 
   Future<void> _saveAccountSyncLocalState() async {
@@ -837,8 +845,25 @@ class AppController extends ChangeNotifier {
 
   void _clearAccountSyncSessionData() {
     _accountSyncLocalState = AccountSyncLocalState.empty();
+    _selectionHistoryClearedAtMs = null;
     _accountSyncSummary = null;
     _accountSyncError = null;
+  }
+
+  Future<void> _applySelectionHistoryClearToLoadedData() async {
+    final clearedAtMs = _selectionHistoryClearedAtMs;
+    if (clearedAtMs == null) {
+      return;
+    }
+    _routeUsageProfiles = _routeUsageProfiles
+        .map((profile) => profile.clearStopUsageBefore(clearedAtMs))
+        .toList(growable: false);
+    _destinationChoiceProfiles = _destinationChoiceProfiles
+        .map((profile) => profile.clearSelectionsBefore(clearedAtMs))
+        .where((profile) => profile.selectionTimestampsMs.isNotEmpty)
+        .toList(growable: false);
+    await storage.saveRouteUsageProfiles(_routeUsageProfiles);
+    await storage.saveDestinationChoiceProfiles(_destinationChoiceProfiles);
   }
 
   Future<void> _restoreDeviceLocalRouteHistory() async {
@@ -852,7 +877,10 @@ class AppController extends ChangeNotifier {
         (clearedAtMs == null || payloadClearedAtMs > clearedAtMs)) {
       clearedAtMs = payloadClearedAtMs;
       _selectionHistoryClearedAtMs = clearedAtMs;
-      await storage.saveSelectionHistoryClearedAtMs(clearedAtMs);
+      _accountSyncLocalState = _accountSyncLocalState.copyWith(
+        routeHistorySelectionHistoryClearedAtMs: clearedAtMs,
+      );
+      await _saveAccountSyncLocalState();
     }
     _history = _historyFromRouteHistoryDevice(
       payload,
@@ -3304,7 +3332,10 @@ class AppController extends ChangeNotifier {
       (_selectionHistoryClearedAtMs ?? 0) + 1,
     );
     _selectionHistoryClearedAtMs = clearedAtMs;
-    await storage.saveSelectionHistoryClearedAtMs(clearedAtMs);
+    _accountSyncLocalState = _accountSyncLocalState.copyWith(
+      routeHistorySelectionHistoryClearedAtMs: clearedAtMs,
+    );
+    await _saveAccountSyncLocalState();
     await _persistSmartRouteProfiles();
     await storage.saveDestinationChoiceProfiles(const []);
     final deviceProfiles = _profilesFromRouteHistoryDevice(
@@ -4442,9 +4473,10 @@ class AppController extends ChangeNotifier {
         (_selectionHistoryClearedAtMs == null ||
             selectionHistoryClearedAtMs > _selectionHistoryClearedAtMs!)) {
       _selectionHistoryClearedAtMs = selectionHistoryClearedAtMs;
-      await storage.saveSelectionHistoryClearedAtMs(
-        selectionHistoryClearedAtMs,
+      _accountSyncLocalState = _accountSyncLocalState.copyWith(
+        routeHistorySelectionHistoryClearedAtMs: selectionHistoryClearedAtMs,
       );
+      await _saveAccountSyncLocalState();
     }
 
     final historyByRoute = <String, SearchHistoryEntry>{};
