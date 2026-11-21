@@ -3032,6 +3032,18 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get metroLocateNearest => '定位最近的車站';
+
+  @override
+  String get metroLocating => '正在尋找最近的車站…';
+
+  @override
+  String get metroNearbyPartial => '部分捷運系統暫時無法查詢，已選擇目前可取得資料中最近的車站。';
+
+  @override
+  String get metroStationLookupFailed => '無法載入捷運站資料，請稍後再試。';
+
+  @override
   String get railOperatingNotices => '營運公告';
 
   @override
@@ -6362,6 +6374,18 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String metroDestination(String destination) {
     return '往 $destination';
   }
+
+  @override
+  String get metroLocateNearest => '定位最近的車站';
+
+  @override
+  String get metroLocating => '正在尋找最近的車站…';
+
+  @override
+  String get metroNearbyPartial => '部分捷運系統暫時無法查詢，已選擇目前可取得資料中最近的車站。';
+
+  @override
+  String get metroStationLookupFailed => '無法載入捷運站資料，請稍後再試。';
 
   @override
   String get railOperatingNotices => '營運公告';

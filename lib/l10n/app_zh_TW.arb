@@ -1,5 +1,9 @@
 {
   "@@locale": "zh_TW",
+  "metroLocateNearest": "定位最近的車站",
+  "metroLocating": "正在尋找最近的車站…",
+  "metroNearbyPartial": "部分捷運系統暫時無法查詢，已選擇目前可取得資料中最近的車站。",
+  "metroStationLookupFailed": "無法載入捷運站資料，請稍後再試。",
   "appTitle": "YetAnotherBusApp",
   "settingsAppearanceDescription": "語言、主題、介面大小與個人化",
   "settingsUsageDescription": "到站資訊更新、智慧推薦與使用偏好",

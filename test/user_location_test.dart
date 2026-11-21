@@ -27,6 +27,23 @@ class _HangingCurrentPosition extends GeolocatorPlatform {
       Completer<Position>().future;
 }
 
+class _DeniedPosition extends _HangingCurrentPosition {
+  _DeniedPosition(this.permission) : super(null);
+
+  final LocationPermission permission;
+
+  @override
+  Future<LocationPermission> checkPermission() async => permission;
+
+  @override
+  Future<LocationPermission> requestPermission() async => permission;
+
+  @override
+  Future<Position> getCurrentPosition({LocationSettings? locationSettings}) {
+    throw StateError('Must not request a position without permission');
+  }
+}
+
 Position _position() => Position(
   latitude: 25.033,
   longitude: 121.5654,
@@ -41,6 +58,34 @@ Position _position() => Position(
 );
 
 void main() {
+  for (final permission in [
+    LocationPermission.denied,
+    LocationPermission.deniedForever,
+  ]) {
+    test('reports $permission as a permission failure', () async {
+      final original = GeolocatorPlatform.instance;
+      GeolocatorPlatform.instance = _DeniedPosition(permission);
+      addTearDown(() => GeolocatorPlatform.instance = original);
+
+      await expectLater(
+        resolveUserPosition(),
+        throwsA(
+          isA<LocationFailure>()
+              .having(
+                (error) => error.permissionDenied,
+                'permissionDenied',
+                true,
+              )
+              .having(
+                (error) => error.deniedForever,
+                'deniedForever',
+                permission == LocationPermission.deniedForever,
+              ),
+        ),
+      );
+    });
+  }
+
   test('reports when the device location service is switched off', () async {
     final original = GeolocatorPlatform.instance;
     GeolocatorPlatform.instance = _HangingCurrentPosition(

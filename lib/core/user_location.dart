@@ -7,6 +7,7 @@ class LocationFailure implements Exception {
   const LocationFailure(
     this.message, {
     this.deniedForever = false,
+    this.permissionDenied = false,
     this.serviceDisabled = false,
   });
 
@@ -14,6 +15,9 @@ class LocationFailure implements Exception {
 
   /// The user has to go into system settings; asking again will not help.
   final bool deniedForever;
+
+  /// Location access was denied, including when requesting again is possible.
+  final bool permissionDenied;
 
   /// The device-wide location switch is off, so app permission settings alone
   /// cannot resolve the failure.
@@ -43,10 +47,14 @@ Future<Position> resolveUserPosition({
     permission = await Geolocator.requestPermission();
   }
   if (permission == LocationPermission.deniedForever) {
-    throw const LocationFailure('沒有取得定位權限。', deniedForever: true);
+    throw const LocationFailure(
+      '沒有取得定位權限。',
+      deniedForever: true,
+      permissionDenied: true,
+    );
   }
   if (permission == LocationPermission.denied) {
-    throw const LocationFailure('沒有取得定位權限。');
+    throw const LocationFailure('沒有取得定位權限。', permissionDenied: true);
   }
 
   Position? lastKnown;

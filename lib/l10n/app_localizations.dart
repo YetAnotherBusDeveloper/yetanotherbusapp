@@ -5368,6 +5368,30 @@ abstract class AppLocalizations {
   /// **'Toward {destination}'**
   String metroDestination(String destination);
 
+  /// No description provided for @metroLocateNearest.
+  ///
+  /// In en, this message translates to:
+  /// **'Find nearest station'**
+  String get metroLocateNearest;
+
+  /// No description provided for @metroLocating.
+  ///
+  /// In en, this message translates to:
+  /// **'Finding nearest station…'**
+  String get metroLocating;
+
+  /// No description provided for @metroNearbyPartial.
+  ///
+  /// In en, this message translates to:
+  /// **'Some metro systems could not be checked. Showing the nearest station from the available data.'**
+  String get metroNearbyPartial;
+
+  /// No description provided for @metroStationLookupFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load metro stations. Please try again.'**
+  String get metroStationLookupFailed;
+
   /// No description provided for @railOperatingNotices.
   ///
   /// In en, this message translates to:
