@@ -6,6 +6,7 @@ import 'api_http.dart';
 import 'api_config.dart';
 import 'api_user_agent.dart';
 import 'auth_token_store.dart';
+import 'feedback_models.dart';
 import 'http_error_utils.dart';
 
 class FeedbackRateLimitException implements Exception {
@@ -46,6 +47,10 @@ class FeedbackService {
   Future<FeedbackSubmissionResult> submitFeedback({
     required String title,
     required String content,
+    FeedbackCategory? category,
+    String? routeContext,
+    String? contact,
+    FeedbackDiagnostics? diagnostics,
   }) async {
     final cleanedTitle = title.trim();
     final cleanedContent = content.trim();
@@ -62,13 +67,24 @@ class FeedbackService {
       throw ArgumentError('內容不能超過 4000 字。');
     }
 
+    final cleanedRouteContext = _optionalText(routeContext, 'route_context');
+    final cleanedContact = _optionalText(contact, 'contact');
+    final payload = <String, Object>{
+      'title': cleanedTitle,
+      'content': cleanedContent,
+      if (category != null) 'category': category.name,
+      'route_context': ?cleanedRouteContext,
+      'contact': ?cleanedContact,
+      if (diagnostics != null) 'diagnostics': diagnostics.toJson(),
+    };
+
     final http.Response response;
     try {
       response = await apiPost(
         _client,
         Uri.parse('${ApiConfig.baseUrl}/api/v1/feedback'),
         headers: ApiUserAgent.applyTo(apiJsonContentHeaders),
-        body: jsonEncode({'title': cleanedTitle, 'content': cleanedContent}),
+        body: jsonEncode(payload),
       );
     } on ApiRequestException catch (error) {
       if (error.statusCode != 429) rethrow;
@@ -99,6 +115,17 @@ class FeedbackService {
       decoded.map((key, value) => MapEntry(key.toString(), value)),
     );
   }
+
+  void dispose() => _client.close();
+}
+
+String? _optionalText(String? value, String field) {
+  final cleaned = value?.trim();
+  if (cleaned == null || cleaned.isEmpty) return null;
+  if (cleaned.length > 200) {
+    throw ArgumentError.value(null, field, 'Must be at most 200 characters.');
+  }
+  return cleaned;
 }
 
 int _jsonInt(Object? value) {

@@ -2702,6 +2702,79 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get feedbackMoreInfo => 'More information (optional)';
+
+  @override
+  String get feedbackMoreInfoHint =>
+      'Additional context can help us understand the issue. You can also submit without it.';
+
+  @override
+  String get feedbackCategoryLabel => 'Category (optional)';
+
+  @override
+  String get feedbackCategoryNone => 'Not specified';
+
+  @override
+  String get feedbackCategoryBug => 'Bug report';
+
+  @override
+  String get feedbackCategoryData => 'Transit data issue';
+
+  @override
+  String get feedbackCategoryFeature => 'Feature suggestion';
+
+  @override
+  String get feedbackCategoryOther => 'Other';
+
+  @override
+  String get feedbackRouteContextLabel => 'Related route / stop (optional)';
+
+  @override
+  String get feedbackRouteContextHint =>
+      'For example: Taipei route 307, toward Banqiao, Taipei Main Station';
+
+  @override
+  String get feedbackContactLabel => 'Contact details (optional)';
+
+  @override
+  String get feedbackContactHint =>
+      'For example: email or Discord username for follow-up questions';
+
+  @override
+  String feedbackOptionalTooLong(int max) {
+    return 'Use no more than $max characters';
+  }
+
+  @override
+  String get feedbackIncludeDiagnostics =>
+      'Include app and display information';
+
+  @override
+  String get feedbackDiagnosticsHint =>
+      'When enabled, the version, platform, language and display settings shown below will be included to help troubleshoot the issue.';
+
+  @override
+  String get feedbackDiagnosticVersion => 'App version';
+
+  @override
+  String get feedbackDiagnosticCommit => 'Code revision';
+
+  @override
+  String get feedbackDiagnosticPlatform => 'Platform';
+
+  @override
+  String get feedbackDiagnosticLocale => 'Language';
+
+  @override
+  String get feedbackDiagnosticScreen => 'Screen size (logical pixels)';
+
+  @override
+  String get feedbackDiagnosticTextScale => 'Text scale (at 14pt)';
+
+  @override
+  String get feedbackDiagnosticTheme => 'Theme';
+
+  @override
   String get feedbackSubmitting => 'Sending...';
 
   @override
