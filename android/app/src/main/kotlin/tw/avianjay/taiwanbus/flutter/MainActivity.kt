@@ -94,6 +94,15 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
 
+                "getSmartRouteReminderLog" -> {
+                    result.success(SmartRouteNotificationSupport.loadReminderLog(this))
+                }
+
+                "forgetSmartRouteReminders" -> {
+                    SmartRouteNotificationSupport.forgetReminders(this)
+                    result.success(null)
+                }
+
                 "setApplicationInForeground" -> {
                     val appInForeground = call.argument<Boolean>("appInForeground") ?: false
                     AppRuntimeStateStore.setAppInForeground(this, appInForeground)

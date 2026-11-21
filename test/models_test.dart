@@ -3,6 +3,54 @@ import 'package:taiwanbus_flutter/core/account_sync_models.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 
 void main() {
+  test(
+    'a local stop clear keeps route-open evidence but drops old stop ids',
+    () {
+      final clearedAt = DateTime(2026, 11, 20, 9).millisecondsSinceEpoch;
+      final profile = RouteUsageProfile(
+        provider: BusProvider.tpe,
+        routeKey: 500,
+        pathId: 0,
+        routeName: '500',
+        totalOpens: 2,
+        lastOpenedAtMs: clearedAt + 1,
+        selectionTimestampsMs: [clearedAt - 1, clearedAt + 1],
+        visits: [
+          RouteVisit(atMs: clearedAt - 1, stopId: 7),
+          RouteVisit(atMs: clearedAt + 1, stopId: 9),
+        ],
+      );
+
+      final cleared = profile.clearStopUsageBefore(clearedAt);
+
+      expect(cleared.visits.map((visit) => visit.atMs), [
+        clearedAt - 1,
+        clearedAt + 1,
+      ]);
+      expect(cleared.visits.map((visit) => visit.stopId), [null, 9]);
+      expect(cleared.selectionTimestampsMs, [clearedAt + 1]);
+      expect(cleared.totalOpens, profile.totalOpens);
+    },
+  );
+
+  test('a local clear drops old destination choice selections', () {
+    final clearedAt = DateTime(2026, 11, 20, 9).millisecondsSinceEpoch;
+    final profile = DestinationChoiceProfile(
+      provider: BusProvider.tpe,
+      routeKey: 500,
+      departurePathId: 0,
+      boardingStopId: 7,
+      destinationPathId: 0,
+      destinationStopId: 12,
+      selectionTimestampsMs: [clearedAt - 1, clearedAt + 1],
+    );
+
+    final cleared = profile.clearSelectionsBefore(clearedAt);
+
+    expect(cleared.selectionTimestampsMs, [clearedAt + 1]);
+    expect(cleared.destinationStopId, profile.destinationStopId);
+  });
+
   test('search history round trips route stop and destination identity', () {
     const entry = SearchHistoryEntry(
       provider: BusProvider.nwt,
@@ -421,6 +469,7 @@ void main() {
           syncEnabled: true,
           routeHistorySyncEnabled: true,
           routeHistoryModifiedAtMs: 1716000000100,
+          routeHistorySelectionHistoryClearedAtMs: 1716000000200,
           routeHistoryDevicePayload: const {
             'modifiedAtMs': 1716000000100,
             'history': <dynamic>[],
@@ -446,6 +495,7 @@ void main() {
     expect(restored.syncEnabled, isTrue);
     expect(restored.routeHistorySyncEnabled, isTrue);
     expect(restored.routeHistoryModifiedAtMs, 1716000000100);
+    expect(restored.routeHistorySelectionHistoryClearedAtMs, 1716000000200);
     expect(restored.routeHistoryDevicePayload?['history'], isEmpty);
     expect(restored.preferences.lastSyncedServerRevision, 4);
     expect(

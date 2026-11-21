@@ -328,7 +328,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get smartRecommendationsEmpty =>
-      'There are no recommendations to show yet. Open your usual routes a few times so YABus can learn when you use them. You can also grant location access in Nearby stops, then return and refresh to find nearby routes.';
+      'There are no recommendations to show yet. Open your usual routes at similar times on different days so YABus can learn when you use them. You can also grant location access in Nearby stops, then return and refresh to find nearby routes.';
 
   @override
   String get smartRecommendationsDisabled =>
@@ -753,7 +753,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get smartRecommendationsDescription =>
-      'Suggest routes on the home screen based on how often and when you open or select them. With insufficient history, nearby stops are used when location is available. Usage-based suggestions require a local database for your region. Turning this off hides the card; learning records can be cleared in History and privacy.';
+      'Suggest routes on the home screen from when you usually look them up on weekdays and weekends, showing the stop you usually use first. With insufficient history, nearby stops are used when location is available. Usage-based suggestions require a local database for your region. Turning this off hides the card; learning records can be cleared in History and privacy.';
 
   @override
   String get autoFavoriteTitle => 'Auto-add frequent favorites';
@@ -767,7 +767,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get smartNotificationDescription =>
-      'Check usual routes and nearby stops in the background around the times you often use them, and send arrival reminders when conditions match. Sufficient usage history, notification permission and background location are required. Battery restrictions may delay checks, and notifications are not sent every time.';
+      'Around the time you usually check a route, look up arrivals at your usual stop in the background and remind you when there is a bus you can still catch. Reminders start once you have checked the same route at a similar time on several different days, and pause when you have not opened that route for two weeks (opening it from a reminder counts) until you check it again; the last reminders before a pause say so. Notification permission is required. Background location is optional: when granted, the stop follows where you are, and no reminder is sent when you are far from the route. Battery restrictions may delay checks, and a reminder is not sent every time.';
 
   @override
   String get smartNotificationPermissionRequired =>

@@ -4,7 +4,6 @@ import android.app.Application
 import android.app.NotificationManager
 import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
-import android.location.Location
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
@@ -144,69 +143,78 @@ class AppLaunchStopIdTest {
 
     @Test
     fun tappingASmartRouteNotificationLaunchesWithTheFullWidthId() {
-        // The stop comes out of the route database Flutter syncs, where the id
-        // is stored as text.
+        val slot = SmartPlanSlot(
+            provider = "khh",
+            routeKey = 100,
+            routeId = "KHH100",
+            pathId = 1,
+            routeName = "100",
+            weekday = 1,
+            startMinute = 190,
+            endMinute = 250,
+            peakMinute = 220,
+            validUntilMs = Long.MAX_VALUE,
+            stopId = RAW_STOP_ID,
+        )
         val databaseFile = File(
-            application.filesDir.parentFile,
-            "app_flutter/.yabus_backend/bus_khh_v2.sqlite",
+            application.getDatabasePath("_").parentFile,
+            ".yabus_backend/bus_khh_v2.sqlite",
         )
         databaseFile.parentFile!!.mkdirs()
         SQLiteDatabase.openOrCreateDatabase(databaseFile, null).use { database ->
-            database.execSQL("CREATE TABLE routes (route_key INTEGER, route_id TEXT, route_name TEXT)")
-            database.execSQL("CREATE TABLE paths (route_key INTEGER, path_id INTEGER, path_name TEXT)")
             database.execSQL(
-                "CREATE TABLE stops (route_key INTEGER, path_id INTEGER, stop_id TEXT, " +
-                    "stop_name TEXT, sequence INTEGER, lon REAL, lat REAL)",
+                "CREATE TABLE stops (routeid TEXT, pathid INTEGER, seq INTEGER, stopid TEXT, " +
+                    "name TEXT, name_en TEXT, lat REAL, lon REAL, PRIMARY KEY (routeid, pathid, seq))",
             )
-            database.execSQL("INSERT INTO routes VALUES (100, 'KHH100', '100')")
-            database.execSQL("INSERT INTO paths VALUES (100, 0, '去程')")
             database.execSQL(
-                "INSERT INTO stops VALUES (100, 0, '$RAW_STOP_ID', '測試站', 1, 120.338401, 22.60612)",
+                "INSERT INTO stops VALUES ('KHH100', 1, 1, ?, '測試站', NULL, 22.60612, 120.338401)",
+                arrayOf(RAW_STOP_ID.toString()),
             )
         }
-        val routeData = requireNotNull(
-            SmartRouteNotificationSupport.loadRouteData(application, "khh", 100, "100"),
+        val routeData = requireNotNull(SmartRouteNotificationSupport.loadRouteData(application, slot))
+        val choice = requireNotNull(
+            SmartRouteNotificationSupport.chooseStop(slot, routeData, location = null),
         )
-        val here = Location("test").apply {
-            latitude = 22.60612
-            longitude = 120.338401
-        }
-        val nearestStop = requireNotNull(
-            SmartRouteNotificationSupport.findNearestStop(here, routeData, pathId = 0),
-        )
+        assertEquals(RAW_STOP_ID.toString(), choice.stop.rawStopId)
 
-        assertEquals(
-            "the live feed is still looked up by the folded key",
-            foldStopId(RAW_STOP_ID),
-            nearestStop.stopId,
+        // The feed is joined by the stored string, not the native folded key.
+        val feed = """
+            {"paths": [{"pathid": 1, "stops": [
+                {"stopid": "${foldStopId(RAW_STOP_ID)}", "eta": 300},
+                {"stopid": "$RAW_STOP_ID", "eta": 480}
+            ]}]}
+        """.trimIndent()
+        val now = 1775604360000L
+        val live = requireNotNull(
+            SmartRouteReminderRules.parseLiveStop(feed, slot.pathId, choice.stop.rawStopId, now),
         )
+        val decision = requireNotNull(SmartRouteReminderRules.decide(live, choice.distanceMeters))
+        assertEquals(480, decision.etaSeconds)
 
         SmartRouteNotificationSupport.ensureChannel(application)
         SmartRouteNotificationSupport.showNotification(
             context = application,
-            profile = SmartRouteProfile(
-                provider = "khh",
-                routeKey = 100,
-                pathId = 0,
-                routeName = "100",
-                totalOpens = 5,
-                lastOpenedAtMs = 0L,
-                totalSelections = 0,
-                lastSelectedAtMs = 0L,
-                hourlyOpens = mapOf(8 to 5),
-                hourlySelections = emptyMap(),
+            slot = slot,
+            stop = choice.stop,
+            text = SmartRouteReminderRules.buildText(
+                routeName = slot.routeName,
+                pathName = routeData.pathName,
+                stopName = choice.stop.stopName,
+                decision = decision,
+                distanceMeters = choice.distanceMeters,
+                slot = slot,
+                dayStartHour = 4,
+                nowMs = now,
             ),
-            routeData = routeData,
-            nearestStop = nearestStop,
-            liveStop = SmartLiveStop(sec = 120, msg = null),
-            distanceMeters = nearestStop.distanceMeters,
-            nowMs = 1L,
+            timeoutMs = SmartRouteReminderRules.timeoutMs(decision),
         )
         val posted = shadowOf(application.getSystemService(NotificationManager::class.java))
             .allNotifications
             .single()
         val payload = launchPayloadOf(shadowOf(posted.contentIntent).savedIntent)
 
+        assertEquals("KHH100", payload["routeId"])
+        assertEquals(1, payload["pathId"])
         assertEquals(RAW_STOP_ID, payload.stopId("stopId"))
     }
 
