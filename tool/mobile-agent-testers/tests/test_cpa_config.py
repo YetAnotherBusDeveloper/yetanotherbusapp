@@ -27,6 +27,7 @@ class CPAConfigTests(unittest.TestCase):
 
     def test_no_alias_or_empty_auth(self):
         for model, key in (('OPUS', 'k'), ('opusplan', 'k'), ('sonnet[1m]', 'k'), ('', 'k'),
+                           ('example[1m][1m]', 'k'), ('example[1m]text', 'k'), ('example[bogus]', 'k'),
                            ('model', ''), ('model', ' \n'), ('model', 'secret\nheader')):
             with self.subTest(model=model), self.assertRaises(ValueError):
                 validate_config('https://cpa.invalid', model, key)

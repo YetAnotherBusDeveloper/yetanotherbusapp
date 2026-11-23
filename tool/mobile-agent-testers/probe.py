@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'runtime' / 'scripts'))
-from cpa_config import validate_config
+from cpa_config import messages_model, validate_config
 
 SOCKET_TIMEOUT = 15  # inactivity, seconds
 STAGE_TIMEOUT = 45   # includes DNS, TLS handshake, headers and slow-drip bodies
@@ -87,7 +87,7 @@ def stage(name):
 
 
 @contextmanager
-def post(root, key, body, mime):
+def post(root, key, body, mime, *, long_context):
     url = urlsplit(root)
     # No urllib proxy handlers, redirect processing, SDK defaults or retries.
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)  # CERT_REQUIRED + check_hostname
@@ -95,9 +95,13 @@ def post(root, key, body, mime):
     ctx.load_default_certs()
     conn = http.client.HTTPSConnection(url.hostname, url.port or 443, timeout=SOCKET_TIMEOUT, context=ctx)
     try:
-        conn.request('POST', url.path + '/v1/messages', json.dumps(body).encode(), headers={
-            'Authorization': 'Bearer ' + key, 'anthropic-version': '2023-06-01',
-            'Content-Type': 'application/json', 'Accept': mime})
+        headers = {'Authorization': 'Bearer ' + key, 'anthropic-version': '2023-06-01',
+                   'Content-Type': 'application/json', 'Accept': mime}
+        path = url.path + '/v1/messages'
+        if long_context:
+            headers['anthropic-beta'] = 'context-1m-2025-08-07'
+            path += '?beta=true'
+        conn.request('POST', path, json.dumps(body).encode(), headers=headers)
         with conn.getresponse() as res:
             if res.status != 200:
                 reasons = {400: 'invalid request', 401: 'authentication failed', 403: 'permission denied',
@@ -267,14 +271,16 @@ def verify(env):
         {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png', 'data': tile_png(colors)}},
         {'type': 'text', 'text': 'Call report_colors with the four tile colors from left to right. '
          'After the tool returns, reply with only its receipt, exactly as received.'}]}]
-    common = {'model': model, 'max_tokens': MAX_TOKENS, 'tools': [TOOL], 'messages': messages}
-    with stage(VISION), post(root, key, dict(common, stream=True), 'text/event-stream') as res:
+    wire_model = messages_model(model)
+    long_context = wire_model != model
+    common = {'model': wire_model, 'max_tokens': MAX_TOKENS, 'tools': [TOOL], 'messages': messages}
+    with stage(VISION), post(root, key, dict(common, stream=True), 'text/event-stream', long_context=long_context) as res:
         blocks, call_id = streamed_call(res, colors)
 
     receipt = 'receipt-' + secrets.token_hex(8)
     messages.extend([{'role': 'assistant', 'content': blocks}, {'role': 'user', 'content': [
         {'type': 'tool_result', 'tool_use_id': call_id, 'content': receipt}]}])
-    with stage(FOLLOWUP), post(root, key, dict(common, stream=False), 'application/json') as res:
+    with stage(FOLLOWUP), post(root, key, dict(common, stream=False), 'application/json', long_context=long_context) as res:
         payload = res.read(MAX_BYTES + 1)
         if len(payload) > MAX_BYTES:
             raise Failure('response size limit exceeded')

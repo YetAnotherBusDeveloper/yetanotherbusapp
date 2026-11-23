@@ -115,6 +115,7 @@ class Preflight(unittest.TestCase):
             self.assertEqual((method, path), ('POST', '/prefix/v1/messages'))
             self.assertEqual(kw['headers']['Authorization'], 'Bearer ' + KEY)
             self.assertEqual(kw['headers']['anthropic-version'], '2023-06-01')
+            self.assertNotIn('anthropic-beta', kw['headers'])
             req = json.loads(body)
             self.assertEqual(req['model'], MODEL)
             self.assertTrue(0 < req['max_tokens'] <= 256)
@@ -147,6 +148,14 @@ class Preflight(unittest.TestCase):
         self.assertNotIn('tool_choice', second)
         self.assertEqual(second['tools'], first['tools'])
         self.assertEqual(self.conn.close.call_count, 2)
+
+    def test_context_suffix_on_both_requests(self):
+        base_model = MODEL + '(xhigh)'
+        self.invoke(stream(), final(), env=dict(ENV, LLM_MODEL=base_model + '[1m]'), rc=0, calls=2)
+        for args, kw in self.conn.request.call_args_list:
+            self.assertEqual(args[1], '/prefix/v1/messages?beta=true')
+            self.assertEqual(json.loads(args[2])['model'], base_model)
+            self.assertEqual(kw['headers']['anthropic-beta'], 'context-1m-2025-08-07')
 
     def test_signed_and_redacted_reasoning_replayed_without_logging(self):
         fs = frames()

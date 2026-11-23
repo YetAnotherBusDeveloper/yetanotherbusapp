@@ -6,12 +6,19 @@ import sys
 from urllib.parse import urlsplit, urlunsplit
 
 
+def messages_model(setting: str) -> str:
+    """Claude Code consumes a terminal [1m]; CPA modifiers like (xhigh) stay on the wire."""
+    return setting.removesuffix('[1m]')
+
+
 def validate_config(base_url: str, model: str, key: str) -> str:
     """Return the SDK base URL (Messages API appends /v1/messages itself)."""
     if not re.fullmatch(r'[!-~]+', key):
         raise ValueError('Missing or invalid CPA key.')
-    if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./:+_()-]*', model)
-            or model.lower() in {'default', 'opus', 'sonnet', 'haiku', 'fable', 'opusplan', 'best', 'inherit'}):
+    model_id = messages_model(model)
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9./:+_()-]*', model_id):
+        raise ValueError('Invalid CPA model ID or context suffix (expected an optional trailing [1m]).')
+    if model_id.lower() in {'default', 'opus', 'sonnet', 'haiku', 'fable', 'opusplan', 'best', 'inherit'}:
         raise ValueError('Supply an explicit CPA model ID, not a CLI alias.')
     if (not base_url.startswith('https://') or not re.fullmatch(r'[!-~]+', base_url)
             or any(c in base_url for c in '@?#\\%')):
