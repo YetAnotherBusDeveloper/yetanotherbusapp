@@ -77,6 +77,29 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
+      - name: Prepare and verify KVM before building the APK
+        run: |
+          if [[ ! -c /dev/kvm ]]; then
+            if grep -qw vmx /proc/cpuinfo; then sudo modprobe kvm_intel
+            elif grep -qw svm /proc/cpuinfo; then sudo modprobe kvm_amd
+            else echo '::error::Runner does not expose CPU virtualization (vmx/svm).'; exit 1; fi
+            sudo udevadm settle --timeout=15
+          fi
+          [[ -c /dev/kvm ]] || { echo '::error::KVM device missing after loading the kernel module.'; exit 1; }
+          # The emulator runs as the Actions runner, not the model's OS user.
+          # Set permissions on the actual node instead of racing an async udev trigger.
+          sudo chgrp "$(id -g)" /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          stat -c 'KVM device: %A %U:%G' /dev/kvm
+          python3 - <<'PY'
+          import fcntl, os
+          fd = os.open('/dev/kvm', os.O_RDWR)
+          try:
+              if fcntl.ioctl(fd, 0xAE00) != 12:  # KVM_GET_API_VERSION
+                  raise SystemExit('Unsupported KVM API version')
+          finally:
+              os.close(fd)
+          PY
       - name: Trusted test harness
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -134,7 +157,7 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
         run: |
           sudo --preserve-env=LLM_BASE_URL python3 tool/mobile-agent-testers/restrict-network.py
-      - name: Select available profile and enable KVM
+      - name: Select available AVD profile
         id: avd
         env:
           PROFILE: ${{ matrix.profile }}
@@ -144,9 +167,6 @@ jobs:
             echo '::notice::Requested AVD profile unavailable; using pixel_6'; PROFILE=pixel_6
           fi
           echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
-          test -w /dev/kvm
       - name: Boot emulator, install and launch APK, then run tester
         id: session
         timeout-minutes: 34
