@@ -1,0 +1,197 @@
+name: Mobile agent testers (YABus Android)
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_personas:
+        description: 'Android persona IDs, comma-separated (1–3, sequential)'
+        type: string
+        required: true
+        default: anna
+      ref:
+        description: 'App branch, tag or full SHA in default-branch history (blank = dispatch SHA)'
+        type: string
+        required: false
+      brief:
+        description: 'YABus test brief'
+        type: choice
+        options: [yabus, search]
+        default: yabus
+      max_actions:
+        description: 'Maximum UI actions per tester (1–40)'
+        type: number
+        required: true
+        default: 15
+      record_video:
+        description: 'Include emulator screen recording in the encrypted report'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+concurrency:
+  group: yabus-android-agent-testers
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    # A dispatch from another workflow ref must not run its scripts with secrets.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout: tool/mobile-agent-testers
+      - name: Validate recipient, app revision and limits
+        id: plan
+        env:
+          PERSONAS: ${{ inputs.android_personas }}
+          BRIEF: ${{ inputs.brief }}
+          MAX_ACTIONS: ${{ inputs.max_actions }}
+          APP_REF: ${{ inputs.ref }}
+        run: |
+          openssl rsa -pubin -in tool/mobile-agent-testers/results_public.pem -noout -modulus >/dev/null
+          python3 tool/mobile-agent-testers/plan.py
+      - name: Check CPA vision, streamed tool call and follow-up (billed)
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: python3 tool/mobile-agent-testers/probe.py
+
+  test:
+    needs: plan
+    name: Android / ${{ matrix.persona }}
+    # Claude's subprocess credential scrub uses unprivileged PID namespaces.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 85
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Trusted test harness
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          sparse-checkout: tool/mobile-agent-testers
+      - name: App source (immutable, reviewed ancestor)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          path: app
+          persist-credentials: false
+      - name: Make room for Android build and AVD
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk-bundle /opt/ghc /usr/local/.ghcup
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            app/android/**/*.gradle.kts
+            app/android/gradle/wrapper/gradle-wrapper.properties
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.41.6'
+          channel: stable
+          cache: true
+      - name: Build actual debug APK (no release or sign-in secrets)
+        working-directory: app
+        env:
+          APP_GIT_SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          python3 ../tool/mobile-agent-testers/debug-manifest.py android/app/src/debug/AndroidManifest.xml
+          flutter pub get
+          flutter build apk --debug --target-platform android-x64 --no-pub --dart-define="APP_GIT_SHA=$APP_GIT_SHA"
+          test -s build/app/outputs/flutter-apk/app-debug.apk
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24.22.1'
+      - name: Prepare isolated Android session
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-pil
+          npm install --prefix "$RUNNER_TEMP/yabus-cli" --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.330
+          sudo cp -R "$RUNNER_TEMP/yabus-cli" /opt/yabus-cli
+          sudo useradd --create-home --shell /bin/bash yabus-agent
+          chmod o-rwx "$HOME"
+          sudo cp -R tool/mobile-agent-testers/runtime /opt/yabus-session
+          sudo install -m 644 app/build/app/outputs/flutter-apk/app-debug.apk /opt/yabus-session/app.apk
+          sudo install -d -m 700 -o yabus-agent /opt/yabus-session/results
+          sudo -H -u yabus-agent /usr/bin/python3 -I -c 'from PIL import Image'
+          sudo -H -u yabus-agent /opt/yabus-cli/bin/claude --version
+          rm -rf app/build
+      - name: Restrict tester egress to CPA and the local emulator
+        env:
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+        run: |
+          sudo --preserve-env=LLM_BASE_URL python3 tool/mobile-agent-testers/restrict-network.py
+      - name: Select available profile and enable KVM
+        id: avd
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          profiles=$("$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" list device -c)
+          if ! grep -Fxq "$PROFILE" <<< "$profiles"; then
+            echo '::notice::Requested AVD profile unavailable; using pixel_6'; PROFILE=pixel_6
+          fi
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          test -w /dev/kvm
+      - name: Boot emulator, install and launch APK, then run tester
+        id: session
+        timeout-minutes: 34
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          PERSONA: ${{ matrix.persona }}
+          DEVICE: ${{ steps.avd.outputs.profile }} (API ${{ matrix.api }})
+          FONT_SCALE: ${{ matrix.font_scale }}
+          THEME: ${{ matrix.theme }}
+          LOCALE: ${{ matrix.locale }}
+          GEO: ${{ matrix.geo }}
+          BRIEF: briefs/${{ inputs.brief }}.md
+          MAX_ACTIONS: ${{ inputs.max_actions }}
+          RECORD_VIDEO: ${{ inputs.record_video }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: ${{ steps.avd.outputs.profile }}
+          ram-size: 3072M
+          disable-animations: true
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 420
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: bash tool/mobile-agent-testers/launch.sh
+      - name: Encrypt complete or partial session (no plaintext upload)
+        id: encrypt
+        if: ${{ !cancelled() && steps.session.outcome != 'skipped' }}
+        env:
+          PERSONA: ${{ matrix.persona }}
+        run: |
+          sudo pkill -KILL -u yabus-agent || true
+          output="$RUNNER_TEMP/yabus-ciphertext"
+          sudo bash tool/mobile-agent-testers/encrypt.sh /opt/yabus-session "$PERSONA" tool/mobile-agent-testers/results_public.pem "$output"
+          sudo chown -R "$(id -u):$(id -g)" "$output"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: ${{ !cancelled() && steps.encrypt.outcome == 'success' }}
+        with:
+          name: results-${{ matrix.persona }}
+          path: |
+            ${{ runner.temp }}/yabus-ciphertext/${{ matrix.persona }}.key.bin
+            ${{ runner.temp }}/yabus-ciphertext/${{ matrix.persona }}.tgz.enc
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
