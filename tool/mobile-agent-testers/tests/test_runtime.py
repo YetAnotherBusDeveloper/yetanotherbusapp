@@ -300,6 +300,7 @@ class WrapperTests(RuntimeTest):
             prepare_device() {{
                 echo device >> calls
                 echo {DEVICE_OUT}; echo {DEVICE_OUT} >&2
+                stage=device-setup/install-apk
                 export APP_ID=com.example.test LAUNCH_COMPONENT=com.example.test/.MainActivity
                 return "${{TEST_DEVICE_RC:-0}}"
             }}
@@ -320,6 +321,7 @@ class WrapperTests(RuntimeTest):
         p = self.wrapper()
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertIn("claude", self.calls())
+        self.assertIn('APK installed, digest verified and launcher activity started', p.stdout)
         self.assertIn("stop", self.calls())
         self.assertTrue((self.root / "results" / PERSONA / "01.png").is_file())
 
@@ -404,7 +406,11 @@ class WrapperTests(RuntimeTest):
         self.assertIn("claude", self.calls())
 
     def test_bad_setup_never_starts_agent(self):
-        self.assertNotEqual(self.wrapper(TEST_DEVICE_RC="17").returncode, 0)
+        p = self.wrapper(TEST_DEVICE_RC="17")
+        self.assertEqual(p.returncode, 17)
+        self.assertIn('device-setup/install-apk', p.stderr)
+        self.assertNotIn('APK installed', p.stdout)
+        self.assertNotIn('Starting Android UI tester', p.stdout)
         self.assertEqual(self.calls(), ["device"])
 
     def test_invalid_configuration_never_reaches_device_or_agent(self):

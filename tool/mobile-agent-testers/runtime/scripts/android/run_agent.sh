@@ -46,10 +46,12 @@ mkdir -- "results/$PERSONA" 2>/dev/null
 
 stage=device-setup
 prepare_device >/dev/null 2>&1 || exit $?
+printf 'Android APK installed, digest verified and launcher activity started.\n'
 stage=recording
 recording_started=true
 start_recording >/dev/null 2>&1 || exit $?
 stage=agent
+printf 'Starting Android UI tester.\n'
 run_claude >/dev/null 2>&1 || exit $?
 stage=recording
 stop_recording >/dev/null 2>&1 || exit $?

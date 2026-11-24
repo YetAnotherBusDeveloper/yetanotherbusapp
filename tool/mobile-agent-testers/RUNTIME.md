@@ -25,6 +25,10 @@ Keep credential scrubbing enabled. On Linux the CLI uses an [isolated PID namesp
 
 **Exit and output.** Exit `0` means setup, Claude completion, optional recording and evidence validation succeeded; it does **not** mean the app had no defects. CLI failures retain their exit code. A turn limit, malformed response, missing report, invalid manifest or missing/referenced-invalid screen fails even if the process itself exited zero. The ordinary log contains only a fixed stage/status (for example, `rate_limit`), not raw model output, endpoint, model ID, screenshot data or adb output. Results remain private until your workflow encrypts them. On failure there may be partial evidence; do not publish it as a successful run.
 
+A `device-setup/...` failure names the last attempted operation (for example, `adb-root`, `geo-fix`, `install-apk`, `verify-installed-apk` or `start-activity`). It happens before the model session. The separate “APK installed, digest verified and launcher activity started” milestone confirms installation and launch; “Starting Android UI tester” alone is **not** evidence that a UI action completed.
+
+After a locale restart, setup waits for the new Android framework, settings services and unlocked emulator user. It installs and starts the app only once. If Android's `am start -W` reports `Status: timeout`, setup gives the launcher a bounded first-frame check: the actual app window must gain focus, be visible, and report `HAS_DRAWN`. A splash window or a running process is not enough. If these checks fail, the agent never starts.
+
 - `results/<persona>/report.md` — nonempty narrative.
 - `results/<persona>/findings.json` — numeric `score` (0–10) and `issues` array; each issue needs `title`, `severity`, `screen`, nonempty `steps`, and `screens` referencing existing numbered PNGs. An empty issues array is valid.
 - `results/<persona>/01.png`, `02.png`, … — half-size evidence, initial screen then after each action. With recording enabled, `video/` holds private MP4 segments. Transcripts/stderr are temporary, not deliverables.
