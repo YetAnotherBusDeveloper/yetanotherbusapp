@@ -18,7 +18,9 @@ finish() {
     local label=''
     IFS= read -r -n 32 label < "$AGENT_TMP/agent-status"
     case "$label" in
-      auth|quota|rate_limit|overloaded|max_turns|cli_error|invalid_response) stage="agent: $label" ;;
+      auth|quota|rate_limit|overloaded|model_or_endpoint|invalid_request|connection|provider_error|\
+      cli_arguments|cli_sandbox|cli_setup|cli_no_output|cli_empty_output|cli_oversized_output|\
+      cli_non_json_output|cli_no_result|cli_error_result|cli_exit_with_success|max_turns|invalid_response) stage="agent: $label" ;;
     esac
   fi
   if [[ -n $AGENT_TMP ]]; then rm -rf -- "$AGENT_TMP"; fi
@@ -32,10 +34,14 @@ trap 'exit 129' HUP
 
 # Do not pipe the agent through tee or print any output from the device or CLI.
 # Stage labels below are constants, not provider-, app- or model-supplied text.
+stage=preflight/provider-config
 source scripts/llm_env.sh >/dev/null 2>&1 || exit $?
+stage=preflight/inputs
 python3 -B scripts/android/check_inputs.py >/dev/null 2>&1 || exit $?
+stage=preflight/dependencies
 python3 -B -c 'from PIL import Image' >/dev/null 2>&1 || exit $?
 for cmd in adb claude; do command -v "$cmd" >/dev/null; done
+stage=preflight/workspace
 AGENT_TMP=$(mktemp -d)
 source scripts/android/device.sh
 source scripts/android/run_claude.sh

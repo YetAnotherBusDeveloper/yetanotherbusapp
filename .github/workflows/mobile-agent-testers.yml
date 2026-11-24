@@ -141,7 +141,7 @@ jobs:
       - name: Prepare isolated Android session
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends python3-pil
+          sudo apt-get install -y --no-install-recommends python3-pil bubblewrap socat
           npm install --prefix "$RUNNER_TEMP/yabus-cli" --global --no-audit --no-fund @anthropic-ai/claude-code@2.1.330
           sudo cp -R "$RUNNER_TEMP/yabus-cli" /opt/yabus-cli
           sudo useradd --create-home --shell /bin/bash yabus-agent
@@ -150,6 +150,8 @@ jobs:
           sudo install -m 644 app/build/app/outputs/flutter-apk/app-debug.apk /opt/yabus-session/app.apk
           sudo install -d -m 700 -o yabus-agent /opt/yabus-session/results
           sudo -H -u yabus-agent /usr/bin/python3 -I -c 'from PIL import Image'
+          # Exercise the credential-scrub prerequisite as the real tester, before billing for a session.
+          sudo -H -u yabus-agent bwrap --unshare-user --unshare-pid --ro-bind / / --proc /proc --dev /dev --chdir / -- /bin/true
           sudo -H -u yabus-agent /opt/yabus-cli/bin/claude --version
           rm -rf app/build
       - name: Restrict tester egress to CPA and the local emulator

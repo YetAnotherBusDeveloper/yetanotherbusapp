@@ -91,6 +91,53 @@ class StatusTests(RuntimeTest):
         self.assertEqual(p.returncode == 0, label == "finished", p.stderr)
         self.assertEqual(self.status.read_text(encoding="ascii").strip(), label)
 
+    def test_setup_and_provider_hints_from_private_error_channels(self):
+        cases = (
+            ('cli_arguments', "error: unknown option '--restricted'"),
+            ('cli_sandbox', 'unshare: unshare failed: Operation not permitted'),
+            ('cli_setup', 'EACCES: permission denied, open config'),
+            ('connection', 'getaddrinfo ENOTFOUND'),
+            ('model_or_endpoint', 'API Error: 404'),
+            ('invalid_request', 'invalid_request_error'),
+            ('provider_error', 'API Error: 502 Bad Gateway'),
+        )
+        for label, message in cases:
+            with self.subTest(label=label):
+                private = f'{message}: {KEY} {MODEL} {CLI_ERR}'
+                self.errors.write_text(private, encoding='utf-8')
+                self.output.write_bytes(b'')
+                self.expect(label, rc=2)
+                self.errors.write_bytes(b'')
+                write_json(self.output, {'type': 'result', 'is_error': True,
+                                         'errors': [{'message': private}]})
+                self.expect(label)  # an error result fails even with a zero exit
+
+    def test_provider_error_envelope_never_substitutes_for_a_result(self):
+        write_json(self.output, {'type': 'error', 'error': {'code': 'model_not_found',
+                                                            'message': f'{KEY} {MODEL}'}})
+        self.expect('model_or_endpoint', rc=1)
+        self.expect('model_or_endpoint')
+
+    def test_unrecognized_cli_failure_reports_only_output_shape(self):
+        for label, stdout, stderr in (
+                ('cli_no_output', b'', b''),
+                ('cli_empty_output', b'\n', CLI_ERR.encode()),
+                ('cli_non_json_output', KEY.encode(), CLI_ERR.encode()),
+                ('cli_no_result', json.dumps([SUCCESS, {'type': MODEL}]).encode(), b''),
+                ('cli_error_result', json.dumps({**SUCCESS, 'is_error': True}).encode(), b''),
+                ('cli_oversized_output', json.dumps(SUCCESS).encode() + b' ' * (4 * 1024 * 1024), b'')):
+            with self.subTest(label=label):
+                self.output.write_bytes(stdout)
+                self.errors.write_bytes(stderr)
+                self.expect(label, rc=1)
+                self.expect('invalid_response')
+
+    def test_text_in_other_turns_or_completed_work_is_not_an_error_hint(self):
+        write_json(self.output, [{'type': 'assistant', 'result': 'unknown option'},
+                                 {**SUCCESS, 'result': 'Report: permission denied on location.'}])
+        self.expect('finished')
+        self.expect('cli_exit_with_success', rc=23)
+
     def test_only_a_complete_final_result_can_succeed(self):
         for data, label in ((SUCCESS, "finished"), ([{"type": "assistant"}, SUCCESS], "finished"),
                             ([SUCCESS, {"type": "assistant"}], "invalid_response"),
@@ -101,7 +148,7 @@ class StatusTests(RuntimeTest):
                 write_json(self.output, data)
                 self.expect(label)
         write_json(self.output, SUCCESS)
-        self.expect("cli_error", rc=23)
+        self.expect("cli_exit_with_success", rc=23)
 
     def test_provider_errors_become_fixed_labels_not_private_text(self):
         for label, message, in_stderr in (("auth", "invalid API key", True),
@@ -380,12 +427,33 @@ class WrapperTests(RuntimeTest):
         self.assertEqual(p.returncode, 19, p.stderr)
         self.assertIn("rate_limit", p.stdout + p.stderr)
 
+    def test_wrapper_reports_cli_startup_failure_without_echoing_stderr(self):
+        self.executable('claude', f"echo 'error: unknown option {KEY} {MODEL}' >&2; exit 2")
+        p = self.wrapper()
+        self.assertEqual(p.returncode, 2)
+        self.assertEqual(p.stderr, 'Android agent failed (agent: cli_arguments, exit 2).\n')
+
+    def test_wrapper_reports_unrecognized_non_json_failure_without_echoing_stdout(self):
+        self.result.write_text(CLI_OUT, encoding='utf-8')
+        (self.root / 'fixture/exit').write_text('9\n', encoding='ascii')
+        p = self.wrapper()
+        self.assertEqual(p.returncode, 9)
+        self.assertEqual(p.stderr, 'Android agent failed (agent: cli_non_json_output, exit 9).\n')
+
+    def test_malformed_status_is_neither_overwritten_nor_logged(self):
+        self.executable('claude', f'''echo 'cli_setup: {KEY}' > "$AGENT_STATE_DIR/agent-status"
+            echo 'unknown option' >&2; exit 7''')
+        p = self.wrapper()
+        self.assertEqual(p.returncode, 7)
+        self.assertEqual(p.stderr, 'Android agent failed (agent, exit 7).\n')
+
     def test_cli_exit_wins_over_success_json_and_valid_files(self):
         (self.root / "fixture/exit").write_text("23\n", encoding="ascii")
         p = self.wrapper()
         self.assertEqual(p.returncode, 23, p.stderr)
         self.assertIn("claude", self.calls())
         self.assertIn("stop", self.calls(), "recording not stopped on failure")
+        self.assertIn('agent: cli_exit_with_success', p.stderr)
 
     def test_success_json_cannot_replace_missing_evidence(self):
         (self.root / "fixture/evidence/01.png").unlink()
@@ -423,6 +491,8 @@ class WrapperTests(RuntimeTest):
                 p = self.wrapper(ANTHROPIC_API_KEY="fake-fallback", **{name: value})
                 self.assertNotEqual(p.returncode, 0)
                 self.assertEqual(self.calls(), [])
+                stage = 'provider-config' if name.startswith('LLM_') else 'inputs'
+                self.assertIn(f'preflight/{stage}', p.stderr)
 
     def test_stale_valid_evidence_is_not_reused(self):
         write_evidence(self.root / "results" / PERSONA)
