@@ -53,8 +53,10 @@ Future<Position> resolveUserPosition({
   Duration timeLimit = const Duration(seconds: 6),
   LocationAccuracy accuracy = LocationAccuracy.medium,
   @visibleForTesting bool? webOverride,
-  @visibleForTesting Duration permissionPollInterval =
-      const Duration(milliseconds: 250),
+  @visibleForTesting
+  Duration permissionPollInterval = const Duration(milliseconds: 250),
+  @visibleForTesting
+  Duration unknownPermissionLimit = const Duration(seconds: 90),
 }) async {
   final isWeb = webOverride ?? kIsWeb;
   if (!await Geolocator.isLocationServiceEnabled()) {
@@ -90,9 +92,9 @@ Future<Position> resolveUserPosition({
           locationSettings: LocationSettings(accuracy: accuracy),
         ),
         timeLimit,
-        // A prompt-state site has not been granted yet; anything else has.
-        permissionGranted: permission != LocationPermission.denied,
+        permission: permission,
         pollInterval: permissionPollInterval,
+        unknownLimit: unknownPermissionLimit,
       );
     }
     return await Geolocator.getCurrentPosition(
@@ -120,43 +122,59 @@ Future<Position> resolveUserPosition({
   }
 }
 
-/// Waits for [fix], failing with a [TimeoutException] [limit] after permission
-/// is granted. While the permission prompt is pending nothing times out.
+/// Waits for [fix], failing with a [TimeoutException] once it has been
+/// outstanding too long. While the permission prompt is pending nothing times
+/// out:
+///
+/// * granted ([LocationPermission.whileInUse]/[LocationPermission.always]):
+///   [limit] starts now;
+/// * `denied` (the browser's "prompt"): [permission] is polled and [limit]
+///   starts when it becomes granted;
+/// * anything else, i.e. `unableToDetermine` on browsers without the
+///   Permissions API (Safari 15): the answer can't be observed, so [limit]
+///   can't be anchored to it. Wait up to the much longer [unknownLimit] so a
+///   slow answer still works but a request can't hang for the plugin's day.
 Future<Position> _boundWebFix(
   Future<Position> fix,
   Duration limit, {
-  required bool permissionGranted,
+  required LocationPermission permission,
   required Duration pollInterval,
+  required Duration unknownLimit,
 }) {
   final done = Completer<Position>();
   Timer? deadline;
   Timer? poll;
 
-  void startDeadline() {
-    deadline ??= Timer(limit, () {
+  void startDeadline(Duration after) {
+    deadline ??= Timer(after, () {
       if (!done.isCompleted) {
-        done.completeError(TimeoutException('No position fix', limit));
+        done.completeError(TimeoutException('No position fix', after));
       }
     });
   }
+
+  bool granted(LocationPermission value) =>
+      value == LocationPermission.whileInUse ||
+      value == LocationPermission.always;
 
   void finish() {
     deadline?.cancel();
     poll?.cancel();
   }
 
-  if (permissionGranted) {
-    startDeadline();
-  } else {
+  if (granted(permission)) {
+    startDeadline(limit);
+  } else if (permission == LocationPermission.denied) {
     poll = Timer.periodic(pollInterval, (_) async {
       try {
-        final now = await Geolocator.checkPermission();
-        if (now != LocationPermission.denied) {
+        if (granted(await Geolocator.checkPermission())) {
           poll?.cancel();
-          startDeadline();
+          startDeadline(limit);
         }
       } catch (_) {}
     });
+  } else {
+    startDeadline(unknownLimit);
   }
 
   fix.then(

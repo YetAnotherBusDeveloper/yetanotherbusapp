@@ -72,6 +72,16 @@ class _WebPrompt extends _HangingCurrentPosition {
   }
 }
 
+/// A browser without `navigator.permissions` (Safari 15): the state can't be
+/// read, so the plugin reports `unableToDetermine`.
+class _WebUnknown extends _WebPrompt {
+  _WebUnknown(super.result);
+
+  @override
+  Future<LocationPermission> checkPermission() async =>
+      LocationPermission.unableToDetermine;
+}
+
 Position _position() => Position(
   latitude: 25.033,
   longitude: 121.5654,
@@ -209,7 +219,7 @@ void main() {
       await result;
     });
 
-    test('a granted prompt with no fix fails after the limit', () async {
+    test('the limit starts when the prompt is answered, not before', () async {
       final original = GeolocatorPlatform.instance;
       final platform = _WebPrompt(
         () => Completer<Position>().future,
@@ -218,11 +228,16 @@ void main() {
       GeolocatorPlatform.instance = platform;
       addTearDown(() => GeolocatorPlatform.instance = original);
 
+      const limit = Duration(milliseconds: 60);
+      final clock = Stopwatch()..start();
       final result = resolveUserPosition(
         webOverride: true,
-        timeLimit: const Duration(milliseconds: 40),
+        timeLimit: limit,
         permissionPollInterval: poll,
       );
+      // The user takes much longer than the limit to answer the prompt.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final answeredAt = clock.elapsed;
       platform.answered = true;
 
       await expectLater(
@@ -233,6 +248,45 @@ void main() {
               .having((f) => f.message, 'message', '目前無法取得定位，請稍後再試。'),
         ),
       );
+      expect(clock.elapsed - answeredAt, greaterThanOrEqualTo(limit));
+    });
+
+    group('without the Permissions API (unknown state)', () {
+      test('a slow answer is not cut off at the normal limit', () async {
+        final original = GeolocatorPlatform.instance;
+        final fix = Completer<Position>();
+        GeolocatorPlatform.instance = _WebUnknown(() => fix.future);
+        addTearDown(() => GeolocatorPlatform.instance = original);
+
+        final result = resolveUserPosition(
+          webOverride: true,
+          timeLimit: const Duration(milliseconds: 20),
+          unknownPermissionLimit: const Duration(seconds: 5),
+          permissionPollInterval: poll,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        fix.complete(_position());
+
+        expect(await result, isA<Position>());
+      });
+
+      test('a request that never resolves still ends', () async {
+        final original = GeolocatorPlatform.instance;
+        GeolocatorPlatform.instance = _WebUnknown(
+          () => Completer<Position>().future,
+        );
+        addTearDown(() => GeolocatorPlatform.instance = original);
+
+        await expectLater(
+          resolveUserPosition(
+            webOverride: true,
+            timeLimit: const Duration(milliseconds: 20),
+            unknownPermissionLimit: const Duration(milliseconds: 100),
+            permissionPollInterval: poll,
+          ),
+          throwsA(isA<LocationFailure>()),
+        );
+      });
     });
 
     test('an already-granted site keeps the time limit', () async {
