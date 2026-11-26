@@ -155,12 +155,15 @@ internal class YabusAssistantFavorites(private val context: Context) {
         "station" -> AppLaunchConstants.createStationDetailIntent(context, item.provider, item.stationId)
         else -> AppLaunchConstants.createRouteDetailIntent(context, item.provider, item.routeKey,
             routeId = item.routeId, pathId = item.pathId.takeIf { item.type == "boarding" },
-            stopId = item.stopId.takeIf { item.type == "boarding" },
-            destinationPathId = item.destinationPathId, destinationStopId = item.destinationStopId)
+            stopId = item.launchStopId.takeIf { item.type == "boarding" },
+            destinationPathId = item.destinationPathId, destinationStopId = item.launchDestinationStopId)
     }
 
     private fun id(group: String, item: FavoriteWidgetItem): String {
-        val identity = org.json.JSONArray(listOf(group, item.identity, item.destinationPathId, item.destinationStopId)).toString()
+        val identity = org.json.JSONArray(listOf(
+            group, item.identity, item.launchStopId.takeIf { item.type == "boarding" },
+            item.destinationPathId, item.launchDestinationStopId,
+        )).toString()
         return java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
     }

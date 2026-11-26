@@ -26,8 +26,8 @@ class YabusAppFunctionsTest {
                 "Commute": [
                     {"type":"route","provider":"tpe","routeKey":1,"routeId":"TPE307","routeName":"307"},
                     {"type":"station","provider":"tpe","stationId":"station-1","stationName":"City Hall"},
-                    {"provider":"tpe","routeKey":1,"routeId":"TPE307","pathId":1,"stopId":123,
-                     "stopName":"City Hall","destinationPathId":1,"destinationStopId":456,"destinationStopName":"Home"}
+                    {"provider":"khh","routeKey":2,"routeId":"KHH100","pathId":1,"stopId":100100128221,
+                     "stopName":"City Hall","destinationPathId":1,"destinationStopId":100100128251,"destinationStopName":"Home"}
                 ],
                 "Weekend": [{"type":"route","provider":"tpe","routeKey":1,"routeId":"TPE307","routeName":"307"}]
             }""").commit()
@@ -82,7 +82,9 @@ class YabusAppFunctionsTest {
         assertEquals("station-1", stationPayload["stationId"])
         val boarding = repository.find(page.items[2].id).second
         val payload = AppLaunchConstants.extractLaunchPayload(repository.intent(boarding))!!
-        assertEquals(456, payload["destinationStopId"])
+        assertEquals(100100128221L, payload["stopId"])
+        assertEquals(100100128251L, payload["destinationStopId"])
+        assertEquals(1, payload["destinationPathId"])
         assertEquals(1, payload["pathId"])
     }
 
