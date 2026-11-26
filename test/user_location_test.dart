@@ -47,14 +47,19 @@ class _DeniedPosition extends _HangingCurrentPosition {
 /// Browser first visit: permission reads as `denied` (prompt) and
 /// `requestPermission()` would block on a fix, so it must not be called.
 class _WebPrompt extends _HangingCurrentPosition {
-  _WebPrompt(this.result) : super(null);
+  _WebPrompt(this.result, {this.afterwards = LocationPermission.denied})
+    : super(null);
 
   final Future<Position> Function() result;
+
+  /// What `checkPermission()` reports once the prompt has been answered.
+  final LocationPermission afterwards;
+  bool answered = false;
   LocationSettings? settings;
 
   @override
   Future<LocationPermission> checkPermission() async =>
-      LocationPermission.denied;
+      answered ? afterwards : LocationPermission.denied;
 
   @override
   Future<LocationPermission> requestPermission() =>
@@ -165,7 +170,9 @@ void main() {
   );
 
   group('web first visit', () {
-    test('asks the browser directly and passes the time limit on', () async {
+    const poll = Duration(milliseconds: 5);
+
+    test('asks the browser directly and skips the plugin timeout', () async {
       final original = GeolocatorPlatform.instance;
       final fix = _position();
       final platform = _WebPrompt(() async => fix);
@@ -174,41 +181,52 @@ void main() {
 
       final position = await resolveUserPosition(
         webOverride: true,
-        timeLimit: const Duration(seconds: 6),
+        permissionPollInterval: poll,
       );
 
       expect(position, same(fix));
-      expect(platform.settings?.timeLimit, const Duration(seconds: 6));
+      // geolocator_web 4.1.3 treats this as microseconds-as-milliseconds.
+      expect(platform.settings?.timeLimit, isNull);
     });
 
-    test('a refused prompt is a permission failure', () async {
+    test('a pending prompt is never timed out', () async {
       final original = GeolocatorPlatform.instance;
-      GeolocatorPlatform.instance = _WebPrompt(
-        () => throw const PermissionDeniedException('denied'),
-      );
+      final fix = Completer<Position>();
+      final platform = _WebPrompt(() => fix.future);
+      GeolocatorPlatform.instance = platform;
       addTearDown(() => GeolocatorPlatform.instance = original);
 
-      await expectLater(
-        resolveUserPosition(webOverride: true),
-        throwsA(
-          isA<LocationFailure>().having(
-            (failure) => failure.permissionDenied,
-            'permissionDenied',
-            true,
-          ),
-        ),
-      );
+      var settled = false;
+      final result = resolveUserPosition(
+        webOverride: true,
+        timeLimit: const Duration(milliseconds: 20),
+        permissionPollInterval: poll,
+      ).whenComplete(() => settled = true);
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(settled, isFalse, reason: 'user is still reading the prompt');
+
+      fix.complete(_position());
+      await result;
     });
 
-    test('a failed fix after granting is not a permission failure', () async {
+    test('a granted prompt with no fix fails after the limit', () async {
       final original = GeolocatorPlatform.instance;
-      GeolocatorPlatform.instance = _WebPrompt(
-        () => throw TimeoutException('no fix'),
+      final platform = _WebPrompt(
+        () => Completer<Position>().future,
+        afterwards: LocationPermission.whileInUse,
       );
+      GeolocatorPlatform.instance = platform;
       addTearDown(() => GeolocatorPlatform.instance = original);
 
+      final result = resolveUserPosition(
+        webOverride: true,
+        timeLimit: const Duration(milliseconds: 40),
+        permissionPollInterval: poll,
+      );
+      platform.answered = true;
+
       await expectLater(
-        resolveUserPosition(webOverride: true),
+        result,
         throwsA(
           isA<LocationFailure>()
               .having((f) => f.permissionDenied, 'permissionDenied', false)
@@ -216,5 +234,45 @@ void main() {
         ),
       );
     });
+
+    test('an already-granted site keeps the time limit', () async {
+      final original = GeolocatorPlatform.instance;
+      GeolocatorPlatform.instance = _HangingCurrentPosition(null);
+      addTearDown(() => GeolocatorPlatform.instance = original);
+
+      await expectLater(
+        resolveUserPosition(
+          webOverride: true,
+          timeLimit: const Duration(milliseconds: 20),
+          permissionPollInterval: poll,
+        ),
+        throwsA(isA<LocationFailure>()),
+      );
+    });
+
+    for (final (after, forever) in [
+      (LocationPermission.deniedForever, true),
+      (LocationPermission.denied, false),
+    ]) {
+      test('a refused prompt reports the settled state ($after)', () async {
+        final original = GeolocatorPlatform.instance;
+        late _WebPrompt platform;
+        platform = _WebPrompt(() {
+          platform.answered = true;
+          throw const PermissionDeniedException('denied');
+        }, afterwards: after);
+        GeolocatorPlatform.instance = platform;
+        addTearDown(() => GeolocatorPlatform.instance = original);
+
+        await expectLater(
+          resolveUserPosition(webOverride: true, permissionPollInterval: poll),
+          throwsA(
+            isA<LocationFailure>()
+                .having((f) => f.permissionDenied, 'permissionDenied', true)
+                .having((f) => f.deniedForever, 'deniedForever', forever),
+          ),
+        );
+      });
+    }
   });
 }

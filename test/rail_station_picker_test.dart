@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:taiwanbus_flutter/core/rail_line_stations.dart';
 import 'package:taiwanbus_flutter/core/transit_repository.dart';
 import 'package:taiwanbus_flutter/core/user_location.dart';
@@ -274,4 +275,55 @@ void main() {
     expect(find.text('沒有取得定位權限。'), findsOneWidget);
     expect(find.byKey(const ValueKey('rail-picker-use-location')), findsNothing);
   });
+
+  testWidgets('a first web refusal blocked by the browser explains itself', (
+    tester,
+  ) async {
+    final original = GeolocatorPlatform.instance;
+    GeolocatorPlatform.instance = _RefusedWebPrompt();
+    addTearDown(() => GeolocatorPlatform.instance = original);
+
+    await _pumpPicker(
+      tester,
+      initial: _station('1000', '西0'),
+      onLocate: () async {
+        await resolveUserPosition(webOverride: true);
+        return null;
+      },
+    );
+
+    await tester.tap(find.byKey(const ValueKey('rail-picker-use-location')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('沒有取得定位權限。'), findsOneWidget);
+    expect(find.byKey(const ValueKey('rail-picker-use-location')), findsNothing);
+  });
+}
+
+/// A browser that refuses the first prompt and then reports the site blocked.
+class _RefusedWebPrompt extends GeolocatorPlatform {
+  bool _refused = false;
+
+  @override
+  Future<bool> isLocationServiceEnabled() async => true;
+
+  @override
+  Future<LocationPermission> checkPermission() async => _refused
+      ? LocationPermission.deniedForever
+      : LocationPermission.denied;
+
+  @override
+  Future<LocationPermission> requestPermission() =>
+      throw StateError('Web must not call requestPermission');
+
+  @override
+  Future<Position?> getLastKnownPosition({
+    bool forceLocationManager = false,
+  }) async => null;
+
+  @override
+  Future<Position> getCurrentPosition({LocationSettings? locationSettings}) {
+    _refused = true;
+    throw const PermissionDeniedException('denied');
+  }
 }

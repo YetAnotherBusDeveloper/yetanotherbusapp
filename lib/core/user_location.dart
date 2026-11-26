@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -39,14 +41,20 @@ class LocationFailure implements Exception {
 /// On web the browser's "prompt" state is reported as
 /// [LocationPermission.denied], and `requestPermission()` itself waits for a
 /// first fix with a one-day timeout. So web skips it and calls
-/// `getCurrentPosition` directly: that triggers the browser prompt, and the
-/// browser starts [timeLimit] only once permission is granted, so a user who is
-/// still deciding is never timed out, while a granted-but-failed fix is bounded.
-/// A position error there is a failed fix, not a permission refusal.
+/// `getCurrentPosition` directly, which triggers the browser prompt. The
+/// plugin's own timeout is not used: `geolocator_web` 4.1.3 hands its
+/// microseconds to the browser as milliseconds. Instead [timeLimit] starts once
+/// the permission is no longer pending (see [_boundWebFix]), so a user still
+/// reading the prompt is never timed out but a granted-yet-failed fix is
+/// bounded. A refused prompt reports the permission state the browser
+/// settled on, so a blocked site is `deniedForever` and a dismissed prompt is
+/// retryable.
 Future<Position> resolveUserPosition({
   Duration timeLimit = const Duration(seconds: 6),
   LocationAccuracy accuracy = LocationAccuracy.medium,
   @visibleForTesting bool? webOverride,
+  @visibleForTesting Duration permissionPollInterval =
+      const Duration(milliseconds: 250),
 }) async {
   final isWeb = webOverride ?? kIsWeb;
   if (!await Geolocator.isLocationServiceEnabled()) {
@@ -76,23 +84,90 @@ Future<Position> resolveUserPosition({
   }
 
   try {
-    final fix = Geolocator.getCurrentPosition(
+    if (isWeb) {
+      return await _boundWebFix(
+        Geolocator.getCurrentPosition(
+          locationSettings: LocationSettings(accuracy: accuracy),
+        ),
+        timeLimit,
+        // A prompt-state site has not been granted yet; anything else has.
+        permissionGranted: permission != LocationPermission.denied,
+        pollInterval: permissionPollInterval,
+      );
+    }
+    return await Geolocator.getCurrentPosition(
       locationSettings: LocationSettings(
         accuracy: accuracy,
         timeLimit: timeLimit,
       ),
-    );
-    // On web the browser enforces the limit after the prompt is answered; a
-    // Dart-side timeout would also expire a prompt the user is still reading.
-    return await (isWeb ? fix : fix.timeout(timeLimit));
+    ).timeout(timeLimit);
   } on PermissionDeniedException {
-    throw const LocationFailure('沒有取得定位權限。', permissionDenied: true);
+    var forever = false;
+    try {
+      forever = await Geolocator.checkPermission() ==
+          LocationPermission.deniedForever;
+    } catch (_) {}
+    throw LocationFailure(
+      '沒有取得定位權限。',
+      deniedForever: forever,
+      permissionDenied: true,
+    );
   } catch (_) {
     if (lastKnown != null) {
       return lastKnown;
     }
     throw const LocationFailure('目前無法取得定位，請稍後再試。');
   }
+}
+
+/// Waits for [fix], failing with a [TimeoutException] [limit] after permission
+/// is granted. While the permission prompt is pending nothing times out.
+Future<Position> _boundWebFix(
+  Future<Position> fix,
+  Duration limit, {
+  required bool permissionGranted,
+  required Duration pollInterval,
+}) {
+  final done = Completer<Position>();
+  Timer? deadline;
+  Timer? poll;
+
+  void startDeadline() {
+    deadline ??= Timer(limit, () {
+      if (!done.isCompleted) {
+        done.completeError(TimeoutException('No position fix', limit));
+      }
+    });
+  }
+
+  void finish() {
+    deadline?.cancel();
+    poll?.cancel();
+  }
+
+  if (permissionGranted) {
+    startDeadline();
+  } else {
+    poll = Timer.periodic(pollInterval, (_) async {
+      try {
+        final now = await Geolocator.checkPermission();
+        if (now != LocationPermission.denied) {
+          poll?.cancel();
+          startDeadline();
+        }
+      } catch (_) {}
+    });
+  }
+
+  fix.then(
+    (position) {
+      if (!done.isCompleted) done.complete(position);
+    },
+    onError: (Object error, StackTrace stackTrace) {
+      if (!done.isCompleted) done.completeError(error, stackTrace);
+    },
+  );
+  return done.future.whenComplete(finish);
 }
 
 /// A station plus how far the user is from it.
