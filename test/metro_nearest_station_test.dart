@@ -74,6 +74,7 @@ MetroStationOfLine _sequence(String line, List<String> ids) =>
 
 class _MetroRepository extends TransitRepository {
   final failedSystems = <String>{};
+  final emptyStationSystems = <String>{};
   final stationRequests = <String>[];
   final etaRequests = <String>[];
   bool missingCoordinates = false;
@@ -90,6 +91,9 @@ class _MetroRepository extends TransitRepository {
     stationRequests.add(system);
     if (failedSystems.contains(system)) {
       throw StateError('Station data unavailable');
+    }
+    if (emptyStationSystems.contains(system)) {
+      return [];
     }
     final stations = system == 'TRTC'
         ? [_station('T1', 25.04, 121.51), _station('T2', 25.05, 121.52)]
@@ -226,6 +230,7 @@ void main() {
     expect(repository.etaRequests.last, 'KRTC/O');
     expect(repository.stationRequests, containsAll(['TRTC', 'KRTC']));
     expect(find.textContaining('Nearest station: Station O2'), findsOneWidget);
+    expect(find.textContaining('Some metro systems'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -267,6 +272,32 @@ void main() {
             .widget<TransitStationMap>(find.byType(TransitStationMap))
             .selectedPointId,
         'O2',
+      );
+      expect(
+        find.textContaining('Some metro systems could not be checked.'),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testMetroWidgets(
+    'an empty Kaohsiung response shows the Taipei result with a scope warning',
+    (tester) async {
+      repository.emptyStationSystems.add('KRTC');
+      await pumpMetro(tester);
+      await tester.tap(locateButton());
+      await tester.pumpAndSettle();
+
+      expect(selectedSystem(tester), 'Taipei Metro');
+      final map = tester.widget<TransitStationMap>(
+        find.byType(TransitStationMap),
+      );
+      expect(map.selectedPointId, 'T1');
+      expect(repository.etaRequests.last, 'TRTC/T');
+      expect(
+        find.textContaining('Nearest station: Station T1'),
+        findsOneWidget,
       );
       expect(
         find.textContaining('Some metro systems could not be checked.'),
