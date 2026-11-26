@@ -61,7 +61,7 @@ void main() {
         longitude: 121,
         preferredSystem: 'TRTC',
         preferredLineId: 'R',
-      );
+      ).nearest;
 
       expect(result!.data.system.system, 'TYMC');
       expect(result.station.stationId, 'near');
@@ -79,7 +79,7 @@ void main() {
           ],
           latitude: 25,
           longitude: 121,
-        );
+        ).nearest;
 
         expect(result!.line.lineId, 'R');
         expect(result.station.stationId, 'R01');
@@ -104,7 +104,7 @@ void main() {
       ],
       latitude: 25,
       longitude: 121,
-    );
+    ).nearest;
 
     expect(result!.station.stationId, 'valid');
     expect(
@@ -112,7 +112,7 @@ void main() {
         [_system('TRTC', stations: invalidStations)],
         latitude: 25,
         longitude: 121,
-      ),
+      ).nearest,
       isNull,
     );
   });
@@ -138,9 +138,25 @@ void main() {
       ],
       latitude: 25,
       longitude: 121,
-    );
+    ).nearest;
 
     expect(result!.station.stationId, 'valid');
+  });
+
+  test('counts each system with a selectable station once', () {
+    final result = nearestMetroStation(
+      [
+        _system('usable', stations: [_station('A'), _station('B')]),
+        _system('empty', stations: []),
+        _system('invalid', stations: [_station('C', latitude: double.nan)]),
+        _system('unmapped', stations: [_station('D')], stationOfLine: []),
+      ],
+      latitude: 25,
+      longitude: 121,
+    );
+
+    expect(result.usableSystems, 1);
+    expect(result.nearest!.station.stationId, 'A');
   });
 
   test('prefers the current line at an interchange only in its own system', () {
@@ -162,7 +178,7 @@ void main() {
       longitude: 121,
       preferredSystem: 'TRTC',
       preferredLineId: 'G',
-    );
+    ).nearest;
 
     expect(result!.data.system.system, 'TRTC');
     expect(result.line.lineId, 'G');
@@ -181,7 +197,7 @@ void main() {
         longitude: 121,
         preferredSystem: 'missing',
         preferredLineId: 'R',
-      );
+      ).nearest;
 
       expect(result!.data.system.system, 'first');
       expect(result.station.stationId, 'first');
@@ -189,7 +205,10 @@ void main() {
   );
 
   test('returns null for empty data or an invalid user location', () {
-    expect(nearestMetroStation([], latitude: 25, longitude: 121), isNull);
+    expect(
+      nearestMetroStation([], latitude: 25, longitude: 121).nearest,
+      isNull,
+    );
     final systems = [
       _system('TRTC', stations: [_station('R01')]),
     ];
@@ -204,7 +223,7 @@ void main() {
           systems,
           latitude: coordinates.$1,
           longitude: coordinates.$2,
-        ),
+        ).nearest,
         isNull,
       );
     }
