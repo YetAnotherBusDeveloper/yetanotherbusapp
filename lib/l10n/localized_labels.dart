@@ -143,11 +143,21 @@ String localizedAppUpdateChannel(
 
 String localizedAppUpdateChannelDescription(
   AppLocalizations l10n,
-  AppUpdateChannel channel,
-) => switch (channel) {
-  AppUpdateChannel.developer => l10n.updateChannelDeveloperDescription,
-  AppUpdateChannel.nightly => l10n.updateChannelNightlyDescription,
-  AppUpdateChannel.release => l10n.updateChannelReleaseDescription,
+  AppUpdateChannel channel, {
+  bool compact = false,
+}) => switch (channel) {
+  AppUpdateChannel.developer =>
+    compact
+        ? l10n.updateChannelDeveloperDescriptionCompact
+        : l10n.updateChannelDeveloperDescription,
+  AppUpdateChannel.nightly =>
+    compact
+        ? l10n.updateChannelNightlyDescriptionCompact
+        : l10n.updateChannelNightlyDescription,
+  AppUpdateChannel.release =>
+    compact
+        ? l10n.updateChannelReleaseDescriptionCompact
+        : l10n.updateChannelReleaseDescription,
 };
 
 String localizedAppUpdateCheckMode(
@@ -161,11 +171,21 @@ String localizedAppUpdateCheckMode(
 
 String localizedAppUpdateCheckModeDescription(
   AppLocalizations l10n,
-  AppUpdateCheckMode mode,
-) => switch (mode) {
-  AppUpdateCheckMode.off => l10n.updateCheckOffDescription,
-  AppUpdateCheckMode.notify => l10n.updateCheckNotifyDescription,
-  AppUpdateCheckMode.popup => l10n.updateCheckPopupDescription,
+  AppUpdateCheckMode mode, {
+  bool compact = false,
+}) => switch (mode) {
+  AppUpdateCheckMode.off =>
+    compact
+        ? l10n.updateCheckOffDescriptionCompact
+        : l10n.updateCheckOffDescription,
+  AppUpdateCheckMode.notify =>
+    compact
+        ? l10n.updateCheckNotifyDescriptionCompact
+        : l10n.updateCheckNotifyDescription,
+  AppUpdateCheckMode.popup =>
+    compact
+        ? l10n.updateCheckPopupDescriptionCompact
+        : l10n.updateCheckPopupDescription,
 };
 
 String localizedAppUpdateResult(

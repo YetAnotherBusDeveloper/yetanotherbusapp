@@ -30,6 +30,130 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsAboutDescription => '版本資訊、貢獻者、社群與意見回饋';
 
   @override
+  String get languageDescriptionCompact => '切換介面語言，立即生效。';
+
+  @override
+  String get themeModeDescriptionCompact => '選擇淺色、深色或跟隨系統。';
+
+  @override
+  String get mapProviderDescriptionCompact => '切換底圖，不影響公車資料來源。';
+
+  @override
+  String get wearSyncCategoryDescriptionCompact => '選擇同步至手錶的最愛分類。';
+
+  @override
+  String get normalUpdateIntervalDescriptionCompact => '到站資訊更新間隔；越短越耗電。';
+
+  @override
+  String get retryIntervalDescriptionCompact => '失敗後重試；實際不短於一般更新間隔。';
+
+  @override
+  String get appUpdateManualCheckDescriptionCompact => '檢查目前更新通道是否有新版。';
+
+  @override
+  String get searchHistoryLimitDescriptionCompact => '保留最近路線；0 為清空並停止記錄。';
+
+  @override
+  String get clearSearchHistoryDescriptionCompact => '清除最近路線，保留最愛與學習紀錄。';
+
+  @override
+  String get clearSmartHistoryDescriptionCompact => '重設推薦學習紀錄，保留最愛。';
+
+  @override
+  String get clearRouteSelectionHistoryDescriptionCompact => '清除路線選擇紀錄，保留開啟次數。';
+
+  @override
+  String get termsOfServiceDescriptionCompact => '查看服務規則與使用條款。';
+
+  @override
+  String get privacyPolicyDescriptionCompact => '查看定位、帳號與使用資料的處理方式。';
+
+  @override
+  String get restartOnboardingDescriptionCompact => '重跑初次設定，保留最愛與偏好。';
+
+  @override
+  String get interfaceScaleDescriptionCompact => '調整文字與介面大小。';
+
+  @override
+  String get showWeatherDescriptionCompact => '首頁顯示當地天氣；點按看預報。';
+
+  @override
+  String get personalizationDescriptionCompact => '調整配色、純黑模式與背景。';
+
+  @override
+  String get wearSyncDescriptionCompact => '將最愛同步至已連線的手錶。';
+
+  @override
+  String get alwaysShowSecondsDescriptionCompact => '有秒數資料時顯示倒數，仍為預估。';
+
+  @override
+  String get hapticFeedbackDescriptionCompact => '操作時提供短暫震動。';
+
+  @override
+  String get smartRecommendationsDescriptionCompact => '依常用路線與時段推薦搭車選項。';
+
+  @override
+  String get autoFavoriteDescriptionCompact => '常搭站牌自動加入「常用」最愛。';
+
+  @override
+  String get smartNotificationDescriptionCompact => '常用時段發送到站提醒，需通知與背景定位。';
+
+  @override
+  String get keepScreenAwakeDescriptionCompact => '查看路線時保持螢幕亮起。';
+
+  @override
+  String get backgroundTripDescriptionCompact => '鎖定螢幕後仍有乘車提醒，需通知與定位權限。';
+
+  @override
+  String get backgroundTripIosDescriptionCompact => '鎖定螢幕後仍顯示乘車狀態，需通知與背景定位。';
+
+  @override
+  String get favoriteWidgetRefreshHelperCompact => '最短 15 分鐘更新一次；系統可能延後。';
+
+  @override
+  String get updateChannelDeveloperDescriptionCompact => '自行建置版本，不檢查更新。';
+
+  @override
+  String get updateChannelNightlyDescriptionCompact => '提早取得新功能，可能較不穩定。';
+
+  @override
+  String get updateChannelReleaseDescriptionCompact => '僅接收正式發行版更新。';
+
+  @override
+  String get updateCheckOffDescriptionCompact => '啟動時不檢查，可手動檢查。';
+
+  @override
+  String get updateCheckNotifyDescriptionCompact => '啟動時檢查，有新版時通知。';
+
+  @override
+  String get updateCheckPopupDescriptionCompact => '啟動時檢查，有新版時開啟更新視窗。';
+
+  @override
+  String get personalizationBackgroundImageDescriptionCompact =>
+      '設定各頁背景；首頁圖片套用至所有交通首頁。';
+
+  @override
+  String get personalizationColorSourceDescriptionCompact => '自動取背景色；系統使用裝置配色。';
+
+  @override
+  String get personalizationGlobalHomeDescriptionCompact => '套用至所有交通首頁分頁。';
+
+  @override
+  String get adsLockedMessageCompact => '切換過於頻繁，已鎖定為開啟。';
+
+  @override
+  String get adsDisabledStatus => '已關閉廣告。';
+
+  @override
+  String get personalizationAmoledDescriptionCompact => '深色模式使用純黑背景。';
+
+  @override
+  String get personalizationHomeGradientDescriptionCompact => '調整首頁漸層透明度。';
+
+  @override
+  String get personalizationPerPageDescriptionCompact => '分別設定各頁背景。';
+
+  @override
   String get settingsTitle => '設定';
 
   @override
@@ -127,8 +251,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get compactModeTitle => '精簡模式';
 
   @override
-  String get compactModeDescription =>
-      '減少首頁與部分卡片的輔助說明，讓常用功能更集中，適合熟悉操作後使用。關閉後會顯示較完整的說明；桌面版首頁固定使用精簡版面。';
+  String get compactModeDescription => '關閉後顯示完整說明；桌面首頁固定精簡。';
 
   @override
   String get showWeatherTitle => '顯示天氣';
@@ -306,7 +429,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get smartRecommendationsEmpty =>
-      '目前沒有可顯示的推薦。多開啟幾次常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
+      '目前沒有可顯示的推薦。在不同日子的相近時間開啟常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
 
   @override
   String get smartRecommendationsDisabled =>
@@ -674,6 +797,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get adsEnabledDescription => '把開發者的飯碗搶走。';
 
   @override
+  String get adDensityTitle => '廣告濃度';
+
+  @override
+  String get adDensityThanksOne => '感謝支持';
+
+  @override
+  String get adDensityThanksTwo => '哇 感謝你的支持<3';
+
+  @override
+  String get adDensityThanksThree => '謝謝謝謝謝謝謝謝謝謝';
+
+  @override
+  String get adDensityThanksFour => '哥們你真的很愛看廣告嗎 那很謝謝你了';
+
+  @override
   String get adsPleaOne => '我求你了';
 
   @override
@@ -699,7 +837,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get smartRecommendationsDescription =>
-      '依照你開啟與選擇路線的次數、常用時段，在首頁推薦可能想搭的路線。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
+      '依照你平日與假日在各時段查看路線的習慣，在首頁推薦此刻可能想搭的路線，並優先顯示你常用的站牌。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
 
   @override
   String get autoFavoriteTitle => '自動加入常用最愛';
@@ -713,7 +851,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get smartNotificationDescription =>
-      '在你常查詢路線的時段，於背景檢查常用路線與附近站牌，符合條件時發送到站提醒。需要足夠的使用紀錄、通知權限與背景定位；系統省電限制可能延後檢查，並非每次都會發送通知。';
+      '在你平常查看某條路線的時間前後，於背景查詢你常用站牌的到站時間，有趕得上的班次時提醒你。要在不同日子的相近時間多次查看同一條路線才會開始提醒；超過兩週沒有再開啟該路線（從提醒通知點進去查看也算）就會暫停，暫停前的提醒會先告知，再次查看後恢復。需要通知權限。背景定位為選用：授權後會依你當下的位置調整站牌，離路線太遠時不提醒。系統省電限制可能延後檢查，並非每次都會發送通知。';
 
   @override
   String get smartNotificationPermissionRequired => '需要通知權限才能啓用智慧推薦通知。';
@@ -2456,6 +2594,74 @@ class AppLocalizationsZh extends AppLocalizations {
   String feedbackContentTooLong(int max) {
     return '內文最多 $max 個字';
   }
+
+  @override
+  String get feedbackMoreInfo => '更多資訊（選填）';
+
+  @override
+  String get feedbackMoreInfoHint => '補充資訊可協助我們了解問題，也可以直接送出。';
+
+  @override
+  String get feedbackCategoryLabel => '回饋類型（選填）';
+
+  @override
+  String get feedbackCategoryNone => '不指定';
+
+  @override
+  String get feedbackCategoryBug => '問題回報';
+
+  @override
+  String get feedbackCategoryData => '交通資料錯誤';
+
+  @override
+  String get feedbackCategoryFeature => '功能建議';
+
+  @override
+  String get feedbackCategoryOther => '其他';
+
+  @override
+  String get feedbackRouteContextLabel => '相關路線／站牌（選填）';
+
+  @override
+  String get feedbackRouteContextHint => '例如：臺北市 307，往板橋，臺北車站';
+
+  @override
+  String get feedbackContactLabel => '聯絡方式（選填）';
+
+  @override
+  String get feedbackContactHint => '例如：Email 或 Discord 帳號，方便我們追問細節';
+
+  @override
+  String feedbackOptionalTooLong(int max) {
+    return '此欄位最多 $max 個字';
+  }
+
+  @override
+  String get feedbackIncludeDiagnostics => '附上 App 與顯示資訊';
+
+  @override
+  String get feedbackDiagnosticsHint => '選擇後會附上以下版本、平台、語言與顯示設定，協助排查問題。';
+
+  @override
+  String get feedbackDiagnosticVersion => 'App 版本';
+
+  @override
+  String get feedbackDiagnosticCommit => '程式版本';
+
+  @override
+  String get feedbackDiagnosticPlatform => '平台';
+
+  @override
+  String get feedbackDiagnosticLocale => '語言';
+
+  @override
+  String get feedbackDiagnosticScreen => '畫面尺寸（邏輯像素）';
+
+  @override
+  String get feedbackDiagnosticTextScale => '文字縮放（以 14pt 為基準）';
+
+  @override
+  String get feedbackDiagnosticTheme => '顯示主題';
 
   @override
   String get feedbackSubmitting => '送出中…';
@@ -3374,6 +3580,130 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsAboutDescription => '版本資訊、貢獻者、社群與意見回饋';
 
   @override
+  String get languageDescriptionCompact => '切換介面語言，立即生效。';
+
+  @override
+  String get themeModeDescriptionCompact => '選擇淺色、深色或跟隨系統。';
+
+  @override
+  String get mapProviderDescriptionCompact => '切換底圖，不影響公車資料來源。';
+
+  @override
+  String get wearSyncCategoryDescriptionCompact => '選擇同步至手錶的最愛分類。';
+
+  @override
+  String get normalUpdateIntervalDescriptionCompact => '到站資訊更新間隔；越短越耗電。';
+
+  @override
+  String get retryIntervalDescriptionCompact => '失敗後重試；實際不短於一般更新間隔。';
+
+  @override
+  String get appUpdateManualCheckDescriptionCompact => '檢查目前更新通道是否有新版。';
+
+  @override
+  String get searchHistoryLimitDescriptionCompact => '保留最近路線；0 為清空並停止記錄。';
+
+  @override
+  String get clearSearchHistoryDescriptionCompact => '清除最近路線，保留最愛與學習紀錄。';
+
+  @override
+  String get clearSmartHistoryDescriptionCompact => '重設推薦學習紀錄，保留最愛。';
+
+  @override
+  String get clearRouteSelectionHistoryDescriptionCompact => '清除路線選擇紀錄，保留開啟次數。';
+
+  @override
+  String get termsOfServiceDescriptionCompact => '查看服務規則與使用條款。';
+
+  @override
+  String get privacyPolicyDescriptionCompact => '查看定位、帳號與使用資料的處理方式。';
+
+  @override
+  String get restartOnboardingDescriptionCompact => '重跑初次設定，保留最愛與偏好。';
+
+  @override
+  String get interfaceScaleDescriptionCompact => '調整文字與介面大小。';
+
+  @override
+  String get showWeatherDescriptionCompact => '首頁顯示當地天氣；點按看預報。';
+
+  @override
+  String get personalizationDescriptionCompact => '調整配色、純黑模式與背景。';
+
+  @override
+  String get wearSyncDescriptionCompact => '將最愛同步至已連線的手錶。';
+
+  @override
+  String get alwaysShowSecondsDescriptionCompact => '有秒數資料時顯示倒數，仍為預估。';
+
+  @override
+  String get hapticFeedbackDescriptionCompact => '操作時提供短暫震動。';
+
+  @override
+  String get smartRecommendationsDescriptionCompact => '依常用路線與時段推薦搭車選項。';
+
+  @override
+  String get autoFavoriteDescriptionCompact => '常搭站牌自動加入「常用」最愛。';
+
+  @override
+  String get smartNotificationDescriptionCompact => '常用時段發送到站提醒，需通知與背景定位。';
+
+  @override
+  String get keepScreenAwakeDescriptionCompact => '查看路線時保持螢幕亮起。';
+
+  @override
+  String get backgroundTripDescriptionCompact => '鎖定螢幕後仍有乘車提醒，需通知與定位權限。';
+
+  @override
+  String get backgroundTripIosDescriptionCompact => '鎖定螢幕後仍顯示乘車狀態，需通知與背景定位。';
+
+  @override
+  String get favoriteWidgetRefreshHelperCompact => '最短 15 分鐘更新一次；系統可能延後。';
+
+  @override
+  String get updateChannelDeveloperDescriptionCompact => '自行建置版本，不檢查更新。';
+
+  @override
+  String get updateChannelNightlyDescriptionCompact => '提早取得新功能，可能較不穩定。';
+
+  @override
+  String get updateChannelReleaseDescriptionCompact => '僅接收正式發行版更新。';
+
+  @override
+  String get updateCheckOffDescriptionCompact => '啟動時不檢查，可手動檢查。';
+
+  @override
+  String get updateCheckNotifyDescriptionCompact => '啟動時檢查，有新版時通知。';
+
+  @override
+  String get updateCheckPopupDescriptionCompact => '啟動時檢查，有新版時開啟更新視窗。';
+
+  @override
+  String get personalizationBackgroundImageDescriptionCompact =>
+      '設定各頁背景；首頁圖片套用至所有交通首頁。';
+
+  @override
+  String get personalizationColorSourceDescriptionCompact => '自動取背景色；系統使用裝置配色。';
+
+  @override
+  String get personalizationGlobalHomeDescriptionCompact => '套用至所有交通首頁分頁。';
+
+  @override
+  String get adsLockedMessageCompact => '切換過於頻繁，已鎖定為開啟。';
+
+  @override
+  String get adsDisabledStatus => '已關閉廣告。';
+
+  @override
+  String get personalizationAmoledDescriptionCompact => '深色模式使用純黑背景。';
+
+  @override
+  String get personalizationHomeGradientDescriptionCompact => '調整首頁漸層透明度。';
+
+  @override
+  String get personalizationPerPageDescriptionCompact => '分別設定各頁背景。';
+
+  @override
   String get settingsTitle => '設定';
 
   @override
@@ -3471,8 +3801,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get compactModeTitle => '精簡模式';
 
   @override
-  String get compactModeDescription =>
-      '減少首頁與部分卡片的輔助說明，讓常用功能更集中，適合熟悉操作後使用。關閉後會顯示較完整的說明；桌面版首頁固定使用精簡版面。';
+  String get compactModeDescription => '關閉後顯示完整說明；桌面首頁固定精簡。';
 
   @override
   String get showWeatherTitle => '顯示天氣';
@@ -3650,7 +3979,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get smartRecommendationsEmpty =>
-      '目前沒有可顯示的推薦。多開啟幾次常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
+      '目前沒有可顯示的推薦。在不同日子的相近時間開啟常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
 
   @override
   String get smartRecommendationsDisabled =>
@@ -4018,6 +4347,21 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get adsEnabledDescription => '把開發者的飯碗搶走。';
 
   @override
+  String get adDensityTitle => '廣告濃度';
+
+  @override
+  String get adDensityThanksOne => '感謝支持';
+
+  @override
+  String get adDensityThanksTwo => '哇 感謝你的支持<3';
+
+  @override
+  String get adDensityThanksThree => '謝謝謝謝謝謝謝謝謝謝';
+
+  @override
+  String get adDensityThanksFour => '哥們你真的很愛看廣告嗎 那很謝謝你了';
+
+  @override
   String get adsPleaOne => '我求你了';
 
   @override
@@ -4043,7 +4387,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get smartRecommendationsDescription =>
-      '依照你開啟與選擇路線的次數、常用時段，在首頁推薦可能想搭的路線。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
+      '依照你平日與假日在各時段查看路線的習慣，在首頁推薦此刻可能想搭的路線，並優先顯示你常用的站牌。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
 
   @override
   String get autoFavoriteTitle => '自動加入常用最愛';
@@ -4057,7 +4401,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get smartNotificationDescription =>
-      '在你常查詢路線的時段，於背景檢查常用路線與附近站牌，符合條件時發送到站提醒。需要足夠的使用紀錄、通知權限與背景定位；系統省電限制可能延後檢查，並非每次都會發送通知。';
+      '在你平常查看某條路線的時間前後，於背景查詢你常用站牌的到站時間，有趕得上的班次時提醒你。要在不同日子的相近時間多次查看同一條路線才會開始提醒；超過兩週沒有再開啟該路線（從提醒通知點進去查看也算）就會暫停，暫停前的提醒會先告知，再次查看後恢復。需要通知權限。背景定位為選用：授權後會依你當下的位置調整站牌，離路線太遠時不提醒。系統省電限制可能延後檢查，並非每次都會發送通知。';
 
   @override
   String get smartNotificationPermissionRequired => '需要通知權限才能啓用智慧推薦通知。';
@@ -5800,6 +6144,74 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String feedbackContentTooLong(int max) {
     return '內文最多 $max 個字';
   }
+
+  @override
+  String get feedbackMoreInfo => '更多資訊（選填）';
+
+  @override
+  String get feedbackMoreInfoHint => '補充資訊可協助我們了解問題，也可以直接送出。';
+
+  @override
+  String get feedbackCategoryLabel => '回饋類型（選填）';
+
+  @override
+  String get feedbackCategoryNone => '不指定';
+
+  @override
+  String get feedbackCategoryBug => '問題回報';
+
+  @override
+  String get feedbackCategoryData => '交通資料錯誤';
+
+  @override
+  String get feedbackCategoryFeature => '功能建議';
+
+  @override
+  String get feedbackCategoryOther => '其他';
+
+  @override
+  String get feedbackRouteContextLabel => '相關路線／站牌（選填）';
+
+  @override
+  String get feedbackRouteContextHint => '例如：臺北市 307，往板橋，臺北車站';
+
+  @override
+  String get feedbackContactLabel => '聯絡方式（選填）';
+
+  @override
+  String get feedbackContactHint => '例如：Email 或 Discord 帳號，方便我們追問細節';
+
+  @override
+  String feedbackOptionalTooLong(int max) {
+    return '此欄位最多 $max 個字';
+  }
+
+  @override
+  String get feedbackIncludeDiagnostics => '附上 App 與顯示資訊';
+
+  @override
+  String get feedbackDiagnosticsHint => '選擇後會附上以下版本、平台、語言與顯示設定，協助排查問題。';
+
+  @override
+  String get feedbackDiagnosticVersion => 'App 版本';
+
+  @override
+  String get feedbackDiagnosticCommit => '程式版本';
+
+  @override
+  String get feedbackDiagnosticPlatform => '平台';
+
+  @override
+  String get feedbackDiagnosticLocale => '語言';
+
+  @override
+  String get feedbackDiagnosticScreen => '畫面尺寸（邏輯像素）';
+
+  @override
+  String get feedbackDiagnosticTextScale => '文字縮放（以 14pt 為基準）';
+
+  @override
+  String get feedbackDiagnosticTheme => '顯示主題';
 
   @override
   String get feedbackSubmitting => '送出中…';

@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
 import android.location.Location
 import android.os.Build
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -24,7 +25,6 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 import java.util.concurrent.TimeUnit
-import org.json.JSONArray
 import org.json.JSONObject
 
 class SmartRouteNotificationWorker(
@@ -47,85 +47,177 @@ class SmartRouteNotificationWorker(
                 return Result.success()
             }
 
-            val profiles = SmartRouteNotificationSupport
-                .loadProfiles(applicationContext)
-                .filter { it.provider == settings.provider }
+            // When to remind, and about what, was worked out by the app the
+            // last time it was used. This only has to follow it.
+            val plan = SmartRouteNotificationSupport.loadPlan(applicationContext)
+                ?: return Result.success()
             val now = System.currentTimeMillis()
-            val candidates = SmartRouteNotificationSupport.chooseProfilesForNow(
-                profiles = profiles,
-                nowMs = now,
-            )
-            if (candidates.isEmpty()) return Result.success()
+            if (!SmartRouteReminderRules.hasLiveSlots(plan, now)) {
+                // Every habit in the plan has lapsed. Nothing can fire until
+                // the app is opened and writes a new one, which reschedules —
+                // unless it already has, which this checks under the lock.
+                SmartRouteNotificationScheduler.cancelIfNothingLive(applicationContext)
+                return Result.success()
+            }
+            val dueSlots = SmartRouteReminderRules.dueSlots(plan, settings.provider, now)
+            if (dueSlots.isEmpty()) {
+                return Result.success()
+            }
 
-            val currentLocation = SmartRouteNotificationSupport.loadCurrentLocation(
-                applicationContext,
-            ) ?: return Result.success()
+            val clock = SmartRouteReminderRules.serviceClock(now, plan.dayStartHour)
+            val history = SmartRouteNotificationSupport.loadHistory(applicationContext)
+            if (!SmartRouteReminderRules.mayRemind(history, now, clock.day)) {
+                return Result.success()
+            }
 
-            for (candidate in candidates) {
-                if (SmartRouteNotificationSupport.wasRecentlyInteracted(candidate, now)) continue
-                val routeData = SmartRouteNotificationSupport.loadRouteData(
-                    context = applicationContext,
-                    provider = candidate.provider,
-                    routeKey = candidate.routeKey,
-                    fallbackRouteName = candidate.routeName,
-                ) ?: continue
-                val nearestStop = SmartRouteNotificationSupport.findNearestStop(
-                    location = currentLocation,
-                    routeData = routeData,
-                    pathId = candidate.pathId,
-                ) ?: continue
-                val liveStop = SmartRouteNotificationSupport.fetchLiveStop(
-                    routeId = routeData.routeId,
-                    preferredPathId = nearestStop.pathId,
-                    stopId = nearestStop.stopId,
-                ) ?: continue
-                if (!SmartRouteNotificationSupport.shouldNotify(liveStop)) continue
-                if (!SmartRouteNotificationSupport.shouldDeliverNotification(
-                        context = applicationContext,
-                        provider = candidate.provider,
-                        routeKey = candidate.routeKey,
-                        pathId = nearestStop.pathId,
-                        stopId = nearestStop.stopId,
-                        nowMs = now,
+            var activePlan = plan
+            var activeNow = now
+            var activeClock = clock
+            var activeHistory = history
+            var candidates = dueSlots
+            val attempted = mutableSetOf<Pair<Int, Int>>()
+
+            // Asked for at most once, and only once a slot has got this far:
+            // a fix costs battery, and most runs end before needing one.
+            val currentLocation by lazy {
+                SmartRouteNotificationSupport.loadCurrentLocation(applicationContext)
+            }
+            while (true) {
+                val slot = candidates.firstOrNull {
+                    attempted.add(it.routeKey to it.pathId)
+                } ?: break
+                if (SmartRouteReminderRules.wasSeenForWindow(
+                        slot,
+                        activeNow,
+                        activeClock.minute,
                     )
                 ) continue
-
-                SmartRouteNotificationSupport.showNotification(
-                    context = applicationContext,
-                    profile = candidate,
-                    routeData = routeData,
-                    nearestStop = nearestStop,
-                    liveStop = liveStop,
-                    distanceMeters = nearestStop.distanceMeters,
-                    nowMs = now,
+                val lastForRoute = SmartRouteNotificationSupport.loadLastReminderForRoute(
+                    applicationContext,
+                    slot,
                 )
-                break
+                if (!SmartRouteReminderRules.mayRemindRoute(lastForRoute, activeNow)) continue
+                val routeData = SmartRouteNotificationSupport.loadRouteData(
+                    applicationContext,
+                    slot,
+                ) ?: continue
+                val choice = SmartRouteNotificationSupport.chooseStop(
+                    slot = slot,
+                    routeData = routeData,
+                    location = currentLocation,
+                ) ?: continue
+                val liveStop = SmartRouteNotificationSupport.fetchLiveStop(
+                    routeId = slot.routeId,
+                    pathId = slot.pathId,
+                    rawStopId = choice.stop.rawStopId,
+                ) ?: continue
+                val decision = SmartRouteReminderRules.decide(liveStop, choice.distanceMeters)
+                    ?: continue
+
+                val shown = SmartRouteNotificationSupport.remind(
+                    context = applicationContext,
+                    slot = slot,
+                    stop = choice.stop,
+                    text = { current ->
+                        SmartRouteReminderRules.buildText(
+                            routeName = current.routeName,
+                            pathName = routeData.pathName,
+                            stopName = choice.stop.stopName,
+                            decision = decision,
+                            distanceMeters = choice.distanceMeters,
+                            slot = current,
+                            dayStartHour = activePlan.dayStartHour,
+                            // The arrival time is counted from when the feed
+                            // was read, which is what its seconds are as of.
+                            nowMs = liveStop.asOfMs,
+                        )
+                    },
+                    timeoutMs = SmartRouteReminderRules.timeoutMs(decision),
+                    history = SmartRouteReminderRules.afterReminder(
+                        activeHistory,
+                        activeNow,
+                        activeClock.day,
+                    ),
+                    nowMs = activeNow,
+                    checkedAtMs = System.currentTimeMillis(),
+                )
+                if (shown) break
+
+                // A route can stop being due while its feed is in flight. A
+                // different candidate may still be valid, but foreground and
+                // channel checks are global and must stop the whole run.
+                if (AppRuntimeStateStore.isAppInForeground(applicationContext) ||
+                    !SmartRouteNotificationSupport.canPostNotifications(applicationContext)
+                ) {
+                    break
+                }
+                val refreshedPlan = SmartRouteNotificationSupport.loadPlan(applicationContext)
+                    ?: break
+                val refreshedNow = System.currentTimeMillis()
+                val refreshedHistory = SmartRouteNotificationSupport.loadHistory(
+                    applicationContext,
+                )
+                val refreshedCandidates =
+                    SmartRouteReminderRules.dueSlotsAfterCandidateFailure(
+                        plan = refreshedPlan,
+                        provider = settings.provider,
+                        nowMs = refreshedNow,
+                        history = refreshedHistory,
+                        attempted = attempted,
+                    )
+                activePlan = refreshedPlan
+                activeNow = refreshedNow
+                activeClock = SmartRouteReminderRules.serviceClock(
+                    refreshedNow,
+                    refreshedPlan.dayStartHour,
+                )
+                activeHistory = refreshedHistory
+                candidates = refreshedCandidates
             }
             Result.success()
         } catch (_: Exception) {
-            Result.retry()
+            // Everything that can fail for a passing reason — the network, a
+            // database mid-download — is already handled where it happens, so
+            // what reaches here would fail the same way on a retry. The next
+            // period runs regardless.
+            Result.failure()
         }
     }
 }
 
 internal object SmartRouteNotificationSupport {
-    private const val MIN_TOTAL_OPENS_FOR_RECOMMENDATION = 3
-    private const val MIN_RELEVANT_INTERACTIONS_FOR_RECOMMENDATION = 2
     private const val FLUTTER_PREFERENCES_NAME = "FlutterSharedPreferences"
     private const val SETTINGS_KEY = "flutter.app_settings"
     private const val SETTINGS_FALLBACK_KEY = "app_settings"
-    private const val ROUTE_USAGE_KEY = "flutter.route_usage_profiles"
-    private const val ROUTE_USAGE_FALLBACK_KEY = "route_usage_profiles"
+
+    // Written by StorageService.saveSmartRoutePlan on the Flutter side.
+    private const val PLAN_KEY = "flutter.smart_route_plan"
     private const val NOTIFICATION_PREFERENCES_NAME = "smart_route_notifications"
-    private const val LAST_NOTIFIED_KEY_PREFIX = "last_notified_"
-    private const val CHANNEL_ID = "smart_route_recommendation"
+    private const val LAST_REMINDER_KEY = "last_reminder_ms"
+    private const val REMINDER_DAY_KEY = "reminder_day"
+    private const val REMINDER_COUNT_KEY = "reminder_count"
+    private const val LAST_ROUTE_REMINDER_KEY_PREFIX = "last_route_reminder_"
+    private const val REMINDER_LOG_KEY = "reminder_log"
+    internal const val CHANNEL_ID = "smart_route_recommendation"
     private const val CHANNEL_NAME = "智慧推薦提醒"
     private const val CHANNEL_DESCRIPTION =
-        "在你常查看某條路線的時間點附近，依最近站牌到站時間主動提醒。"
+        "在你常查看某條路線的時間點附近，依常用或最近站牌的到站時間主動提醒。"
+    private const val NOTIFICATION_ID_BASE = 710_000
     private const val ROUTE_REQUEST_TIMEOUT_MS = 10_000
     private const val API_BASE_URL = "https://bus.avianjay.sbs"
-    private const val NOTIFICATION_COOLDOWN_MS = 75 * 60 * 1000L
-    private const val RECENT_INTERACTION_SUPPRESSION_MS = 30 * 60 * 1000L
+
+    // BusRepository keeps its databases in this directory, under the path
+    // sqflite's getDatabasesPath() returns: stops per provider in one file,
+    // route and direction names for every provider in another.
+    private const val DATABASE_DIRECTORY = ".yabus_backend"
+    private val METADATA_DATABASE_NAMES = listOf(
+        "routes_metadata_v1.sqlite",
+        "routes_metadata_v2.sqlite",
+    )
+
+    // A fix older than this may be from wherever the phone last had a map
+    // open, which is no guide to which stop its owner is near now.
+    private const val MAX_LOCATION_AGE_MS = 10 * 60 * 1000L
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -147,115 +239,127 @@ internal object SmartRouteNotificationSupport {
     }
 
     fun loadSettings(context: Context): SmartRouteSettings? {
-        val root = loadFlutterJsonObject(
-            context = context,
-            primaryKey = SETTINGS_KEY,
-            fallbackKey = SETTINGS_FALLBACK_KEY,
-        ) ?: return null
+        val preferences = flutterPreferences(context)
+        val raw = preferences.getString(SETTINGS_KEY, null)
+            ?: preferences.getString(SETTINGS_FALLBACK_KEY, null)
+            ?: return null
+        val root = try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            return null
+        }
         return SmartRouteSettings(
             provider = root.optString("provider", "twn"),
             enableNotifications = root.optBoolean("enableSmartRouteNotifications", false),
         )
     }
 
-    fun loadProfiles(context: Context): List<SmartRouteProfile> {
-        val preferences = context.getSharedPreferences(
-            FLUTTER_PREFERENCES_NAME,
-            Context.MODE_PRIVATE,
+    fun loadPlan(context: Context): SmartRoutePlan? =
+        SmartRouteReminderRules.parsePlan(
+            flutterPreferences(context).getString(PLAN_KEY, null),
         )
-        val raw = preferences.getString(ROUTE_USAGE_KEY, null)
-            ?: preferences.getString(ROUTE_USAGE_FALLBACK_KEY, null)
-            ?: return emptyList()
-        val array = try {
-            JSONArray(raw)
-        } catch (_: Exception) {
-            return emptyList()
-        }
 
-        val result = mutableListOf<SmartRouteProfile>()
-        for (index in 0 until array.length()) {
-            val item = array.optJSONObject(index) ?: continue
-            val routeKey = item.optInt("routeKey", 0)
-            val pathId = if (item.has("pathId")) item.optInt("pathId") else null
-            if (routeKey <= 0 || pathId == null) {
-                continue
-            }
-            val hourlyOpens = mutableMapOf<Int, Int>()
-            val hourlyObject = item.optJSONObject("hourlyOpens")
-            hourlyObject?.keys()?.forEach { key ->
-                val hour = key.toIntOrNull() ?: return@forEach
-                if (hour !in 0..23) {
-                    return@forEach
-                }
-                val count = hourlyObject.optInt(key, 0)
-                if (count > 0) {
-                    hourlyOpens[hour] = count
-                }
-            }
-            val hourlySelections = mutableMapOf<Int, Int>()
-            val selectionObject = item.optJSONObject("hourlySelections")
-            selectionObject?.keys()?.forEach { key ->
-                val hour = key.toIntOrNull() ?: return@forEach
-                if (hour !in 0..23) {
-                    return@forEach
-                }
-                val count = selectionObject.optInt(key, 0)
-                if (count > 0) {
-                    hourlySelections[hour] = count
-                }
-            }
-            result += SmartRouteProfile(
-                provider = item.optString("provider", "twn"),
-                routeKey = routeKey,
-                pathId = pathId,
-                routeName = item.optString("routeName", "").trim(),
-                totalOpens = item.optInt("totalOpens", 0),
-                lastOpenedAtMs = item.optLong("lastOpenedAtMs", 0L),
-                totalSelections = item.optInt("totalSelections", 0),
-                lastSelectedAtMs = item.optLong("lastSelectedAtMs", 0L),
-                hourlyOpens = hourlyOpens,
-                hourlySelections = hourlySelections,
-            )
-        }
-        return result
+    fun loadHistory(context: Context): SmartReminderHistory {
+        val preferences = notificationPreferences(context)
+        return SmartReminderHistory(
+            lastAnyMs = preferences.getLong(LAST_REMINDER_KEY, 0L),
+            countDay = preferences.getLong(REMINDER_DAY_KEY, 0L),
+            countThatDay = preferences.getInt(REMINDER_COUNT_KEY, 0),
+        )
     }
 
-    fun chooseProfilesForNow(
-        profiles: List<SmartRouteProfile>,
+    fun loadLastReminderForRoute(context: Context, slot: SmartPlanSlot): Long =
+        notificationPreferences(context).getLong(routeReminderKey(slot), 0L)
+
+    fun saveReminder(
+        context: Context,
+        slot: SmartPlanSlot,
+        history: SmartReminderHistory,
         nowMs: Long,
-    ): List<SmartRouteProfile> {
-        val now = java.util.Calendar.getInstance().apply {
-            timeInMillis = nowMs
-        }
-        val currentHour = now.get(java.util.Calendar.HOUR_OF_DAY)
-        val previousHour = (currentHour + 23) % 24
-        val nextHour = (currentHour + 1) % 24
-
-        return profiles
-            .filter {
-                hasEnoughHistoryForRecommendation(
-                    profile = it,
-                    currentHour = currentHour,
-                    previousHour = previousHour,
-                    nextHour = nextHour,
-                )
-            }
-            .sortedByDescending { profile ->
-                scoreProfile(profile, currentHour, previousHour, nextHour, nowMs)
-            }
-            .distinctBy { profile ->
-                listOf(profile.provider, profile.routeKey, profile.pathId)
-            }
+    ) {
+        val preferences = notificationPreferences(context)
+        preferences
+            .edit()
+            .putLong(LAST_REMINDER_KEY, history.lastAnyMs)
+            .putLong(REMINDER_DAY_KEY, history.countDay)
+            .putInt(REMINDER_COUNT_KEY, history.countThatDay)
+            .putLong(routeReminderKey(slot), nowMs)
+            .putString(
+                REMINDER_LOG_KEY,
+                SmartRouteReminderRules.appendToReminderLog(
+                    preferences.getString(REMINDER_LOG_KEY, null),
+                    slot,
+                    nowMs,
+                ),
+            )
+            .apply()
     }
 
-    fun wasRecentlyInteracted(profile: SmartRouteProfile, nowMs: Long): Boolean {
-        val lastInteractionAt = profile.latestInteractionAtMs
-        if (lastInteractionAt <= 0L) {
+    /** The reminders shown so far, as JSON, for the Flutter side to read. */
+    fun loadReminderLog(context: Context): String =
+        notificationPreferences(context).getString(REMINDER_LOG_KEY, null) ?: "[]"
+
+    /**
+     * Shows a reminder for [slot] and records it, against the limits and in
+     * the log the Flutter side learns from — if it can still go out, and be
+     * seen, at [checkedAtMs].
+     *
+     * A run reads the plan once and then waits on the location and the
+     * network, and the app can replace the plan meanwhile: the rider clears
+     * what it learned, or opens the route. So the plan is read again here,
+     * and only what it says now goes out; see [SmartRouteReminderRules.stillDue].
+     * [text] is written for the slot as that plan has it.
+     *
+     * One that cannot be seen — this channel turned off while the app's
+     * other notifications stay on — is recorded nowhere. The habit model
+     * reads a logged reminder as one that told the rider what they would
+     * have opened the route for, and one nobody saw would excuse a day they
+     * simply did not go.
+     *
+     * Returns whether it was shown.
+     */
+    fun remind(
+        context: Context,
+        slot: SmartPlanSlot,
+        stop: SmartRouteStop,
+        text: (SmartPlanSlot) -> SmartReminderText,
+        timeoutMs: Long,
+        history: SmartReminderHistory,
+        nowMs: Long,
+        checkedAtMs: Long,
+    ): Boolean {
+        val current = SmartRouteReminderRules.stillDue(loadPlan(context), slot, checkedAtMs)
+            ?: return false
+        // Opened while this run waited: the rider is looking at the app.
+        if (AppRuntimeStateStore.isAppInForeground(context)) {
             return false
         }
-        return nowMs - lastInteractionAt < RECENT_INTERACTION_SUPPRESSION_MS
+        if (!canPostNotifications(context)) {
+            return false
+        }
+        showNotification(context, current, stop, text(current), timeoutMs)
+        saveReminder(context, current, history, nowMs)
+        return true
     }
 
+    /**
+     * Drops every trace of reminders already shown: the log, and what holds
+     * the next one back. For when the rider clears what the app has learned
+     * about them, which this is part of.
+     */
+    fun forgetReminders(context: Context) {
+        notificationPreferences(context).edit().clear().apply()
+    }
+
+    private fun routeReminderKey(slot: SmartPlanSlot): String =
+        LAST_ROUTE_REMINDER_KEY_PREFIX +
+            listOf(slot.provider, slot.routeKey, slot.pathId).joinToString("_")
+
+    /**
+     * The device's location, or null when it may not be read in the
+     * background or no recent fix can be had. A reminder can still go out
+     * without one, as long as the plan names the rider's usual stop.
+     */
     fun loadCurrentLocation(context: Context): Location? {
         if (!hasLocationPermission(context)) {
             return null
@@ -268,7 +372,7 @@ internal object SmartRouteNotificationSupport {
             } catch (_: Exception) {
                 null
             }
-            if (lastKnown != null) {
+            if (lastKnown != null && isRecent(lastKnown)) {
                 return lastKnown
             }
 
@@ -286,105 +390,178 @@ internal object SmartRouteNotificationSupport {
         }
     }
 
-    fun loadRouteData(
-        context: Context,
-        provider: String,
-        routeKey: Int,
-        fallbackRouteName: String,
-    ): SmartRouteData? {
-        val databaseFile = resolveDatabaseFile(context, provider) ?: return null
-        if (!databaseFile.exists()) {
+    private fun isRecent(location: Location): Boolean {
+        val ageMs =
+            (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000
+        return ageMs <= MAX_LOCATION_AGE_MS
+    }
+
+    /**
+     * The stops of the slot's direction, and that direction's name.
+     *
+     * Null when the stops cannot be read — the provider's database is not
+     * downloaded, or is being replaced — which is not an error: there is
+     * simply nothing to remind about until it is back.
+     */
+    fun loadRouteData(context: Context, slot: SmartPlanSlot): SmartRouteData? {
+        val stops = queryDatabase(context, listOf("bus_${slot.provider}_v2.sqlite")) { database ->
+            loadStops(database, slot.routeId, slot.pathId)
+        }
+        if (stops.isNullOrEmpty()) {
             return null
         }
-
-        val database = SQLiteDatabase.openDatabase(
-            databaseFile.path,
-            null,
-            SQLiteDatabase.OPEN_READONLY,
+        return SmartRouteData(
+            // The name only labels the reminder, so doing without is fine.
+            pathName = queryDatabase(context, METADATA_DATABASE_NAMES) { database ->
+                loadPathName(database, slot.routeId, slot.pathId)
+            },
+            stops = stops,
         )
-        return try {
-            var routeId: String? = null
-            val routeName = database.rawQuery(
-                "SELECT route_id, route_name FROM routes WHERE route_key = ? LIMIT 1",
-                arrayOf(routeKey.toString()),
-            ).use { cursor ->
-                if (cursor.moveToFirst()) {
-                    routeId = cursor.getString(0)
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                    cursor.getString(1).orEmpty()
-                } else {
-                    fallbackRouteName
-                }
-            }
-
-            val pathNames = linkedMapOf<Int, String>()
-            database.rawQuery(
-                "SELECT path_id, path_name FROM paths WHERE route_key = ? ORDER BY path_id ASC",
-                arrayOf(routeKey.toString()),
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    pathNames[cursor.getInt(0)] = cursor.getString(1).orEmpty()
-                }
-            }
-
-            val stops = loadStopsFromDatabase(database, routeKey)
-            if (stops.isEmpty() || routeId.isNullOrEmpty()) {
-                null
-            } else {
-                SmartRouteData(
-                    provider = provider,
-                    routeKey = routeKey,
-                    routeId = routeId!!,
-                    routeName = routeName.ifBlank { fallbackRouteName },
-                    pathNames = pathNames,
-                    stops = stops.sortedWith(compareBy({ it.pathId }, { it.sequence })),
-                )
-            }
-        } finally {
-            database.close()
-        }
     }
 
-    fun findNearestStop(
-        location: Location,
-        routeData: SmartRouteData,
+    internal fun loadStops(
+        database: SQLiteDatabase,
+        routeId: String,
         pathId: Int,
-    ): SmartNearestStop? {
-        var bestStop: SmartNearestStop? = null
-        for (stop in routeData.stops) {
-            if (stop.pathId != pathId || stop.lat == 0.0 || stop.lon == 0.0) {
-                continue
-            }
-            val results = FloatArray(1)
-            Location.distanceBetween(
-                location.latitude,
-                location.longitude,
-                stop.lat,
-                stop.lon,
-                results,
-            )
-            val distance = results[0].toDouble()
-            if (bestStop == null || distance < bestStop.distanceMeters) {
-                bestStop = SmartNearestStop(
-                    pathId = stop.pathId,
-                    stopId = stop.stopId,
-                    stopName = stop.stopName,
-                    distanceMeters = distance,
+    ): List<SmartRouteStop> {
+        val result = mutableListOf<SmartRouteStop>()
+        database.rawQuery(
+            """
+            SELECT stopid, name, seq, lon, lat
+            FROM stops
+            WHERE routeid = ? AND pathid = ?
+            ORDER BY seq ASC
+            """.trimIndent(),
+            arrayOf(routeId, pathId.toString()),
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val rawStopId = cursor.getString(0)?.trim().orEmpty()
+                if (rawStopId.isEmpty()) {
+                    continue
+                }
+                result += SmartRouteStop(
+                    pathId = pathId,
+                    rawStopId = rawStopId,
+                    stopName = cursor.getString(1).orEmpty(),
+                    sequence = cursor.getInt(2),
+                    lon = cursor.getDouble(3),
+                    lat = cursor.getDouble(4),
                 )
             }
         }
-        return bestStop
+        return result
     }
 
+    internal fun loadPathName(database: SQLiteDatabase, routeId: String, pathId: Int): String? =
+        database.rawQuery(
+            "SELECT name FROM paths WHERE routeid = ? AND pathid = ? LIMIT 1",
+            arrayOf(routeId, pathId.toString()),
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                cursor.getString(0)?.trim()?.takeIf { it.isNotEmpty() }
+            } else {
+                null
+            }
+        }
+
+    /**
+     * Runs [query] against the first of [fileNames] that exists, read-only.
+     * Null if none does or the query cannot be answered.
+     */
+    private fun <T> queryDatabase(
+        context: Context,
+        fileNames: List<String>,
+        query: (SQLiteDatabase) -> T?,
+    ): T? {
+        val file = databaseDirectories(context)
+            .flatMap { directory -> fileNames.map { File(directory, it) } }
+            .firstOrNull { it.exists() }
+            ?: return null
+        val database = try {
+            SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY)
+        } catch (_: Exception) {
+            return null
+        }
+        return try {
+            query(database)
+        } catch (_: Exception) {
+            // A schema this build does not know, or a file caught halfway
+            // through being replaced by a database update.
+            null
+        } finally {
+            runCatching { database.close() }
+        }
+    }
+
+    private fun databaseDirectories(context: Context): List<File> = listOfNotNull(
+        // Where the app keeps them now.
+        context.getDatabasePath("_").parentFile?.let { File(it, DATABASE_DIRECTORY) },
+        // Where it kept them before it moved them there.
+        context.filesDir.parentFile?.let { File(it, "app_flutter/$DATABASE_DIRECTORY") },
+        File(context.filesDir, DATABASE_DIRECTORY),
+    )
+
+    /** Measures what can be measured and leaves the choice to the rules. */
+    fun chooseStop(
+        slot: SmartPlanSlot,
+        routeData: SmartRouteData,
+        location: Location?,
+    ): SmartStopChoice? {
+        val usualStop = SmartRouteReminderRules.findUsualStop(slot, routeData.stops)
+        var nearestStop: SmartRouteStop? = null
+        var nearestDistance: Double? = null
+        if (location != null) {
+            for (stop in routeData.stops) {
+                val distance = distanceMeters(location, stop) ?: continue
+                if (nearestDistance == null || distance < nearestDistance) {
+                    nearestDistance = distance
+                    nearestStop = stop
+                }
+            }
+        }
+        return SmartRouteReminderRules.chooseStop(
+            usualStop = usualStop,
+            usualDistanceMeters = if (usualStop != null && location != null) {
+                distanceMeters(location, usualStop)
+            } else {
+                null
+            },
+            nearestStop = nearestStop,
+            nearestDistanceMeters = nearestDistance,
+        )
+    }
+
+    private fun distanceMeters(location: Location, stop: SmartRouteStop): Double? {
+        if (stop.lat == 0.0 || stop.lon == 0.0) {
+            return null
+        }
+        val results = FloatArray(1)
+        Location.distanceBetween(
+            location.latitude,
+            location.longitude,
+            stop.lat,
+            stop.lon,
+            results,
+        )
+        return results[0].toDouble()
+    }
+
+    /**
+     * The live state of one stop, counted down to the moment the response
+     * arrived; see [SmartRouteReminderRules.parseLiveStop].
+     */
     fun fetchLiveStop(
         routeId: String,
-        preferredPathId: Int,
-        stopId: Int,
+        pathId: Int,
+        rawStopId: String,
     ): SmartLiveStop? {
         val encodedRouteId = URLEncoder.encode(routeId, Charsets.UTF_8.name())
-        val connection = URL("$API_BASE_URL/api/v1/routes/$encodedRouteId/realtime")
-            .openConnection() as HttpURLConnection
+        val connection = try {
+            URL("$API_BASE_URL/api/v1/routes/$encodedRouteId/realtime")
+                .openConnection() as HttpURLConnection
+        } catch (_: Exception) {
+            return null
+        }
         connection.connectTimeout = ROUTE_REQUEST_TIMEOUT_MS
         connection.readTimeout = ROUTE_REQUEST_TIMEOUT_MS
         connection.requestMethod = "GET"
@@ -400,7 +577,12 @@ internal object SmartRouteNotificationSupport {
                 val jsonText = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                     reader.readText()
                 }
-                parseLiveStopMap(jsonText, preferredPathId)[stopId]
+                SmartRouteReminderRules.parseLiveStop(
+                    jsonText,
+                    pathId,
+                    rawStopId,
+                    System.currentTimeMillis(),
+                )
             }
         } catch (_: Exception) {
             null
@@ -409,105 +591,67 @@ internal object SmartRouteNotificationSupport {
         }
     }
 
-    fun shouldNotify(liveStop: SmartLiveStop): Boolean {
-        val message = liveStop.msg?.trim().orEmpty()
-        if (isLastBusMessage(message)) {
-            return false
-        }
-        if (message.isNotEmpty()) {
-            return true
-        }
-        val seconds = liveStop.sec ?: return false
-        return seconds <= 20 * 60
-    }
-
-    fun shouldDeliverNotification(
-        context: Context,
-        provider: String,
-        routeKey: Int,
-        pathId: Int,
-        stopId: Int,
-        nowMs: Long,
-    ): Boolean {
-        val preferences = notificationPreferences(context)
-        val key = LAST_NOTIFIED_KEY_PREFIX + listOf(provider, routeKey, pathId, stopId).joinToString("_")
-        val lastNotified = preferences.getLong(key, 0L)
-        return nowMs - lastNotified >= NOTIFICATION_COOLDOWN_MS
-    }
-
+    /**
+     * Posts the reminder. Whether it will be seen is for the caller to have
+     * checked; see [remind].
+     */
     fun showNotification(
         context: Context,
-        profile: SmartRouteProfile,
-        routeData: SmartRouteData,
-        nearestStop: SmartNearestStop,
-        liveStop: SmartLiveStop,
-        distanceMeters: Double,
-        nowMs: Long,
+        slot: SmartPlanSlot,
+        stop: SmartRouteStop,
+        text: SmartReminderText,
+        timeoutMs: Long,
     ) {
         val contentIntent = PendingIntent.getActivity(
             context,
-            profile.routeKey * 173 + nearestStop.stopId,
+            slot.routeKey * 31 + slot.pathId,
             AppLaunchConstants.createRouteDetailIntent(
                 context = context,
-                provider = profile.provider,
-                routeKey = profile.routeKey,
-                pathId = nearestStop.pathId,
-                stopId = nearestStop.stopId,
+                provider = slot.provider,
+                routeKey = slot.routeKey,
+                routeId = slot.routeId,
+                pathId = slot.pathId,
+                // Use the selected stop, not the plan's usual stop: location
+                // can pick a different one. Flutter needs the full-width id.
+                stopId = launchStopId(stop.rawStopId).takeIf { it > 0L },
             ),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val title = "智慧推薦：${routeData.routeName.ifBlank { profile.routeName.ifBlank { "路線" } }}"
-        val etaText = formatEtaText(liveStop)
-        val contentText = "最近站牌 ${nearestStop.stopName}，預估 $etaText"
-        val hourLabel = profile.preferredHour.toString().padStart(2, '0')
-        val pathName = routeData.pathNames[nearestStop.pathId]
-        val bigText = buildString {
-            append("你通常會在 ")
-            append(hourLabel)
-            append(":00 左右查看這條路線。")
-            if (!pathName.isNullOrBlank()) {
-                append("方向：")
-                append(pathName)
-                append("。")
-            }
-            append("最近站牌：")
-            append(nearestStop.stopName)
-            append("（距離你約 ")
-            append(formatDistance(distanceMeters))
-            append("）。預估到站 ")
-            append(etaText)
-            append('。')
-        }
-
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification_bus)
-            .setContentTitle(title)
-            .setContentText(contentText)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+            .setContentTitle(text.title)
+            .setContentText(text.text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text.bigText))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+            // Once the bus has gone the reminder is wrong, and a wrong arrival
+            // time is worse than none: it takes itself down.
+            .setTimeoutAfter(timeoutMs)
             .build()
 
         NotificationManagerCompat.from(context).notify(
-            710000 + profile.routeKey,
+            NOTIFICATION_ID_BASE + slot.routeKey % 100_000,
             notification,
         )
-
-        notificationPreferences(context)
-            .edit()
-            .putLong(
-                LAST_NOTIFIED_KEY_PREFIX +
-                    listOf(profile.provider, profile.routeKey, nearestStop.pathId, nearestStop.stopId)
-                        .joinToString("_"),
-                nowMs,
-            ).apply()
     }
 
+    /**
+     * Whether a reminder posted now would be shown: notifications allowed
+     * for the app, and this channel not turned off on its own. With the
+     * channel off the system drops the reminder without a word.
+     */
     fun canPostNotifications(context: Context): Boolean {
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            manager.getNotificationChannel(CHANNEL_ID)?.importance ==
+            NotificationManager.IMPORTANCE_NONE
+        ) {
             return false
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -517,57 +661,6 @@ internal object SmartRouteNotificationSupport {
             context,
             Manifest.permission.POST_NOTIFICATIONS,
         ) == PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun scoreProfile(
-        profile: SmartRouteProfile,
-        currentHour: Int,
-        previousHour: Int,
-        nextHour: Int,
-        nowMs: Long,
-    ): Double {
-        val currentOpenCount = profile.countAtHour(currentHour)
-        val currentSelectionCount = profile.selectionCountAtHour(currentHour)
-        val adjacentOpenCount =
-            profile.countAtHour(previousHour) + profile.countAtHour(nextHour)
-        val adjacentSelectionCount =
-            profile.selectionCountAtHour(previousHour) +
-                profile.selectionCountAtHour(nextHour)
-        val preferredCount = profile.combinedCountAtHour(profile.preferredHour)
-        val recencyDays = if (profile.latestInteractionAtMs <= 0L) {
-            365.0
-        } else {
-            (nowMs - profile.latestInteractionAtMs).toDouble() / (24 * 60 * 60 * 1000)
-        }
-        val recencyBonus = when {
-            recencyDays <= 2 -> 1.5
-            recencyDays <= 7 -> 0.75
-            else -> 0.0
-        }
-        return (currentOpenCount * 5) +
-            (currentSelectionCount * 3.5) +
-            (adjacentOpenCount * 2.5) +
-            (adjacentSelectionCount * 1.5) +
-            (preferredCount * 0.5) +
-            (profile.totalOpens * 0.15) +
-            (profile.totalSelections * 0.1) +
-            recencyBonus
-    }
-
-    private fun hasEnoughHistoryForRecommendation(
-        profile: SmartRouteProfile,
-        currentHour: Int,
-        previousHour: Int,
-        nextHour: Int,
-    ): Boolean {
-        if (profile.totalOpens < MIN_TOTAL_OPENS_FOR_RECOMMENDATION) {
-            return false
-        }
-        val relevantInteractions =
-            profile.combinedCountAtHour(currentHour) +
-                profile.combinedCountAtHour(previousHour) +
-                profile.combinedCountAtHour(nextHour)
-        return relevantInteractions >= MIN_RELEVANT_INTERACTIONS_FOR_RECOMMENDATION
     }
 
     private fun hasLocationPermission(context: Context): Boolean {
@@ -594,161 +687,11 @@ internal object SmartRouteNotificationSupport {
         return true
     }
 
-    private fun resolveDatabaseFile(context: Context, provider: String): File? {
-        val filesParent = context.filesDir.parentFile ?: return null
-        val candidates = listOf(
-            File(filesParent, "app_flutter/.yabus_backend/bus_${provider}_v2.sqlite"),
-            File(context.filesDir, ".yabus_backend/bus_${provider}_v2.sqlite"),
-            File(filesParent, "app_flutter/.taiwanbus/bus_${provider}.sqlite"),
-            File(context.filesDir, ".taiwanbus/bus_${provider}.sqlite"),
-        )
-        return candidates.firstOrNull { it.exists() } ?: candidates.first()
-    }
+    private fun flutterPreferences(context: Context): SharedPreferences =
+        context.getSharedPreferences(FLUTTER_PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-    private fun loadStopsFromDatabase(
-        database: SQLiteDatabase,
-        routeKey: Int,
-    ): List<SmartRouteStop> {
-        val result = mutableListOf<SmartRouteStop>()
-        database.rawQuery(
-            """
-            SELECT path_id, stop_id, stop_name, sequence, lon, lat
-            FROM stops
-            WHERE route_key = ?
-            ORDER BY path_id ASC, sequence ASC
-            """.trimIndent(),
-            arrayOf(routeKey.toString()),
-        ).use { cursor ->
-            while (cursor.moveToNext()) {
-                result += SmartRouteStop(
-                    pathId = cursor.getInt(0),
-                    stopId = cursor.getInt(1),
-                    stopName = cursor.getString(2).orEmpty(),
-                    sequence = cursor.getInt(3),
-                    lon = cursor.getDouble(4),
-                    lat = cursor.getDouble(5),
-                )
-            }
-        }
-        return result
-    }
-
-    private fun parseLiveStopMap(
-        jsonText: String,
-        preferredPathId: Int,
-    ): Map<Int, SmartLiveStop> {
-        val root = JSONObject(jsonText)
-        val paths = root.optJSONArray("paths") ?: return emptyMap()
-        val result = mutableMapOf<Int, SmartLiveStop>()
-
-        fun appendPath(pathObject: JSONObject) {
-            val stops = pathObject.optJSONArray("stops") ?: return
-            for (index in 0 until stops.length()) {
-                val stop = stops.optJSONObject(index) ?: continue
-                val stopId = parseStopId(stop.opt("stopid"))
-                if (stopId <= 0) {
-                    continue
-                }
-                result[stopId] = SmartLiveStop(
-                    sec = toIntOrNull(stop.opt("eta")),
-                    msg = stop.opt("message")
-                        ?.toString()
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) },
-                )
-            }
-        }
-
-        var matchedPath = false
-        for (index in 0 until paths.length()) {
-            val pathObject = paths.optJSONObject(index) ?: continue
-            if (toIntOrNull(pathObject.opt("pathid")) == preferredPathId) {
-                matchedPath = true
-                appendPath(pathObject)
-            }
-        }
-
-        if (!matchedPath) {
-            for (index in 0 until paths.length()) {
-                val pathObject = paths.optJSONObject(index) ?: continue
-                appendPath(pathObject)
-            }
-        }
-
-        return result
-    }
-
-    private fun parseStopId(raw: Any?): Int {
-        if (raw is Number) {
-            return raw.toInt()
-        }
-        val text = raw?.toString()?.trim().orEmpty()
-        val parsed = text.toIntOrNull()
-        if (parsed != null) {
-            return parsed
-        }
-        var hash = 17
-        for (char in text) {
-            hash = (hash * 31 + char.code) and 0x7fffffff
-        }
-        return hash
-    }
-
-    private fun toIntOrNull(raw: Any?): Int? {
-        return when (raw) {
-            is Number -> raw.toInt()
-            else -> raw?.toString()?.trim()?.toIntOrNull()
-        }
-    }
-
-    private fun formatEtaText(liveStop: SmartLiveStop): String {
-        val message = liveStop.msg?.trim().orEmpty()
-        if (message.isNotEmpty()) {
-            return message
-        }
-        val seconds = liveStop.sec ?: return "--"
-        if (seconds <= 0) {
-            return "進站中"
-        }
-        if (seconds < 60) {
-            return "1 分內"
-        }
-        return "${seconds / 60} 分"
-    }
-
-    private fun formatDistance(distanceMeters: Double): String {
-        if (distanceMeters < 1000) {
-            return "${distanceMeters.toInt()}m"
-        }
-        val kilometers = distanceMeters / 1000.0
-        return String.format("%.1fkm", kilometers)
-    }
-
-    private fun loadFlutterJsonObject(
-        context: Context,
-        primaryKey: String,
-        fallbackKey: String,
-    ): JSONObject? {
-        val preferences = context.getSharedPreferences(
-            FLUTTER_PREFERENCES_NAME,
-            Context.MODE_PRIVATE,
-        )
-        val raw = preferences.getString(primaryKey, null)
-            ?: preferences.getString(fallbackKey, null)
-            ?: return null
-        return try {
-            JSONObject(raw)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun notificationPreferences(context: Context): SharedPreferences {
-        return context.getSharedPreferences(
-            NOTIFICATION_PREFERENCES_NAME,
-            Context.MODE_PRIVATE,
-        )
-    }
+    private fun notificationPreferences(context: Context): SharedPreferences =
+        context.getSharedPreferences(NOTIFICATION_PREFERENCES_NAME, Context.MODE_PRIVATE)
 }
 
 internal data class SmartRouteSettings(
@@ -756,66 +699,8 @@ internal data class SmartRouteSettings(
     val enableNotifications: Boolean,
 )
 
-internal data class SmartRouteProfile(
-    val provider: String,
-    val routeKey: Int,
-    val pathId: Int,
-    val routeName: String,
-    val totalOpens: Int,
-    val lastOpenedAtMs: Long,
-    val totalSelections: Int,
-    val lastSelectedAtMs: Long,
-    val hourlyOpens: Map<Int, Int>,
-    val hourlySelections: Map<Int, Int>,
-) {
-    fun countAtHour(hour: Int): Int = hourlyOpens[hour] ?: 0
-    fun selectionCountAtHour(hour: Int): Int = hourlySelections[hour] ?: 0
-    fun combinedCountAtHour(hour: Int): Int = countAtHour(hour) + selectionCountAtHour(hour)
-
-    val latestInteractionAtMs: Long
-        get() = maxOf(lastOpenedAtMs, lastSelectedAtMs)
-
-    val preferredHour: Int
-        get() {
-            var bestHour = 0
-            var bestCount = -1
-            for (hour in 0..23) {
-                val count = combinedCountAtHour(hour)
-                if (count > bestCount) {
-                    bestHour = hour
-                    bestCount = count
-                }
-            }
-            return bestHour
-        }
-}
-
 internal data class SmartRouteData(
-    val provider: String,
-    val routeKey: Int,
-    val routeId: String,
-    val routeName: String,
-    val pathNames: Map<Int, String>,
+    val pathName: String?,
+    /** The stops of one direction, in running order. */
     val stops: List<SmartRouteStop>,
-)
-
-internal data class SmartRouteStop(
-    val pathId: Int,
-    val stopId: Int,
-    val stopName: String,
-    val sequence: Int,
-    val lon: Double,
-    val lat: Double,
-)
-
-internal data class SmartNearestStop(
-    val pathId: Int,
-    val stopId: Int,
-    val stopName: String,
-    val distanceMeters: Double,
-)
-
-internal data class SmartLiveStop(
-    val sec: Int?,
-    val msg: String?,
 )

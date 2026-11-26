@@ -60,8 +60,14 @@ YetAnotherBusApp（YABus）是一個以 Flutter 開發的跨平台公車動態�
 ### 捷運最近車站
 
 - 在捷運分頁點選「定位最近的車站」，跨系統尋找最近站點，自動選擇系統、路線與車站並開啟地圖及到站資訊。
-- 定位僅在點選後使用，距離在裝置端計算；若部分系統資料暫時無法取得，仍顯示可用結果並提示查詢範圍不完整。
+- 定位僅在點選後使用，距離在裝置端計算；若部分系統沒有可定位的站點或暫時無法取得資料，仍顯示可用結果並提示查詢範圍不完整。
 - 定位失敗時保留目前選擇，仍可手動切換系統與路線。
+
+### Android AI 助理整合
+
+- 透過 AppFunctions 提供本機收藏與分類查詢，以及開啟收藏路線、站點的操作。
+- 使用手機現有收藏，包含尚未同步的變更；Android 16+ 與助理支援程度依平台開放狀態而定。
+- 建置、工具清單與裝置驗證方式見 [APPFUNCTIONS.md](APPFUNCTIONS.md)。
 
 ### 地圖顯示
 
@@ -141,7 +147,7 @@ https://github.com/YetAnotherBusDeveloper/yetanotherbusapp/releases/latest
 
 ### Requirements
 
-- Flutter 3.x+
+- Flutter 3.44.0+（Android AppFunctions 的 AGP 9.1 建置需求）
 - Dart SDK
 - Android Studio / VS Code
 - Node.js 24.22.1（Web 工具；版本記錄於 `.node-version`）
