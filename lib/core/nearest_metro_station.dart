@@ -48,13 +48,13 @@ class NearestMetroStation {
   final double distanceMeters;
 }
 
-/// Finds the nearest station that can be displayed on an available metro line.
+/// Finds the nearest station and counts systems with a displayable candidate.
 ///
 /// Station-of-line membership is authoritative: the stations endpoint can
 /// return an empty `line_id`. At equal distances, keep the preferred system
 /// and then its preferred line (useful at interchanges); otherwise retain input
 /// order. A preference never overrides a closer station.
-NearestMetroStation? nearestMetroStation(
+({NearestMetroStation? nearest, int usableSystems}) nearestMetroStation(
   List<MetroSystemData> systems, {
   required double latitude,
   required double longitude,
@@ -62,11 +62,12 @@ NearestMetroStation? nearestMetroStation(
   String? preferredLineId,
 }) {
   if (!_validCoordinates(latitude, longitude)) {
-    return null;
+    return (nearest: null, usableSystems: 0);
   }
 
   NearestMetroStation? nearest;
   var bestPreference = -1;
+  var usableSystems = 0;
   for (final data in systems) {
     final linesById = {
       for (final line in data.lines)
@@ -84,6 +85,7 @@ NearestMetroStation? nearestMetroStation(
       }
     }
 
+    var hasCandidate = false;
     for (final station in data.stations) {
       if (station.stationId.isEmpty ||
           !_validCoordinates(station.lat, station.lon) ||
@@ -94,6 +96,7 @@ NearestMetroStation? nearestMetroStation(
       if (lineIds == null) {
         continue;
       }
+      hasCandidate = true;
       final distance = Geolocator.distanceBetween(
         latitude,
         longitude,
@@ -117,8 +120,11 @@ NearestMetroStation? nearestMetroStation(
         }
       }
     }
+    if (hasCandidate) {
+      usableSystems++;
+    }
   }
-  return nearest;
+  return (nearest: nearest, usableSystems: usableSystems);
 }
 
 bool _validCoordinates(double latitude, double longitude) =>
