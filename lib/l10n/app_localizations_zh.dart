@@ -306,7 +306,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get smartRecommendationsEmpty =>
-      '目前沒有可顯示的推薦。多開啟幾次常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
+      '目前沒有可顯示的推薦。在不同日子的相近時間開啟常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
 
   @override
   String get smartRecommendationsDisabled =>
@@ -699,7 +699,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get smartRecommendationsDescription =>
-      '依照你開啟與選擇路線的次數、常用時段，在首頁推薦可能想搭的路線。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
+      '依照你平日與假日在各時段查看路線的習慣，在首頁推薦此刻可能想搭的路線，並優先顯示你常用的站牌。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
 
   @override
   String get autoFavoriteTitle => '自動加入常用最愛';
@@ -713,7 +713,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get smartNotificationDescription =>
-      '在你常查詢路線的時段，於背景檢查常用路線與附近站牌，符合條件時發送到站提醒。需要足夠的使用紀錄、通知權限與背景定位；系統省電限制可能延後檢查，並非每次都會發送通知。';
+      '在你平常查看某條路線的時間前後，於背景查詢你常用站牌的到站時間，有趕得上的班次時提醒你。要在不同日子的相近時間多次查看同一條路線才會開始提醒；超過兩週沒有再開啟該路線（從提醒通知點進去查看也算）就會暫停，暫停前的提醒會先告知，再次查看後恢復。需要通知權限。背景定位為選用：授權後會依你當下的位置調整站牌，離路線太遠時不提醒。系統省電限制可能延後檢查，並非每次都會發送通知。';
 
   @override
   String get smartNotificationPermissionRequired => '需要通知權限才能啓用智慧推薦通知。';
@@ -2456,6 +2456,74 @@ class AppLocalizationsZh extends AppLocalizations {
   String feedbackContentTooLong(int max) {
     return '內文最多 $max 個字';
   }
+
+  @override
+  String get feedbackMoreInfo => '更多資訊（選填）';
+
+  @override
+  String get feedbackMoreInfoHint => '補充資訊可協助我們了解問題，也可以直接送出。';
+
+  @override
+  String get feedbackCategoryLabel => '回饋類型（選填）';
+
+  @override
+  String get feedbackCategoryNone => '不指定';
+
+  @override
+  String get feedbackCategoryBug => '問題回報';
+
+  @override
+  String get feedbackCategoryData => '交通資料錯誤';
+
+  @override
+  String get feedbackCategoryFeature => '功能建議';
+
+  @override
+  String get feedbackCategoryOther => '其他';
+
+  @override
+  String get feedbackRouteContextLabel => '相關路線／站牌（選填）';
+
+  @override
+  String get feedbackRouteContextHint => '例如：臺北市 307，往板橋，臺北車站';
+
+  @override
+  String get feedbackContactLabel => '聯絡方式（選填）';
+
+  @override
+  String get feedbackContactHint => '例如：Email 或 Discord 帳號，方便我們追問細節';
+
+  @override
+  String feedbackOptionalTooLong(int max) {
+    return '此欄位最多 $max 個字';
+  }
+
+  @override
+  String get feedbackIncludeDiagnostics => '附上 App 與顯示資訊';
+
+  @override
+  String get feedbackDiagnosticsHint => '選擇後會附上以下版本、平台、語言與顯示設定，協助排查問題。';
+
+  @override
+  String get feedbackDiagnosticVersion => 'App 版本';
+
+  @override
+  String get feedbackDiagnosticCommit => '程式版本';
+
+  @override
+  String get feedbackDiagnosticPlatform => '平台';
+
+  @override
+  String get feedbackDiagnosticLocale => '語言';
+
+  @override
+  String get feedbackDiagnosticScreen => '畫面尺寸（邏輯像素）';
+
+  @override
+  String get feedbackDiagnosticTextScale => '文字縮放（以 14pt 為基準）';
+
+  @override
+  String get feedbackDiagnosticTheme => '顯示主題';
 
   @override
   String get feedbackSubmitting => '送出中…';
@@ -3638,7 +3706,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get smartRecommendationsEmpty =>
-      '目前沒有可顯示的推薦。多開啟幾次常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
+      '目前沒有可顯示的推薦。在不同日子的相近時間開啟常搭的路線，YABus 就能逐漸學習你的使用時段；也可以到「附近站牌」授權定位，再回來重新整理，查看附近可搭乘的路線。';
 
   @override
   String get smartRecommendationsDisabled =>
@@ -4031,7 +4099,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get smartRecommendationsDescription =>
-      '依照你開啟與選擇路線的次數、常用時段，在首頁推薦可能想搭的路線。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
+      '依照你平日與假日在各時段查看路線的習慣，在首頁推薦此刻可能想搭的路線，並優先顯示你常用的站牌。使用紀錄不足時會嘗試顯示附近站牌；附近推薦需要定位，依使用紀錄推薦則需要目前地區的本地資料庫。關閉後首頁會隱藏這個區塊，學習紀錄可在「紀錄與隱私」清除。';
 
   @override
   String get autoFavoriteTitle => '自動加入常用最愛';
@@ -4045,7 +4113,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get smartNotificationDescription =>
-      '在你常查詢路線的時段，於背景檢查常用路線與附近站牌，符合條件時發送到站提醒。需要足夠的使用紀錄、通知權限與背景定位；系統省電限制可能延後檢查，並非每次都會發送通知。';
+      '在你平常查看某條路線的時間前後，於背景查詢你常用站牌的到站時間，有趕得上的班次時提醒你。要在不同日子的相近時間多次查看同一條路線才會開始提醒；超過兩週沒有再開啟該路線（從提醒通知點進去查看也算）就會暫停，暫停前的提醒會先告知，再次查看後恢復。需要通知權限。背景定位為選用：授權後會依你當下的位置調整站牌，離路線太遠時不提醒。系統省電限制可能延後檢查，並非每次都會發送通知。';
 
   @override
   String get smartNotificationPermissionRequired => '需要通知權限才能啓用智慧推薦通知。';
@@ -5788,6 +5856,74 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String feedbackContentTooLong(int max) {
     return '內文最多 $max 個字';
   }
+
+  @override
+  String get feedbackMoreInfo => '更多資訊（選填）';
+
+  @override
+  String get feedbackMoreInfoHint => '補充資訊可協助我們了解問題，也可以直接送出。';
+
+  @override
+  String get feedbackCategoryLabel => '回饋類型（選填）';
+
+  @override
+  String get feedbackCategoryNone => '不指定';
+
+  @override
+  String get feedbackCategoryBug => '問題回報';
+
+  @override
+  String get feedbackCategoryData => '交通資料錯誤';
+
+  @override
+  String get feedbackCategoryFeature => '功能建議';
+
+  @override
+  String get feedbackCategoryOther => '其他';
+
+  @override
+  String get feedbackRouteContextLabel => '相關路線／站牌（選填）';
+
+  @override
+  String get feedbackRouteContextHint => '例如：臺北市 307，往板橋，臺北車站';
+
+  @override
+  String get feedbackContactLabel => '聯絡方式（選填）';
+
+  @override
+  String get feedbackContactHint => '例如：Email 或 Discord 帳號，方便我們追問細節';
+
+  @override
+  String feedbackOptionalTooLong(int max) {
+    return '此欄位最多 $max 個字';
+  }
+
+  @override
+  String get feedbackIncludeDiagnostics => '附上 App 與顯示資訊';
+
+  @override
+  String get feedbackDiagnosticsHint => '選擇後會附上以下版本、平台、語言與顯示設定，協助排查問題。';
+
+  @override
+  String get feedbackDiagnosticVersion => 'App 版本';
+
+  @override
+  String get feedbackDiagnosticCommit => '程式版本';
+
+  @override
+  String get feedbackDiagnosticPlatform => '平台';
+
+  @override
+  String get feedbackDiagnosticLocale => '語言';
+
+  @override
+  String get feedbackDiagnosticScreen => '畫面尺寸（邏輯像素）';
+
+  @override
+  String get feedbackDiagnosticTextScale => '文字縮放（以 14pt 為基準）';
+
+  @override
+  String get feedbackDiagnosticTheme => '顯示主題';
 
   @override
   String get feedbackSubmitting => '送出中…';

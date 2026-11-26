@@ -3707,8 +3707,14 @@ class BusRepository {
         vehicleId: vehicleId,
         source: _nonEmptyString(rawEta['source']) ?? 'tdx',
         estimated: _truthyPayloadValue(rawEta['estimated']),
+        isArriving: _truthyPayloadValue(rawEta['is_arriving']),
       );
-      if (eta.sec == null && eta.msg == null && eta.vehicleId == null) {
+      // The flag alone is something said of a bus: one at the stop that the
+      // feed neither names nor has an estimate for.
+      if (eta.sec == null &&
+          eta.msg == null &&
+          eta.vehicleId == null &&
+          !eta.isArriving) {
         continue;
       }
       result.add(eta);
@@ -4922,6 +4928,30 @@ class BusRepository {
     return null;
   }
 
+  /// The routeids behind [routeKeys], for those of them the local database
+  /// lists. The reverse of [routeKeyForRouteId], done for many keys in the
+  /// one pass over the provider's routes that a single key would take.
+  Future<Map<int, String>> routeIdsForRouteKeys(
+    BusProvider provider,
+    Set<int> routeKeys,
+  ) async {
+    if (routeKeys.isEmpty) {
+      return const <int, String>{};
+    }
+    final rows = await _loadMetadataPathRows(provider: provider);
+    final routeIds = <int, String>{};
+    for (final row in rows) {
+      if (row.routeId.isEmpty) {
+        continue;
+      }
+      final routeKey = _routeKeyForRouteId(row.routeId);
+      if (routeKeys.contains(routeKey)) {
+        routeIds.putIfAbsent(routeKey, () => row.routeId);
+      }
+    }
+    return routeIds;
+  }
+
   /// The stable client-side key for a routeid.
   ///
   /// Route detail is addressed by [routeKey], but anything that arrives from
@@ -4959,6 +4989,15 @@ class BusRepository {
     return (normalized == null || normalized.isEmpty) ? null : normalized;
   }
 
+  /// Parses a stop id into the `int` this app keys stops by.
+  ///
+  /// Stop ids are 64-bit in the feeds (高雄's look like `100100128221`), so
+  /// this keeps the full value rather than narrowing it, and every Dart-side
+  /// map is keyed with the same result. The native side folds whatever it is
+  /// given into a positive 32-bit key (`foldStopId` in StopIdCodec.kt); the two
+  /// never need to agree on the same number, only to be self-consistent.
+  ///
+  /// Some providers use non-numeric ids (`101-11009`); those hash.
   int _parseStopId(Object? raw) {
     if (raw is num) {
       return raw.toInt();

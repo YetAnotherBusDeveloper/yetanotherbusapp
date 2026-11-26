@@ -1,0 +1,16 @@
+[
+  {
+    "provider": "khh",
+    "routeKey": 101,
+    "pathId": 0,
+    "atMs": 1775604360000,
+    "peakMinute": 220
+  },
+  {
+    "provider": "khh",
+    "routeKey": 202,
+    "pathId": 1,
+    "atMs": 1775901000000,
+    "peakMinute": 840
+  }
+]

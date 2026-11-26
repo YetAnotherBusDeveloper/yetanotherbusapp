@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+results/
+results.enc/
+runs/
+*.tgz*
+*.bin
+*.apk
+*.png
+*.mp4
+*.pem
+!results_public.pem
+.env*

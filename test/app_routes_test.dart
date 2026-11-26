@@ -143,4 +143,26 @@ void main() {
     expect(action.routeKey, isNull);
     expect(action.stopId, isNull);
   });
+
+  test('native route launch payload keeps 64-bit stop ids', () {
+    // 高雄 stop ids exceed 32 bits, and the platform channel hands those over
+    // as a 64-bit integer. A widget or notification tap has to arrive naming
+    // the same stop the route screen's own models hold, or nothing is selected.
+    const stopId = 101111144601;
+    final action = AppLaunchAction.fromMap({
+      'target': 'route_detail',
+      'provider': 'khh',
+      'routeKey': 100,
+      'routeId': 'KHH100',
+      'pathId': 0,
+      'stopId': stopId,
+      'destinationPathId': 0,
+      'destinationStopId': stopId + 30,
+    });
+
+    expect(action.target, AppLaunchTarget.routeDetail);
+    expect(action.provider, BusProvider.khh);
+    expect(action.stopId, stopId);
+    expect(action.destinationStopId, stopId + 30);
+  });
 }

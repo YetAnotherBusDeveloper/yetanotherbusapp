@@ -324,6 +324,7 @@ class AccountSyncLocalState {
     this.routeHistorySyncEnabled = false,
     this.routeHistoryDeletionPending = false,
     this.routeHistoryModifiedAtMs,
+    this.routeHistorySelectionHistoryClearedAtMs,
     this.routeHistoryDevicePayload,
   });
 
@@ -333,6 +334,7 @@ class AccountSyncLocalState {
   final bool routeHistorySyncEnabled;
   final bool routeHistoryDeletionPending;
   final int? routeHistoryModifiedAtMs;
+  final int? routeHistorySelectionHistoryClearedAtMs;
   final Map<String, dynamic>? routeHistoryDevicePayload;
 
   factory AccountSyncLocalState.empty() {
@@ -370,6 +372,9 @@ class AccountSyncLocalState {
       routeHistoryModifiedAtMs: _jsonIntOrNull(
         json['route_history_modified_at_ms'],
       ),
+      routeHistorySelectionHistoryClearedAtMs: _jsonIntOrNull(
+        json['route_history_selection_history_cleared_at_ms'],
+      ),
       routeHistoryDevicePayload: json['route_history_device_payload'] is Map
           ? (json['route_history_device_payload'] as Map).map(
               (key, value) => MapEntry(key.toString(), _deepCloneJson(value)),
@@ -397,6 +402,8 @@ class AccountSyncLocalState {
         routeHistorySyncEnabled: routeHistorySyncEnabled,
         routeHistoryDeletionPending: routeHistoryDeletionPending,
         routeHistoryModifiedAtMs: routeHistoryModifiedAtMs,
+        routeHistorySelectionHistoryClearedAtMs:
+            routeHistorySelectionHistoryClearedAtMs,
         routeHistoryDevicePayload: routeHistoryDevicePayload,
       ),
       AccountSyncNamespace.preferences => AccountSyncLocalState(
@@ -406,6 +413,8 @@ class AccountSyncLocalState {
         routeHistorySyncEnabled: routeHistorySyncEnabled,
         routeHistoryDeletionPending: routeHistoryDeletionPending,
         routeHistoryModifiedAtMs: routeHistoryModifiedAtMs,
+        routeHistorySelectionHistoryClearedAtMs:
+            routeHistorySelectionHistoryClearedAtMs,
         routeHistoryDevicePayload: routeHistoryDevicePayload,
       ),
     };
@@ -419,6 +428,7 @@ class AccountSyncLocalState {
     bool? routeHistoryDeletionPending,
     int? routeHistoryModifiedAtMs,
     bool clearRouteHistoryModifiedAtMs = false,
+    int? routeHistorySelectionHistoryClearedAtMs,
     Map<String, dynamic>? routeHistoryDevicePayload,
     bool clearRouteHistoryDevicePayload = false,
   }) {
@@ -435,6 +445,9 @@ class AccountSyncLocalState {
       routeHistoryModifiedAtMs: clearRouteHistoryModifiedAtMs
           ? null
           : (routeHistoryModifiedAtMs ?? this.routeHistoryModifiedAtMs),
+      routeHistorySelectionHistoryClearedAtMs:
+          routeHistorySelectionHistoryClearedAtMs ??
+          this.routeHistorySelectionHistoryClearedAtMs,
       routeHistoryDevicePayload: clearRouteHistoryDevicePayload
           ? null
           : (routeHistoryDevicePayload ?? this.routeHistoryDevicePayload),
@@ -450,6 +463,9 @@ class AccountSyncLocalState {
       'route_history_deletion_pending': routeHistoryDeletionPending,
       if (routeHistoryModifiedAtMs != null)
         'route_history_modified_at_ms': routeHistoryModifiedAtMs,
+      if (routeHistorySelectionHistoryClearedAtMs != null)
+        'route_history_selection_history_cleared_at_ms':
+            routeHistorySelectionHistoryClearedAtMs,
       if (routeHistoryDevicePayload != null)
         'route_history_device_payload': jsonDecode(
           jsonEncode(routeHistoryDevicePayload),

@@ -25,6 +25,7 @@ import '../core/models.dart';
 import '../core/refresh_backoff.dart';
 import '../core/route_detail_launch_bridge.dart';
 import '../core/samsung_live_notification_prompt_service.dart';
+import '../core/smart_route_service.dart';
 import '../core/stop_route_merge.dart';
 import '../core/trip_monitor_notifications.dart';
 import '../core/twbusforum.dart';
@@ -68,6 +69,35 @@ StopInfo? resolveLearnedDestinationStop({
   return boardingIndex >= 0 && destinationIndex > boardingIndex
       ? pathStops[destinationIndex]
       : null;
+}
+
+/// The stop a visit to a route should be remembered against, if any.
+///
+/// A stop the rider chose comes first, whatever else is known: it is the one
+/// they have said they board at, even when it also happens to be the nearest.
+/// Next the stop the page was opened on. The nearest stop is only a guess at
+/// where they will board, and is trusted only when they are close enough to
+/// be heading for it: the nearest stop to somebody reading the timetable
+/// from across town says nothing about their habits.
+@visibleForTesting
+int? usageStopIdFor({
+  required int? pickedStopId,
+  required int? openedStopId,
+  required int? nearestStopId,
+  required double? nearestDistanceMeters,
+}) {
+  if (pickedStopId != null) {
+    return pickedStopId;
+  }
+  if (openedStopId != null) {
+    return openedStopId;
+  }
+  if (nearestStopId == null ||
+      nearestDistanceMeters == null ||
+      nearestDistanceMeters > SmartRouteService.atStopMeters) {
+    return null;
+  }
+  return nearestStopId;
 }
 
 class RouteDetailScreen extends StatefulWidget {
@@ -204,6 +234,16 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   int? _requestedDestinationStopId;
   int? _boardingStopId;
   String? _boardingStopName;
+
+  /// The boarding stop the rider chose themselves. [_boardingStopId] is also
+  /// filled in from the nearest stop and from the stop the page was opened
+  /// on, and only this tells a choice apart from those.
+  int? _riderPickedBoardingStopId;
+
+  /// True after the rider explicitly returns to the location-based candidate.
+  /// The candidate may be filled into [_boardingStopId] again later, but the
+  /// old opened stop must not become the visit's source again.
+  bool _boardingStopUsesCurrentLocation = false;
   int? _destinationStopId;
   String? _destinationStopName;
   bool _hasExplicitDestinationRequest = false;
@@ -559,6 +599,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
               detail.route,
               provider: widget.provider,
               pathId: _currentPathId,
+              stopId: _usageStopHint(),
             ),
           );
         });
@@ -1109,6 +1150,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           etaReferenceAt: previousStop.etaReferenceAt,
           buses: previousStop.buses,
           etas: previousStop.etas,
+          routeObservations: previousStop.routeObservations,
         );
       }).toList();
     }
@@ -1164,11 +1206,20 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       if (_tabController!.indexIsChanging) {
         return;
       }
+      final boardingStop = _findStopById(_currentPathStops, _boardingStopId);
+      if (_boardingStopId != null && boardingStop == null) {
+        _boardingStopId = null;
+        _boardingStopName = null;
+        if (_riderPickedBoardingStopId != null) {
+          _riderPickedBoardingStopId = null;
+          _boardingStopUsesCurrentLocation = true;
+        }
+        _resetLiveActivityRideState();
+      }
       if (_destinationStopId != null &&
           _currentPathStops.every(
             (stop) => stop.stopId != _destinationStopId,
           )) {
-        final boardingStop = _findStopById(_currentPathStops, _boardingStopId);
         _boardingStopId = boardingStop?.stopId;
         _boardingStopName = boardingStop?.stopName;
         _destinationStopId = null;
@@ -1317,6 +1368,14 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       requestedPathId: requestedPathId,
       requestedStopId: requestedStopId,
     );
+    final requestedBoardingStop = detail == null || resolvedPathId == null
+        ? null
+        : _findStopById(
+            detail.stopsByPath[resolvedPathId] ?? const <StopInfo>[],
+            requestedStopId,
+          );
+    final replacesBoardingSource = requestedStopId != null &&
+        (detail == null || requestedBoardingStop != null);
 
     setState(() {
       _requestedPathId = resolvedPathId;
@@ -1329,6 +1388,17 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _targetInitialPathId = resolvedPathId;
       _didScrollToInitialStop = requestedStopId == null;
       _autoScrolledPathId = null;
+      if (replacesBoardingSource) {
+        _resetLiveActivityRideState();
+        _resetLiveActivityDestinationState();
+        _boardingStopId = requestedStopId;
+        _boardingStopName = requestedBoardingStop?.stopName;
+        _riderPickedBoardingStopId = null;
+        _boardingStopUsesCurrentLocation = false;
+        _destinationStopId = null;
+        _destinationStopName = null;
+        _hasExplicitDestinationRequest = requestedDestinationStopId != null;
+      }
     });
 
     if (detail != null && _tabController != null && resolvedPathId != null) {
@@ -1442,8 +1512,12 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       return;
     }
 
+    final requestedBoardingStop = _findStopById(
+      pathStops,
+      _requestedStopId,
+    );
     final boardingStop =
-        _findStopById(pathStops, _requestedStopId) ??
+        requestedBoardingStop ??
         _findStopById(pathStops, _boardingStopId) ??
         _findStopById(pathStops, _nearestStopByPath[resolvedPathId]);
 
@@ -1461,6 +1535,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _destinationStopName = destinationStop.stopName;
       _boardingStopId = boardingStop?.stopId;
       _boardingStopName = boardingStop?.stopName;
+      // A launch action with an explicit boarding stop replaces an earlier
+      // manual choice; do not let that stale choice win when the visit is
+      // recorded later.
+      if (requestedBoardingStop != null) {
+        _riderPickedBoardingStopId = null;
+        _boardingStopUsesCurrentLocation = false;
+      }
     });
 
     await _configureBackgroundTripMonitorIfNeeded();
@@ -2130,6 +2211,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       destinationStopName: _destinationStopName,
       initialLatitude: _lastPosition?.latitude,
       initialLongitude: _lastPosition?.longitude,
+      initialLocationTimestampMs:
+          _lastPosition?.timestamp.millisecondsSinceEpoch,
       stops: resolvedStops.map(TripMonitorStop.fromStop).toList(),
     );
   }
@@ -2698,6 +2781,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       }
       _boardingStopId = stop.stopId;
       _boardingStopName = stop.stopName;
+      _riderPickedBoardingStopId = stop.stopId;
+      _boardingStopUsesCurrentLocation = false;
     });
     await _applyLearnedDestinationIfPossible();
     await _configureBackgroundTripMonitorIfNeeded();
@@ -2730,6 +2815,16 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       _destinationStopId = stop.stopId;
       _destinationStopName = stop.stopName;
     });
+    if (_isAndroid && _backgroundTripMonitorPaused) {
+      // The service pauses a trip, not the screen: with a destination this is
+      // a different trip to it, and holding on to the old answer would leave
+      // the monitor off. That stranded the "you have boarded, choose where to
+      // get off" prompt — choosing never started anything again.
+      await _syncBackgroundTripMonitorPausedState();
+      if (!mounted) {
+        return;
+      }
+    }
     if (boardingStop != null && pathId != null) {
       final controller = AppControllerScope.read(context);
       await controller.recordDestinationChoice(
@@ -2783,6 +2878,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
       }
       _boardingStopId = null;
       _boardingStopName = null;
+      _riderPickedBoardingStopId = null;
+      _boardingStopUsesCurrentLocation = true;
     });
     await _configureBackgroundTripMonitorIfNeeded();
     if (!mounted) {
@@ -3082,6 +3179,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
           setState(() {
             _boardingStopId = boardingStop.stopId;
             _boardingStopName = boardingStop.stopName;
+            _boardingStopUsesCurrentLocation = true;
           });
           unawaited(_configureBackgroundTripMonitorIfNeeded());
         }
@@ -3122,6 +3220,36 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   StopInfo? _resolvedBoardingStop() {
     return _findStopById(_currentPathStops, _boardingStopId) ??
         _currentBoardingCandidateStop();
+  }
+
+  /// The stop this visit should be remembered against, if any; see
+  /// [usageStopIdFor].
+  int? _usageStopHint() {
+    final nearest = _currentBoardingCandidateStop();
+    final position = _lastPosition;
+    return usageStopIdFor(
+      pickedStopId: _findStopById(
+        _currentPathStops,
+        _riderPickedBoardingStopId,
+      )?.stopId,
+      // Clearing the manual boarding stop means "use my current location";
+      // the stop that opened the page is no longer a current source.
+      openedStopId: _boardingStopUsesCurrentLocation
+          ? null
+          : _findStopById(_currentPathStops, _requestedStopId)?.stopId,
+      nearestStopId: nearest?.stopId,
+      nearestDistanceMeters:
+          nearest == null ||
+              position == null ||
+              (nearest.lat == 0 && nearest.lon == 0)
+          ? null
+          : Geolocator.distanceBetween(
+              position.latitude,
+              position.longitude,
+              nearest.lat,
+              nearest.lon,
+            ),
+    );
   }
 
   String? _buildDesktopDiscordArrivalStatus(AppSettings settings) {
@@ -4607,7 +4735,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
   }
 
   String _normalizeStopRouteLookupName(String value) {
-    return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    // Same 臺→台 folding as the repository's stop search, otherwise a sibling
+    // result spelled 台北車站 is dropped for a stop named 臺北車站.
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('臺', '台')
+        .replaceAll(RegExp(r'\s+'), '');
   }
 
   // Keys ([stopRouteMergeKey]) of the entries in the related-stop-routes sheet
@@ -4665,9 +4799,9 @@ class _RouteDetailScreenState extends State<RouteDetailScreen>
     Object? localError;
     StackTrace? localStackTrace;
     try {
-      final results = await controller.searchRoutesByStop(
+      final results = await controller.searchRoutesByStopAcrossAllProviders(
         stop.stopName,
-        provider: widget.provider,
+        current: widget.provider,
       );
       local = results
           .where(
