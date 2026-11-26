@@ -248,7 +248,11 @@ void main() {
               .having((f) => f.message, 'message', '目前無法取得定位，請稍後再試。'),
         ),
       );
-      expect(clock.elapsed - answeredAt, greaterThanOrEqualTo(limit));
+      // Anchored to the answer (200ms in), not the start; tolerate timer slack.
+      expect(
+        clock.elapsed - answeredAt,
+        greaterThanOrEqualTo(limit - const Duration(milliseconds: 10)),
+      );
     });
 
     group('without the Permissions API (unknown state)', () {

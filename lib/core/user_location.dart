@@ -46,7 +46,9 @@ class LocationFailure implements Exception {
 /// microseconds to the browser as milliseconds. Instead [timeLimit] starts once
 /// the permission is no longer pending (see [_boundWebFix]), so a user still
 /// reading the prompt is never timed out but a granted-yet-failed fix is
-/// bounded. A refused prompt reports the permission state the browser
+/// bounded. Browsers that cannot report the permission state (no Permissions
+/// API) get the longer [unknownPermissionLimit] instead, since the answer can't
+/// be observed. A refused prompt reports the permission state the browser
 /// settled on, so a blocked site is `deniedForever` and a dismissed prompt is
 /// retryable.
 Future<Position> resolveUserPosition({
@@ -144,8 +146,11 @@ Future<Position> _boundWebFix(
   final done = Completer<Position>();
   Timer? deadline;
   Timer? poll;
+  var closed = false;
 
   void startDeadline(Duration after) {
+    // An in-flight permission poll can finish after the request already did.
+    if (closed) return;
     deadline ??= Timer(after, () {
       if (!done.isCompleted) {
         done.completeError(TimeoutException('No position fix', after));
@@ -158,6 +163,7 @@ Future<Position> _boundWebFix(
       value == LocationPermission.always;
 
   void finish() {
+    closed = true;
     deadline?.cancel();
     poll?.cancel();
   }
