@@ -14,6 +14,8 @@ const APP_SHELL_MANIFEST_URL = '/app-shell.json';
 const BASE_PRECACHE_URLS = [
   '/',
   '/index.html',
+  '/landing.css',
+  '/landing-assets/home.webp',
   APP_SHELL_MANIFEST_URL,
   '/manifest.json',
   '/favicon.png',
@@ -24,6 +26,7 @@ const BASE_PRECACHE_URLS = [
 ];
 
 const STATIC_ASSET_PATHS = new Set([
+  '/landing.css',
   '/flutter.js',
   '/flutter_bootstrap.js',
   '/main.dart.js',
@@ -33,6 +36,7 @@ const STATIC_ASSET_PATHS = new Set([
   '/favicon.png',
 ]);
 const STATIC_ASSET_PREFIXES = [
+  '/landing-assets/',
   '/assets/',
   '/canvaskit/',
   '/icons/',
@@ -161,12 +165,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Do not cache arbitrary same-origin responses. Offline direct links fall
-  // back to the app shell, which Flutter then resolves with its route parser.
+  // Offline navigation to the site root gets the marketing page. App and deep
+  // links still fall back to Flutter's index.html shell.
   event.respondWith(
     fetch(event.request).catch(() =>
       event.request.mode === 'navigate'
-        ? caches.match('/index.html')
+        ? caches.match(url.pathname === '/' ? '/' : '/index.html')
         : caches.match(event.request),
     ),
   );

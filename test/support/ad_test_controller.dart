@@ -14,6 +14,7 @@ import 'package:taiwanbus_flutter/core/storage_service.dart';
 
 Future<AppController> createAdTestController({
   BusRepository? repository,
+  AppUpdateService? appUpdateService,
 }) async {
   const buildInfo = AppBuildInfo(
     version: '1.0.0',
@@ -35,7 +36,9 @@ Future<AppController> createAdTestController({
     storage: StorageService(),
     analytics: analytics,
     buildInfo: buildInfo,
-    appUpdateService: AppUpdateService(buildInfo: buildInfo, client: client),
+    appUpdateService:
+        appUpdateService ??
+        AppUpdateService(buildInfo: buildInfo, client: client),
     appUpdateInstaller: createAppUpdateInstaller(),
     authService: AuthService(),
     accountSyncService: AccountSyncService(client: client),

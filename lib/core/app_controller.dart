@@ -30,6 +30,7 @@ import 'haptic_feedback_service.dart';
 import 'ios_widget_integration.dart';
 import 'live_activity_service.dart';
 import 'models.dart';
+import 'smart_route_plan.dart';
 import 'smart_route_service.dart';
 import 'storage_service.dart';
 import 'wear_os_integration.dart';
@@ -119,6 +120,7 @@ class AppController extends ChangeNotifier {
   List<FavoriteUsageProfile> _favoriteUsageProfiles = const [];
   List<FavoriteUsageProfile> _stopVisitProfiles = const [];
   List<DestinationChoiceProfile> _destinationChoiceProfiles = const [];
+  int? _selectionHistoryClearedAtMs;
   int? _settingsLastModifiedAtMs;
   int? _favoriteGroupsLastModifiedAtMs;
   bool _initialized = false;
@@ -155,6 +157,15 @@ class AppController extends ChangeNotifier {
   bool _pendingChangeDrivenAccountSync = false;
   int _recommendationRevision = 0;
   String? _cachedSmartRouteSignature;
+
+  /// Route ids already looked up for the reminder plan, by provider and
+  /// route key. They do not change, so one lookup per route is enough.
+  final Map<String, String> _smartRouteIds = <String, String>{};
+
+  /// The reminder plan being rebuilt, if one is, and whether what it is
+  /// built from has changed since that rebuild began.
+  Future<void>? _smartRoutePlanSync;
+  bool _smartRoutePlanStale = false;
   Object? _lastRecommendationRoutes;
   Object? _lastRecommendationFavorites;
   Object? _lastRecommendationUsage;
@@ -411,12 +422,16 @@ class AppController extends ChangeNotifier {
         _favoriteGroupKinds = kinds;
         _favoriteGroupsLastModifiedAtMs = modifiedAt;
       case AppLocalData.routeHistory:
+        await ensureAccountReady();
         final history = await storage.loadHistory();
         final routes = await storage.loadRouteUsageProfiles();
         final destinations = await storage.loadDestinationChoiceProfiles();
+        _selectionHistoryClearedAtMs =
+            _accountSyncLocalState.routeHistorySelectionHistoryClearedAtMs;
         _history = history;
         _routeUsageProfiles = routes;
         _destinationChoiceProfiles = destinations;
+        await _applySelectionHistoryClearToLoadedData();
       case AppLocalData.smartUsage:
         final favorites = await storage.loadFavoriteUsageProfiles();
         final visits = await storage.loadStopVisitProfiles();
@@ -506,11 +521,7 @@ class AppController extends ChangeNotifier {
       () => _syncWearOsSnapshot(requestRefresh: false),
     );
     _attachWearOsEventStream();
-    await _runNonCriticalStartupTask(
-      () => AndroidHomeIntegration.syncSmartRouteNotifications(
-        _settings.enableSmartRouteNotifications,
-      ),
-    );
+    await _runNonCriticalStartupTask(_syncSmartRouteNotifications);
     await _runNonCriticalStartupTask(
       () => desktopDiscordPresenceService.refresh(settings: _settings),
     );
@@ -800,19 +811,28 @@ class AppController extends ChangeNotifier {
     if (scheduleSync) {
       _scheduleChangeDrivenAccountSync();
     }
+    // A reminder with no stop of its own watches the route's favourite, so
+    // one that is gone must not be watched any more.
+    await _refreshSmartRoutePlan();
   }
 
   Future<void> _loadAccountSyncLocalState() async {
     final accountId = _authSession?.accountId.trim() ?? '';
     if (accountId.isEmpty) {
       _accountSyncLocalState = AccountSyncLocalState.empty();
+      _selectionHistoryClearedAtMs = null;
       _accountSyncSummary = null;
       _accountSyncError = null;
       return;
     }
     _accountSyncLocalState = await storage.loadAccountSyncLocalState(accountId);
+    _selectionHistoryClearedAtMs =
+        _accountSyncLocalState.routeHistorySelectionHistoryClearedAtMs;
     _accountSyncSummary = null;
     _accountSyncError = null;
+    if (routeHistoryReady) {
+      await _applySelectionHistoryClearToLoadedData();
+    }
   }
 
   Future<void> _saveAccountSyncLocalState() async {
@@ -825,8 +845,25 @@ class AppController extends ChangeNotifier {
 
   void _clearAccountSyncSessionData() {
     _accountSyncLocalState = AccountSyncLocalState.empty();
+    _selectionHistoryClearedAtMs = null;
     _accountSyncSummary = null;
     _accountSyncError = null;
+  }
+
+  Future<void> _applySelectionHistoryClearToLoadedData() async {
+    final clearedAtMs = _selectionHistoryClearedAtMs;
+    if (clearedAtMs == null) {
+      return;
+    }
+    _routeUsageProfiles = _routeUsageProfiles
+        .map((profile) => profile.clearStopUsageBefore(clearedAtMs))
+        .toList(growable: false);
+    _destinationChoiceProfiles = _destinationChoiceProfiles
+        .map((profile) => profile.clearSelectionsBefore(clearedAtMs))
+        .where((profile) => profile.selectionTimestampsMs.isNotEmpty)
+        .toList(growable: false);
+    await storage.saveRouteUsageProfiles(_routeUsageProfiles);
+    await storage.saveDestinationChoiceProfiles(_destinationChoiceProfiles);
   }
 
   Future<void> _restoreDeviceLocalRouteHistory() async {
@@ -834,17 +871,48 @@ class AppController extends ChangeNotifier {
     if (payload == null) {
       return;
     }
+    final payloadClearedAtMs = _selectionHistoryClearMarkerFromPayload(payload);
+    int? clearedAtMs = _selectionHistoryClearedAtMs;
+    if (payloadClearedAtMs != null &&
+        (clearedAtMs == null || payloadClearedAtMs > clearedAtMs)) {
+      clearedAtMs = payloadClearedAtMs;
+      _selectionHistoryClearedAtMs = clearedAtMs;
+      _accountSyncLocalState = _accountSyncLocalState.copyWith(
+        routeHistorySelectionHistoryClearedAtMs: clearedAtMs,
+      );
+      await _saveAccountSyncLocalState();
+    }
     _history = _historyFromRouteHistoryDevice(
       payload,
     ).take(_settings.maxHistory).toList(growable: false);
-    _routeUsageProfiles = _profilesFromRouteHistoryDevice(payload)
-      ..sort(_compareRouteUsageProfiles);
-    _destinationChoiceProfiles = _destinationChoicesFromRouteHistoryDevice(
-      payload,
-    );
+    _routeUsageProfiles =
+        _profilesFromRouteHistoryDevice(payload)
+            .map(
+              (profile) => clearedAtMs == null
+                  ? profile
+                  : profile.clearStopUsageBefore(clearedAtMs),
+            )
+            .toList()
+          ..sort(_compareRouteUsageProfiles);
+    _destinationChoiceProfiles =
+        _destinationChoicesFromRouteHistoryDevice(payload)
+            .map(
+              (profile) => clearedAtMs == null
+                  ? profile
+                  : profile.clearSelectionsBefore(clearedAtMs),
+            )
+            .where(
+              (profile) =>
+                  clearedAtMs == null ||
+                  profile.selectionTimestampsMs.isNotEmpty,
+            )
+            .toList();
     await storage.saveHistory(_history);
     await storage.saveRouteUsageProfiles(_routeUsageProfiles);
     await storage.saveDestinationChoiceProfiles(_destinationChoiceProfiles);
+    // The plan was made from the merged history, other devices' routes and
+    // all. Those are not this device's to be reminded of any more.
+    await _refreshSmartRoutePlan();
   }
 
   Future<void> setAccountSyncEnabled(
@@ -1290,9 +1358,9 @@ class AppController extends ChangeNotifier {
     await AndroidHomeIntegration.updateFavoriteWidgetAutoRefreshMinutes(
       _settings.favoriteWidgetAutoRefreshMinutes,
     );
-    await AndroidHomeIntegration.syncSmartRouteNotifications(
-      _settings.enableSmartRouteNotifications,
-    );
+    // Not allowed to fail the rest: applying a synced document still has its
+    // bookkeeping to do after this.
+    await _refreshSmartRoutePlan(evenIfDisabled: true);
     await desktopDiscordPresenceService.refresh(settings: _settings);
     await _syncWearOsSnapshot(requestRefresh: false);
   }
@@ -2224,8 +2292,157 @@ class AppController extends ChangeNotifier {
   Future<void> updateEnableSmartRouteNotifications(bool value) async {
     _settings = _settings.copyWith(enableSmartRouteNotifications: value);
     await _persistSettings();
-    await AndroidHomeIntegration.syncSmartRouteNotifications(value);
+    await _syncSmartRouteNotifications();
     notifyListeners();
+  }
+
+  /// Works out when a reminder is worth sending and hands that to the
+  /// platform, which only has to follow it.
+  ///
+  /// Called whenever something the plan is built from changes. Rebuilds run
+  /// one at a time, and one that finds its inputs changed while it was
+  /// waiting writes nothing: the rebuild queued behind it will. Otherwise a
+  /// rebuild started before the rider cleared their history could finish
+  /// after the clearing and write the old plan back.
+  ///
+  /// The returned future completes once a rebuild that started after this
+  /// call has finished.
+  Future<void> _syncSmartRouteNotifications() {
+    _smartRoutePlanStale = true;
+    // Started as a microtask so the drain is recorded before any of it runs:
+    // a drain that somehow finished at once would otherwise clear the field
+    // before it was set, and leave every later call waiting on a finished
+    // drain instead of starting a rebuild.
+    return _smartRoutePlanSync ??= Future<void>.microtask(
+      _drainSmartRoutePlanSyncs,
+    );
+  }
+
+  Future<void> _drainSmartRoutePlanSyncs() async {
+    try {
+      while (true) {
+        _smartRoutePlanStale = false;
+        try {
+          await _syncSmartRouteNotificationsOnce();
+        } catch (_) {
+          // A rebuild that has been overtaken does not get the last word,
+          // failure included: the one after it may well succeed.
+          if (!_smartRoutePlanStale) rethrow;
+        }
+        if (!_smartRoutePlanStale) return;
+      }
+    } finally {
+      // Cleared in the same step as the last check of the flag, so no call
+      // can join a drain that has already decided to stop.
+      _smartRoutePlanSync = null;
+    }
+  }
+
+  /// Rebuilds the reminder plan after a change made for some other reason —
+  /// favourites, a database, logging out, synced settings. That change has
+  /// already happened and is not to be reported as failed because the plan
+  /// could not follow it; a rebuild that fails leaves no plan rather than an
+  /// outdated one.
+  ///
+  /// With reminders off there is no plan to keep up to date, unless the
+  /// change may be the one that turned them off: [evenIfDisabled].
+  Future<void> _refreshSmartRoutePlan({bool evenIfDisabled = false}) async {
+    if (!evenIfDisabled && !_settings.enableSmartRouteNotifications) {
+      return;
+    }
+    try {
+      await _syncSmartRouteNotifications();
+    } catch (_) {
+      // See above.
+    }
+  }
+
+  /// The plan is written before the scheduler is told anything, because the
+  /// scheduler decides whether to run at all by looking for one.
+  Future<void> _syncSmartRouteNotificationsOnce() async {
+    final enabled = _settings.enableSmartRouteNotifications;
+    if (AndroidHomeIntegration.supportsSmartRouteNotifications) {
+      try {
+        if (enabled) {
+          await ensureRecommendationDataReady();
+          final now = DateTime.now();
+          await _resolveSmartRouteIds(now);
+          final reminders = await _loadSmartRouteReminders();
+          if (_smartRoutePlanStale) {
+            return;
+          }
+          // Read only now, after the last wait, so the plan is of what is
+          // current rather than of what was when this rebuild began.
+          final plan = SmartRoutePlanner.build(
+            profiles: _routeUsageProfiles,
+            routeIdOf: (profile) => _smartRouteIds[_smartRouteIdKey(profile)],
+            reminders: reminders,
+            favoriteProfiles: _favoriteUsageProfiles,
+            favorites: _favoriteGroups.values
+                .expand((group) => group)
+                .whereType<FavoriteStop>(),
+            now: now,
+          );
+          await storage.saveSmartRoutePlan(plan.toJson());
+        } else {
+          await storage.clearSmartRoutePlan();
+        }
+      } catch (_) {
+        // A plan that could not be brought up to date is one about routes,
+        // stops or a history that may no longer be the rider's. None at all
+        // is the safer thing to leave behind.
+        try {
+          await storage.clearSmartRoutePlan();
+          await AndroidHomeIntegration.syncSmartRouteNotifications(enabled);
+        } catch (_) {
+          // The error worth reporting is the first one.
+        }
+        rethrow;
+      }
+    }
+    if (_smartRoutePlanStale) {
+      return;
+    }
+    await AndroidHomeIntegration.syncSmartRouteNotifications(enabled);
+  }
+
+  /// The reminders the background check has shown, for anything that reads
+  /// a habit; see [SmartRouteReminder]. None where there is no such check.
+  Future<List<SmartRouteReminder>> _loadSmartRouteReminders() async =>
+      SmartRouteReminder.parseLog(
+        await AndroidHomeIntegration.loadSmartRouteReminderLog(),
+      );
+
+  static String _smartRouteIdKey(RouteUsageProfile profile) =>
+      '${profile.provider.name}:${profile.routeKey}';
+
+  /// Looks up the route ids the plan will need. Only the route key is kept
+  /// with the usage history, and the background worker cannot reverse it.
+  ///
+  /// A route that cannot be found is asked about again next time rather than
+  /// remembered as missing: its database may simply not be downloaded yet.
+  Future<void> _resolveSmartRouteIds(DateTime now) async {
+    final wanted = <BusProvider, Set<int>>{};
+    for (final profile in _routeUsageProfiles) {
+      if (!_smartRouteIds.containsKey(_smartRouteIdKey(profile)) &&
+          SmartRoutePlanner.isCandidate(profile, now)) {
+        (wanted[profile.provider] ??= <int>{}).add(profile.routeKey);
+      }
+    }
+    for (final entry in wanted.entries) {
+      try {
+        final routeIds = await repository.routeIdsForRouteKeys(
+          entry.key,
+          entry.value,
+        );
+        routeIds.forEach((routeKey, routeId) {
+          _smartRouteIds['${entry.key.name}:$routeKey'] = routeId;
+        });
+      } catch (_) {
+        // No database for that provider right now; its routes are left out
+        // of this plan and tried again with the next one.
+      }
+    }
   }
 
   Future<void> updateKeepScreenAwakeOnRouteDetail(bool value) async {
@@ -2531,9 +2748,11 @@ class AppController extends ChangeNotifier {
     }
     _downloadingDatabase = true;
     notifyListeners();
+    var downloadedAny = false;
     try {
       for (final provider in targets) {
         await repository.downloadDatabase(provider);
+        downloadedAny = true;
         _databaseReadyByProvider = {
           ..._databaseReadyByProvider,
           provider: true,
@@ -2550,6 +2769,12 @@ class AppController extends ChangeNotifier {
     } finally {
       _downloadingDatabase = false;
       notifyListeners();
+      if (downloadedAny) {
+        // Routes that could not be named without the database were left out
+        // of the reminder plan. Nothing else would put them back before the
+        // app is next used, which for a reminder may be too late.
+        await _refreshSmartRoutePlan();
+      }
     }
   }
 
@@ -2624,6 +2849,53 @@ class AppController extends ChangeNotifier {
       results.addAll(
         await searchRoutesByStopFromApi(query, providers: remoteProviders),
       );
+    }
+    return results;
+  }
+
+  /// Finds every route that serves a stop name regardless of which city
+  /// manages the route. Cities whose local database is ready are searched
+  /// locally; the rest (and the whole lookup on web) go through the API, so a
+  /// route from a neighbouring city is listed even when that city's data was
+  /// never downloaded. The [current] provider is searched first and its errors
+  /// propagate; failures for other cities are skipped.
+  Future<List<StopRouteSearchResult>> searchRoutesByStopAcrossAllProviders(
+    String query, {
+    required BusProvider current,
+  }) async {
+    if (kIsWeb) return searchRoutesByStopFromApi(query);
+    final results = <StopRouteSearchResult>[
+      ...await repository.searchRoutesByStopName(query, provider: current),
+    ];
+    final remoteProviders = <BusProvider>[];
+    for (final provider in BusProvider.values) {
+      if (provider == current) continue;
+      if (!provider.supportsLocalDatabase) {
+        // Intercity has no local database; it is only reachable via the API.
+        remoteProviders.add(provider);
+        continue;
+      }
+      try {
+        await ensureProviderDatabaseState(provider);
+        if (!isDatabaseReady(provider)) {
+          remoteProviders.add(provider);
+          continue;
+        }
+        results.addAll(
+          await repository.searchRoutesByStopName(query, provider: provider),
+        );
+      } catch (error) {
+        debugPrint('Stop route lookup skipped for ${provider.name}: $error');
+      }
+    }
+    if (remoteProviders.isNotEmpty) {
+      try {
+        results.addAll(
+          await searchRoutesByStopFromApi(query, providers: remoteProviders),
+        );
+      } catch (error) {
+        debugPrint('Stop route API lookup error: $error');
+      }
     }
     return results;
   }
@@ -3056,12 +3328,37 @@ class AppController extends ChangeNotifier {
     _favoriteUsageProfiles = const [];
     _stopVisitProfiles = const [];
     _destinationChoiceProfiles = const [];
-    await _persistSmartRouteProfiles();
-    await storage.saveDestinationChoiceProfiles(const []);
-    await _updateRouteHistoryDevicePayload(
-      profiles: const [],
-      destinationChoices: const [],
+    // Each step removes part of what was learned, so each is tried whatever
+    // becomes of the others; the first failure is reported once all have
+    // been. The reminder log goes before the plan is rebuilt, so the new
+    // plan is not made from it.
+    final failures = <(Object, StackTrace)>[];
+    Future<void> attempt(Future<void> Function() step) async {
+      try {
+        await step();
+      } catch (error, stackTrace) {
+        failures.add((error, stackTrace));
+      }
+    }
+
+    await attempt(() => storage.saveRouteUsageProfiles(const []));
+    await attempt(() => storage.saveFavoriteUsageProfiles(const []));
+    await attempt(() => storage.saveStopVisitProfiles(const []));
+    await attempt(() => storage.saveDestinationChoiceProfiles(const []));
+    await attempt(
+      () => _updateRouteHistoryDevicePayload(
+        profiles: const [],
+        destinationChoices: const [],
+      ),
     );
+    // Which routes a reminder went out for, and when, was learned too.
+    await attempt(AndroidHomeIntegration.forgetSmartRouteReminders);
+    await attempt(_syncSmartRouteNotifications);
+    unawaited(_pushSmartSuggestionToWearOsIfNeeded());
+    notifyListeners();
+    if (failures.isNotEmpty) {
+      Error.throwWithStackTrace(failures.first.$1, failures.first.$2);
+    }
   }
 
   Future<void> clearRouteSelectionHistory() async {
@@ -3077,6 +3374,15 @@ class AppController extends ChangeNotifier {
     _favoriteUsageProfiles = const [];
     _stopVisitProfiles = const [];
     _destinationChoiceProfiles = const [];
+    final clearedAtMs = math.max(
+      DateTime.now().millisecondsSinceEpoch,
+      (_selectionHistoryClearedAtMs ?? 0) + 1,
+    );
+    _selectionHistoryClearedAtMs = clearedAtMs;
+    _accountSyncLocalState = _accountSyncLocalState.copyWith(
+      routeHistorySelectionHistoryClearedAtMs: clearedAtMs,
+    );
+    await _saveAccountSyncLocalState();
     await _persistSmartRouteProfiles();
     await storage.saveDestinationChoiceProfiles(const []);
     final deviceProfiles = _profilesFromRouteHistoryDevice(
@@ -3085,6 +3391,7 @@ class AppController extends ChangeNotifier {
     await _updateRouteHistoryDevicePayload(
       profiles: deviceProfiles,
       destinationChoices: const [],
+      selectionHistoryClearedAtMs: clearedAtMs,
     );
   }
 
@@ -3254,11 +3561,17 @@ class AppController extends ChangeNotifier {
         );
   }
 
+  /// Records that a route page was open long enough to count as a use.
+  ///
+  /// [stopId] is the stop the rider was looking at, if the page knew one. It
+  /// is what lets a reminder watch the right stop without the device's
+  /// location.
   Future<void> recordRouteVisit(
     RouteSummary route, {
     required BusProvider provider,
     DateTime? openedAt,
     int? pathId,
+    int? stopId,
   }) async {
     final timestamp = openedAt ?? DateTime.now();
     await ensureRouteHistoryReady();
@@ -3267,16 +3580,18 @@ class AppController extends ChangeNotifier {
       provider: provider,
       routeKey: route.routeKey,
       pathId: pathId,
-      record: (profile) =>
-          profile.recordOpen(timestamp, routeName: route.routeName),
-      create: () => RouteUsageProfile(
+      record: (profile) => profile.recordOpen(
+        timestamp,
+        routeName: route.routeName,
+        stopId: stopId,
+      ),
+      create: () => _newlyOpenedRouteProfile(
         provider: provider,
         routeKey: route.routeKey,
         pathId: pathId,
         routeName: route.routeName,
-        totalOpens: 1,
-        lastOpenedAtMs: timestamp.millisecondsSinceEpoch,
-        hourlyOpens: <int, int>{timestamp.hour: 1},
+        timestamp: timestamp,
+        stopId: stopId,
       ),
     );
     await _persistSmartRouteProfiles(
@@ -3290,8 +3605,27 @@ class AppController extends ChangeNotifier {
       timestamp: timestamp,
       selection: false,
       pathId: pathId,
+      stopId: stopId,
     );
     await analytics.logRouteVisit(provider: provider, routeKey: route.routeKey);
+  }
+
+  RouteUsageProfile _newlyOpenedRouteProfile({
+    required BusProvider provider,
+    required int routeKey,
+    required int? pathId,
+    required String routeName,
+    required DateTime timestamp,
+    required int? stopId,
+  }) {
+    return RouteUsageProfile(
+      provider: provider,
+      routeKey: routeKey,
+      pathId: pathId,
+      routeName: routeName,
+      totalOpens: 0,
+      lastOpenedAtMs: 0,
+    ).recordOpen(timestamp, stopId: stopId);
   }
 
   List<RouteUsageProfile> _buildUpdatedRouteUsageProfiles({
@@ -3402,9 +3736,7 @@ class AppController extends ChangeNotifier {
     if (stopVisitsChanged) {
       await storage.saveStopVisitProfiles(_stopVisitProfiles);
     }
-    await AndroidHomeIntegration.syncSmartRouteNotifications(
-      _settings.enableSmartRouteNotifications,
-    );
+    await _refreshSmartRoutePlan();
     unawaited(_pushSmartSuggestionToWearOsIfNeeded());
     notifyListeners();
   }
@@ -3463,6 +3795,7 @@ class AppController extends ChangeNotifier {
           .expand((group) => group)
           .whereType<FavoriteStop>()
           .where((favorite) => favorite.provider == _settings.provider),
+      reminders: await _loadSmartRouteReminders(),
       now: now ?? DateTime.now(),
       position: position,
     );
@@ -3493,6 +3826,7 @@ class AppController extends ChangeNotifier {
           .expand((group) => group)
           .whereType<FavoriteStop>()
           .where((favorite) => favorite.provider == _settings.provider),
+      reminders: await _loadSmartRouteReminders(),
       now: now ?? DateTime.now(),
       position: position,
       limit: limit,
@@ -3923,8 +4257,11 @@ class AppController extends ChangeNotifier {
     required List<RouteUsageProfile> profiles,
     required List<DestinationChoiceProfile> destinationChoices,
     int? modifiedAtMs,
+    int? selectionHistoryClearedAtMs,
   }) {
-    return {
+    final effectiveSelectionHistoryClearedAtMs =
+        selectionHistoryClearedAtMs ?? _selectionHistoryClearedAtMs;
+    final payload = <String, dynamic>{
       'modifiedAtMs': modifiedAtMs ?? DateTime.now().millisecondsSinceEpoch,
       'history': history.map((entry) => entry.toJson()).toList(growable: false),
       'routeUsageProfiles': profiles
@@ -3934,6 +4271,10 @@ class AppController extends ChangeNotifier {
           .map((profile) => profile.toJson())
           .toList(growable: false),
     };
+    if (effectiveSelectionHistoryClearedAtMs case final clearedAtMs?) {
+      payload['selectionHistoryClearedAtMs'] = clearedAtMs;
+    }
+    return payload;
   }
 
   List<SearchHistoryEntry> _historyFromRouteHistoryDevice(Object? value) {
@@ -3954,6 +4295,13 @@ class AppController extends ChangeNotifier {
       }
     }
     return entries;
+  }
+
+  int? _selectionHistoryClearMarkerFromPayload(Object? value) {
+    final payload = _stringMap(value);
+    final clearedAtMs = (payload?['selectionHistoryClearedAtMs'] as num?)
+        ?.toInt();
+    return clearedAtMs != null && clearedAtMs > 0 ? clearedAtMs : null;
   }
 
   List<RouteUsageProfile> _profilesFromRouteHistoryDevice(Object? value) {
@@ -4029,6 +4377,7 @@ class AppController extends ChangeNotifier {
     required DateTime timestamp,
     required bool selection,
     required int? pathId,
+    int? stopId,
   }) async {
     if (!_tracksDeviceRouteHistory) return;
     final current = _profilesFromRouteHistoryDevice(
@@ -4040,19 +4389,25 @@ class AppController extends ChangeNotifier {
       pathId: pathId,
       record: (profile) => selection
           ? profile.recordSelection(timestamp, routeName: routeName)
-          : profile.recordOpen(timestamp, routeName: routeName),
-      create: () => RouteUsageProfile(
-        provider: provider,
-        routeKey: routeKey,
-        pathId: pathId,
-        routeName: routeName.trim(),
-        totalOpens: selection ? 0 : 1,
-        lastOpenedAtMs: selection ? 0 : timestamp.millisecondsSinceEpoch,
-        hourlyOpens: selection ? const {} : {timestamp.hour: 1},
-        selectionTimestampsMs: selection
-            ? [timestamp.millisecondsSinceEpoch]
-            : const [],
-      ),
+          : profile.recordOpen(timestamp, routeName: routeName, stopId: stopId),
+      create: () => selection
+          ? RouteUsageProfile(
+              provider: provider,
+              routeKey: routeKey,
+              pathId: pathId,
+              routeName: routeName.trim(),
+              totalOpens: 0,
+              lastOpenedAtMs: 0,
+              selectionTimestampsMs: [timestamp.millisecondsSinceEpoch],
+            )
+          : _newlyOpenedRouteProfile(
+              provider: provider,
+              routeKey: routeKey,
+              pathId: pathId,
+              routeName: routeName.trim(),
+              timestamp: timestamp,
+              stopId: stopId,
+            ),
       source: current,
     );
     await _updateRouteHistoryDevicePayload(profiles: next);
@@ -4090,6 +4445,7 @@ class AppController extends ChangeNotifier {
     List<SearchHistoryEntry>? history,
     List<RouteUsageProfile>? profiles,
     List<DestinationChoiceProfile>? destinationChoices,
+    int? selectionHistoryClearedAtMs,
   }) async {
     if (!_tracksDeviceRouteHistory) return;
     final current = _accountSyncLocalState.routeHistoryDevicePayload;
@@ -4106,6 +4462,9 @@ class AppController extends ChangeNotifier {
             destinationChoices ??
             _destinationChoicesFromRouteHistoryDevice(current),
         modifiedAtMs: nowMs,
+        selectionHistoryClearedAtMs:
+            selectionHistoryClearedAtMs ??
+            _selectionHistoryClearMarkerFromPayload(current),
       ),
     );
     await _saveAccountSyncLocalState();
@@ -4139,6 +4498,34 @@ class AppController extends ChangeNotifier {
     }
     if (devices.isEmpty) return;
 
+    int? selectionHistoryClearedAtMs = _selectionHistoryClearedAtMs;
+    final localPayloadSelectionHistoryClearedAtMs =
+        _selectionHistoryClearMarkerFromPayload(
+          _accountSyncLocalState.routeHistoryDevicePayload,
+        );
+    final remoteOwnPayload = _stringMap(devices[deviceId]);
+    final remoteSelectionHistoryClearedAtMs =
+        _selectionHistoryClearMarkerFromPayload(remoteOwnPayload);
+    for (final candidate in [
+      localPayloadSelectionHistoryClearedAtMs,
+      remoteSelectionHistoryClearedAtMs,
+    ]) {
+      if (candidate != null &&
+          (selectionHistoryClearedAtMs == null ||
+              candidate > selectionHistoryClearedAtMs)) {
+        selectionHistoryClearedAtMs = candidate;
+      }
+    }
+    if (selectionHistoryClearedAtMs != null &&
+        (_selectionHistoryClearedAtMs == null ||
+            selectionHistoryClearedAtMs > _selectionHistoryClearedAtMs!)) {
+      _selectionHistoryClearedAtMs = selectionHistoryClearedAtMs;
+      _accountSyncLocalState = _accountSyncLocalState.copyWith(
+        routeHistorySelectionHistoryClearedAtMs: selectionHistoryClearedAtMs,
+      );
+      await _saveAccountSyncLocalState();
+    }
+
     final historyByRoute = <String, SearchHistoryEntry>{};
     final profileParts = <String, List<RouteUsageProfile>>{};
     final destinationChoiceParts = <String, List<DestinationChoiceProfile>>{};
@@ -4151,25 +4538,43 @@ class AppController extends ChangeNotifier {
         }
       }
       for (final profile in _profilesFromRouteHistoryDevice(devicePayload)) {
+        final effectiveProfile = selectionHistoryClearedAtMs == null
+            ? profile
+            : profile.clearStopUsageBefore(selectionHistoryClearedAtMs);
         final key =
-            '${profile.provider.name}:${profile.routeKey}:${profile.pathId}';
-        (profileParts[key] ??= []).add(profile);
+            '${effectiveProfile.provider.name}:${effectiveProfile.routeKey}:'
+            '${effectiveProfile.pathId}';
+        (profileParts[key] ??= []).add(effectiveProfile);
       }
       for (final profile in _destinationChoicesFromRouteHistoryDevice(
         devicePayload,
       )) {
+        final effectiveProfile = selectionHistoryClearedAtMs == null
+            ? profile
+            : profile.clearSelectionsBefore(selectionHistoryClearedAtMs);
+        if (selectionHistoryClearedAtMs != null &&
+            effectiveProfile.selectionTimestampsMs.isEmpty) {
+          continue;
+        }
         final key =
-            '${profile.provider.name}:${profile.routeKey}:'
-            '${profile.departurePathId}:${profile.boardingStopId}:'
-            '${profile.destinationPathId}:${profile.destinationStopId}';
-        (destinationChoiceParts[key] ??= []).add(profile);
+            '${effectiveProfile.provider.name}:${effectiveProfile.routeKey}:'
+            '${effectiveProfile.departurePathId}:${effectiveProfile.boardingStopId}:'
+            '${effectiveProfile.destinationPathId}:${effectiveProfile.destinationStopId}';
+        (destinationChoiceParts[key] ??= []).add(effectiveProfile);
       }
     }
 
     final ownPayload = _stringMap(devices[deviceId]);
     if (ownPayload != null) {
+      final effectiveOwnPayload = Map<String, dynamic>.from(ownPayload);
+      if (selectionHistoryClearedAtMs != null) {
+        // A response may echo an older copy of this device's bucket. Keep the
+        // local clear marker so a later merge cannot resurrect old stop ids.
+        effectiveOwnPayload['selectionHistoryClearedAtMs'] =
+            selectionHistoryClearedAtMs;
+      }
       _accountSyncLocalState = _accountSyncLocalState.copyWith(
-        routeHistoryDevicePayload: ownPayload,
+        routeHistoryDevicePayload: effectiveOwnPayload,
       );
     }
 
@@ -4222,6 +4627,8 @@ class AppController extends ChangeNotifier {
     var lastOpenedAtMs = 0;
     final hourlyOpens = <int, int>{};
     final selections = <int>[];
+    final visits = <RouteVisit>[];
+    int? legacyAsOfMs;
     for (final profile in profiles) {
       totalOpens += profile.totalOpens;
       if (profile.lastOpenedAtMs >= lastOpenedAtMs) {
@@ -4232,6 +4639,14 @@ class AppController extends ChangeNotifier {
         hourlyOpens[hour] = (hourlyOpens[hour] ?? 0) + count;
       });
       selections.addAll(profile.selectionTimestampsWithin());
+      visits.addAll(profile.visits);
+      // The counters are summed, so they are as recent as the most recent
+      // device that still relies on them.
+      final profileLegacyAsOfMs = profile.legacyAsOfMs;
+      if (profileLegacyAsOfMs != null &&
+          (legacyAsOfMs == null || profileLegacyAsOfMs > legacyAsOfMs)) {
+        legacyAsOfMs = profileLegacyAsOfMs;
+      }
     }
     selections.sort();
     return RouteUsageProfile(
@@ -4243,6 +4658,11 @@ class AppController extends ChangeNotifier {
       lastOpenedAtMs: lastOpenedAtMs,
       hourlyOpens: hourlyOpens,
       selectionTimestampsMs: selections,
+      visits: RouteUsageProfile.normalizeVisits(
+        visits,
+        nowMs: DateTime.now().millisecondsSinceEpoch,
+      ),
+      legacyAsOfMs: legacyAsOfMs,
     );
   }
 

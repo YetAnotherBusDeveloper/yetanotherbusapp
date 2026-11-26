@@ -8,6 +8,7 @@ import '../core/account_sync_models.dart';
 import '../core/app_controller.dart';
 import '../core/auth_service.dart';
 import '../widgets/local_data_gate.dart';
+import '../widgets/settings_scaffold.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/localized_labels.dart';
 
@@ -374,7 +375,7 @@ class _AccountScreenState extends State<_AccountView> {
     final account = controller.authAccount;
     final l10n = AppLocalizations.of(context);
 
-    return Scaffold(
+    return SettingsScaffold(
       appBar: AppBar(title: Text(l10n.accountTitle)),
       body: Center(
         child: ConstrainedBox(

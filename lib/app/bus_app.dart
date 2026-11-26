@@ -399,7 +399,9 @@ class _AutomaticBackgroundColorState extends State<_AutomaticBackgroundColor> {
 
 Route<dynamic> _buildHomeRoute(AppController controller) {
   return MaterialPageRoute<void>(
-    settings: const RouteSettings(name: AppRoutes.home),
+    settings: RouteSettings(
+      name: kIsWeb ? AppRoutes.webHome : AppRoutes.home,
+    ),
     builder: (_) => _AppHome(controller: controller),
   );
 }

@@ -489,7 +489,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get smartRecommendationsEmpty =>
-      'There are no recommendations to show yet. Open your usual routes a few times so YABus can learn when you use them. You can also grant location access in Nearby stops, then return and refresh to find nearby routes.';
+      'There are no recommendations to show yet. Open your usual routes at similar times on different days so YABus can learn when you use them. You can also grant location access in Nearby stops, then return and refresh to find nearby routes.';
 
   @override
   String get smartRecommendationsDisabled =>
@@ -889,6 +889,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adsEnabledDescription => 'Take away the developer\'s lunch money.';
 
   @override
+  String get adDensityTitle => 'Ad density';
+
+  @override
+  String get adDensityThanksOne => 'Thanks for the support!';
+
+  @override
+  String get adDensityThanksTwo => 'Wow, thanks for the love <3';
+
+  @override
+  String get adDensityThanksThree => 'Thank you, thank you, thank you!';
+
+  @override
+  String get adDensityThanksFour =>
+      'You really like ads, huh? Thanks for watching!';
+
+  @override
   String get adsPleaOne => 'Please don\'t';
 
   @override
@@ -914,7 +930,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get smartRecommendationsDescription =>
-      'Suggest routes on the home screen based on how often and when you open or select them. With insufficient history, nearby stops are used when location is available. Usage-based suggestions require a local database for your region. Turning this off hides the card; learning records can be cleared in History and privacy.';
+      'Suggest routes on the home screen from when you usually look them up on weekdays and weekends, showing the stop you usually use first. With insufficient history, nearby stops are used when location is available. Usage-based suggestions require a local database for your region. Turning this off hides the card; learning records can be cleared in History and privacy.';
 
   @override
   String get autoFavoriteTitle => 'Auto-add frequent favorites';
@@ -928,7 +944,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get smartNotificationDescription =>
-      'Check usual routes and nearby stops in the background around the times you often use them, and send arrival reminders when conditions match. Sufficient usage history, notification permission and background location are required. Battery restrictions may delay checks, and notifications are not sent every time.';
+      'Around the time you usually check a route, look up arrivals at your usual stop in the background and remind you when there is a bus you can still catch. Reminders start once you have checked the same route at a similar time on several different days, and pause when you have not opened that route for two weeks (opening it from a reminder counts) until you check it again; the last reminders before a pause say so. Notification permission is required. Background location is optional: when granted, the stop follows where you are, and no reminder is sent when you are far from the route. Battery restrictions may delay checks, and a reminder is not sent every time.';
 
   @override
   String get smartNotificationPermissionRequired =>
@@ -2861,6 +2877,79 @@ class AppLocalizationsEn extends AppLocalizations {
   String feedbackContentTooLong(int max) {
     return 'The details can be at most $max characters.';
   }
+
+  @override
+  String get feedbackMoreInfo => 'More information (optional)';
+
+  @override
+  String get feedbackMoreInfoHint =>
+      'Additional context can help us understand the issue. You can also submit without it.';
+
+  @override
+  String get feedbackCategoryLabel => 'Category (optional)';
+
+  @override
+  String get feedbackCategoryNone => 'Not specified';
+
+  @override
+  String get feedbackCategoryBug => 'Bug report';
+
+  @override
+  String get feedbackCategoryData => 'Transit data issue';
+
+  @override
+  String get feedbackCategoryFeature => 'Feature suggestion';
+
+  @override
+  String get feedbackCategoryOther => 'Other';
+
+  @override
+  String get feedbackRouteContextLabel => 'Related route / stop (optional)';
+
+  @override
+  String get feedbackRouteContextHint =>
+      'For example: Taipei route 307, toward Banqiao, Taipei Main Station';
+
+  @override
+  String get feedbackContactLabel => 'Contact details (optional)';
+
+  @override
+  String get feedbackContactHint =>
+      'For example: email or Discord username for follow-up questions';
+
+  @override
+  String feedbackOptionalTooLong(int max) {
+    return 'Use no more than $max characters';
+  }
+
+  @override
+  String get feedbackIncludeDiagnostics =>
+      'Include app and display information';
+
+  @override
+  String get feedbackDiagnosticsHint =>
+      'When enabled, the version, platform, language and display settings shown below will be included to help troubleshoot the issue.';
+
+  @override
+  String get feedbackDiagnosticVersion => 'App version';
+
+  @override
+  String get feedbackDiagnosticCommit => 'Code revision';
+
+  @override
+  String get feedbackDiagnosticPlatform => 'Platform';
+
+  @override
+  String get feedbackDiagnosticLocale => 'Language';
+
+  @override
+  String get feedbackDiagnosticScreen => 'Screen size (logical pixels)';
+
+  @override
+  String get feedbackDiagnosticTextScale => 'Text scale (at 14pt)';
+
+  @override
+  String get feedbackDiagnosticTheme => 'Theme';
 
   @override
   String get feedbackSubmitting => 'Sending...';

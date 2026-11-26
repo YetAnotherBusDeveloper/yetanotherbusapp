@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +9,7 @@ import 'package:taiwanbus_flutter/app/bus_app.dart';
 import 'package:taiwanbus_flutter/core/ad_service.dart';
 import 'package:taiwanbus_flutter/core/app_build_info.dart';
 import 'package:taiwanbus_flutter/core/app_controller.dart';
+import 'package:taiwanbus_flutter/core/app_update_service.dart';
 import 'package:taiwanbus_flutter/core/bus_repository.dart';
 import 'package:taiwanbus_flutter/core/models.dart';
 import 'package:taiwanbus_flutter/core/storage_service.dart';
@@ -199,6 +202,18 @@ void main() {
         findsOneWidget,
       );
       expect(find.text(l10n.personalizationAmoledDescription), findsNothing);
+      await tester.tap(find.text(l10n.personalizationColorScheme));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(l10n.personalizationColorSourceDescriptionCompact),
+        findsOneWidget,
+      );
+      expect(
+        find.text(l10n.personalizationColorSourceDescription),
+        findsNothing,
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       await tester.tap(find.byType(BackButton));
@@ -260,6 +275,8 @@ void main() {
         expect(tester.widget<SwitchListTile>(ads).value, isTrue);
         expect(find.text(l10n.adsEnabledDescription), findsOneWidget);
         expect(find.byType(AdDensitySetting), findsOneWidget);
+        expect(find.text(l10n.adDensityTitle), findsOneWidget);
+        expect(find.textContaining(l10n.adDensityThanksOne), findsOneWidget);
 
         await tester.tap(ads);
         await tester.pumpAndSettle();
@@ -313,6 +330,48 @@ void main() {
       },
     );
   }
+
+  _settingsTest('manual Nightly check displays its result and failure reason', (
+    tester,
+  ) async {
+    final updateService = _PendingAppUpdateService();
+    await _pumpHost(tester, updateService: updateService);
+    await _openCategory(tester, 'App 更新');
+    final checkButton = find.text('立即檢查 App 更新');
+    await tester.ensureVisible(checkButton);
+    await tester.tap(checkButton);
+    await tester.pump();
+    expect(find.text('檢查中…'), findsOneWidget);
+
+    updateService.finish(
+      const AppUpdateCheckResult(
+        status: AppUpdateStatus.unavailable,
+        message: 'GitHub API HTTP 403',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('GitHub API HTTP 403'), findsOneWidget);
+    expect(find.text('立即檢查 App 更新'), findsOneWidget);
+  });
+
+  _settingsTest('manual Nightly check shows the checked commit when current', (
+    tester,
+  ) async {
+    final updateService = _PendingAppUpdateService();
+    await _pumpHost(tester, updateService: updateService);
+    await _openCategory(tester, 'App 更新');
+    final checkButton = find.text('立即檢查 App 更新');
+    await tester.ensureVisible(checkButton);
+    await tester.tap(checkButton);
+    updateService.finish(
+      const AppUpdateCheckResult(
+        status: AppUpdateStatus.upToDate,
+        message: '目前已是最新 nightly commit：b2702bf',
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('nightly commit：b2702bf'), findsOneWidget);
+  });
 
   _settingsTest('catalog and category scroll positions are restored', (
     tester,
@@ -501,9 +560,11 @@ Future<AppController> _pumpHost(
   double scale = 1,
   Locale locale = const Locale('zh', 'TW'),
   bool adaptive = true,
+  AppUpdateService? updateService,
 }) async {
   final controller = await createAdTestController(
     repository: _SettingsRepository(),
+    appUpdateService: updateService,
   );
   await controller.setOnboardingCompleted(true);
   addTearDown(() async {
@@ -571,4 +632,24 @@ void _settingsTest(String description, WidgetTesterCallback test) {
 class _SettingsRepository extends BusRepository {
   @override
   Future<int?> getLocalVersion(BusProvider provider) async => null;
+}
+
+class _PendingAppUpdateService extends AppUpdateService {
+  _PendingAppUpdateService()
+    : super(
+        buildInfo: const AppBuildInfo(
+          version: '1.0.0',
+          buildNumber: '1',
+          gitSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          defaultUpdateChannel: AppUpdateChannel.nightly,
+        ),
+      );
+
+  final _result = Completer<AppUpdateCheckResult>();
+
+  @override
+  Future<AppUpdateCheckResult> checkForUpdates(AppUpdateChannel channel) =>
+      _result.future;
+
+  void finish(AppUpdateCheckResult result) => _result.complete(result);
 }

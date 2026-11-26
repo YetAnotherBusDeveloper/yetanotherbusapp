@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/bus_app.dart';
 import '../core/android_trip_monitor.dart';
 import '../core/app_build_info.dart';
+import '../core/app_update_service.dart';
 import '../core/app_routes.dart';
 import '../core/app_controller.dart';
 import '../core/models.dart';
@@ -22,7 +23,7 @@ import '../widgets/app_update_dialog.dart';
 import 'account_screen.dart';
 import 'database_settings_screen.dart';
 import 'personalization_screen.dart';
-import '../widgets/background_image_wrapper.dart';
+import '../widgets/settings_scaffold.dart';
 
 enum _SettingsCategory {
   appearance,
@@ -61,6 +62,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _adToggleCount = 0;
   bool _adToggleLocked = false;
   bool _adToggleConfirmed = false;
+  bool _checkingAppUpdateManually = false;
+  AppUpdateCheckResult? _manualAppUpdateResult;
 
   bool get _compactMode =>
       AppControllerScope.of(context).settings.enableCompactMode;
@@ -90,28 +93,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     BuildContext context,
     AppController controller,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final result = await controller.checkForAppUpdate();
-    if (!context.mounted) {
-      return;
+    if (_checkingAppUpdateManually) return;
+    setState(() {
+      _checkingAppUpdateManually = true;
+      _manualAppUpdateResult = null;
+    });
+    try {
+      final result = await controller.checkForAppUpdate();
+      if (!mounted || !context.mounted) return;
+      setState(() => _manualAppUpdateResult = result);
+      if (result.hasUpdate) {
+        await showAppUpdateDialog(
+          context,
+          controller: controller,
+          result: result,
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _manualAppUpdateResult = AppUpdateCheckResult(
+          status: AppUpdateStatus.unavailable,
+          message: localizedFriendlyError(AppLocalizations.of(context), error),
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _checkingAppUpdateManually = false);
     }
-
-    if (result.hasUpdate) {
-      await showAppUpdateDialog(
-        context,
-        controller: controller,
-        result: result,
-      );
-      return;
-    }
-
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          localizedAppUpdateResult(AppLocalizations.of(context), result),
-        ),
-      ),
-    );
   }
 
   Future<void> _toggleSmartRouteNotifications(
@@ -508,14 +516,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = AppControllerScope.of(context);
     final l10n = AppLocalizations.of(context);
     final category = _selectedCategory;
     final isDialog = ModalRoute.of(context) is PopupRoute;
-    final hasSettingsBackgroundImage = hasBackgroundImageForPage(
-      controller.settings,
-      pageKey: 'settings',
-    );
 
     return PopScope<void>(
       // Scrim clicks and Escape dismiss the dialog. Category back is handled
@@ -526,53 +529,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _returnToCategories();
         }
       },
-      child: BackgroundImageWrapper(
-        pageKey: 'settings',
-        child: Scaffold(
-          backgroundColor: hasSettingsBackgroundImage
-              ? Colors.transparent
-              : null,
-          appBar: AppBar(
-            title: Text(
-              category == null
-                  ? l10n.settingsTitle
-                  : _categoryTitle(l10n, category),
-            ),
-            leading: category == null
-                ? null
-                : BackButton(onPressed: _returnToCategories),
+      child: SettingsScaffold(
+        appBar: AppBar(
+          title: Text(
+            category == null
+                ? l10n.settingsTitle
+                : _categoryTitle(l10n, category),
           ),
-          body: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 860),
-              child: PageStorage(
-                bucket: _pageStorageBucket,
-                child: ListView(
-                  key: PageStorageKey(category?.name ?? 'categories'),
-                  primary: false,
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                  children: [
-                    if (category == null)
-                      ..._buildCategories(context)
-                    else
-                      ListTileTheme(
-                        data: ListTileThemeData(
-                          minVerticalPadding: _compactMode ? 4 : 12,
-                          subtitleTextStyle: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                                height: _compactMode ? 1.3 : 1.6,
-                              ),
-                        ),
-                        child: _buildCategory(context, category),
+          leading: category == null
+              ? null
+              : BackButton(onPressed: _returnToCategories),
+        ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 860),
+            child: PageStorage(
+              bucket: _pageStorageBucket,
+              child: ListView(
+                key: PageStorageKey(category?.name ?? 'categories'),
+                primary: false,
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                children: [
+                  if (category == null)
+                    ..._buildCategories(context)
+                  else
+                    ListTileTheme(
+                      data: ListTileThemeData(
+                        minVerticalPadding: _compactMode ? 4 : 12,
+                        subtitleTextStyle: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                              height: _compactMode ? 1.3 : 1.6,
+                            ),
                       ),
-                    const AdBannerWidget(minimumDensity: 4, isInline: true),
-                  ],
-                ),
+                      child: _buildCategory(context, category),
+                    ),
+                  const AdBannerWidget(minimumDensity: 4, isInline: true),
+                ],
               ),
             ),
           ),
@@ -1108,6 +1105,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildAppUpdates(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final l10n = AppLocalizations.of(context);
+    final result = _checkingAppUpdateManually
+        ? null
+        : _manualAppUpdateResult ?? controller.lastAppUpdateResult;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -1172,23 +1172,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               l10n.appUpdateManualCheckDescription,
               compactDescription: l10n.appUpdateManualCheckDescriptionCompact,
             ),
-            FilledButton.icon(
-              onPressed: controller.checkingAppUpdate
-                  ? null
-                  : () => _checkAppUpdate(context, controller),
-              icon: controller.checkingAppUpdate
-                  ? const SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.system_update_alt_rounded),
-              label: Text(
-                controller.checkingAppUpdate
-                    ? l10n.appUpdateChecking
-                    : l10n.appUpdateCheckNow,
-              ),
-            ),
-            if (controller.lastAppUpdateResult case final result?) ...[
+            if (result != null) ...[
               const SizedBox(height: 12),
               Text(
                 l10n.appUpdateRecentResult(
@@ -1197,6 +1181,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
+            FilledButton.icon(
+              onPressed:
+                  controller.checkingAppUpdate || _checkingAppUpdateManually
+                  ? null
+                  : () => _checkAppUpdate(context, controller),
+              icon: controller.checkingAppUpdate || _checkingAppUpdateManually
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.system_update_alt_rounded),
+              label: Text(
+                controller.checkingAppUpdate || _checkingAppUpdateManually
+                    ? l10n.appUpdateChecking
+                    : l10n.appUpdateCheckNow,
+              ),
+            ),
           ],
         ),
       ),

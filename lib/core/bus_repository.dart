@@ -45,6 +45,7 @@ class BusRepository {
   Map<String, String> get _apiJsonHeaders =>
       ApiUserAgent.applyTo(apiJsonHeaders);
   static const _routeDetailCacheTtl = Duration(seconds: 2);
+  static const _recentRouteDetailCapacity = 8;
   static const _routeTopologyCacheTtl = Duration(minutes: 30);
   static const _routeFamilyCacheTtl = Duration(minutes: 30);
   static const _searchApiCacheTtl = Duration(seconds: 2);
@@ -61,6 +62,7 @@ class BusRepository {
   static const _taichungCancelledDepartureCacheTtl = Duration(hours: 2);
   final Map<String, _TimedValue<RouteDetailData>> _routeDetailCache =
       <String, _TimedValue<RouteDetailData>>{};
+  final Map<String, _TimedValue<RouteDetailData>> _recentRouteDetails = {};
   final Map<String, Future<RouteDetailData>> _routeDetailInFlight =
       <String, Future<RouteDetailData>>{};
   int _routeDataGeneration = 0;
@@ -78,6 +80,7 @@ class BusRepository {
     _routeDataGeneration++;
     _clearAllStaticRouteCaches();
     _realtimeCache.clear();
+    _partiallyLoadedRealtimeRoutes.clear();
     _realtimeInFlight.clear();
     _stationPassbyCache.clear();
     _stationPassbyInFlight.clear();
@@ -86,6 +89,7 @@ class BusRepository {
     _routeAlertsCache.clear();
     _routeAlertsInFlight.clear();
     _routeDetailCache.clear();
+    _recentRouteDetails.clear();
     _routeDetailInFlight.clear();
     _routeStopsApiCache.clear();
     _routeStopsApiInFlight.clear();
@@ -111,6 +115,7 @@ class BusRepository {
   _stopSearchApiInFlight = {};
   final Map<String, _TimedValue<LiveStopMap>> _realtimeCache =
       <String, _TimedValue<LiveStopMap>>{};
+  final Set<String> _partiallyLoadedRealtimeRoutes = {};
   final Map<String, Future<LiveStopMap>> _realtimeInFlight =
       <String, Future<LiveStopMap>>{};
   final Map<String, _TimedValue<StationPassbyData>> _stationPassbyCache =
@@ -1385,6 +1390,13 @@ class BusRepository {
       final detail = await future;
       if (generation == _routeDataGeneration) {
         _routeDetailCache[cacheKey] = _TimedValue<RouteDetailData>(detail);
+        if (hasFreshRouteEta(detail)) {
+          _recentRouteDetails.remove(cacheKey);
+          while (_recentRouteDetails.length >= _recentRouteDetailCapacity) {
+            _recentRouteDetails.remove(_recentRouteDetails.keys.first);
+          }
+          _recentRouteDetails[cacheKey] = _TimedValue<RouteDetailData>(detail);
+        }
       }
       return detail;
     } finally {
@@ -1392,6 +1404,37 @@ class BusRepository {
         _routeDetailInFlight.remove(cacheKey);
       }
     }
+  }
+
+  /// Last known ETA for an instant route-detail preview; callers still fetch
+  /// the latest snapshot normally. Source timestamps, not cache age alone,
+  /// determine whether it is safe to show.
+  RouteDetailData? getRecentRouteDetail(
+    int routeKey, {
+    required BusProvider provider,
+    String? routeIdHint,
+  }) {
+    final prefix = '${provider.name}:';
+    final hint = routeIdHint?.trim();
+    final Iterable<_TimedValue<RouteDetailData>?> entries =
+        hint != null && hint.isNotEmpty
+        ? [_recentRouteDetails['$prefix$hint']]
+        : _recentRouteDetails.entries
+              .where((entry) => entry.key.startsWith(prefix))
+              .map((entry) => entry.value);
+    for (final entry in entries) {
+      if (entry == null ||
+          (hint == null || hint.isEmpty) &&
+              entry.value.route.routeKey != routeKey) {
+        continue;
+      }
+      if (DateTime.now().difference(entry.createdAt) > maxRealtimeStopAge ||
+          !hasFreshRouteEta(entry.value)) {
+        continue;
+      }
+      return entry.value;
+    }
+    return null;
   }
 
   Future<RouteDetailData> getRouteTopology(
@@ -1651,7 +1694,7 @@ class BusRepository {
         routeId: routeId,
         routeNameHint: routeNameHint,
       ),
-      _loadLiveStopResult(routeId),
+      _loadLiveStopResult(routeId, preferCached: true),
     ]);
     final topology = results[0] as RouteDetailData;
     final liveResult = results[1] as _LiveStopResult;
@@ -1699,10 +1742,13 @@ class BusRepository {
     }
   }
 
-  Future<_LiveStopResult> _loadLiveStopResult(String routeId) async {
+  Future<_LiveStopResult> _loadLiveStopResult(
+    String routeId, {
+    bool preferCached = false,
+  }) async {
     try {
       return _LiveStopResult(
-        liveMap: await _getLiveStopMap(routeId),
+        liveMap: await _getLiveStopMap(routeId, preferCached: preferCached),
         hasLiveData: true,
       );
     } catch (_) {
@@ -2758,7 +2804,13 @@ class BusRepository {
   Future<LiveStopMap> getLiveStopMap(String routeId) =>
       _getLiveStopMap(routeId);
 
-  Future<LiveStopMap> _getLiveStopMap(String routeId) async {
+  bool isRouteRealtimePartial(String routeId) =>
+      _partiallyLoadedRealtimeRoutes.contains(routeId);
+
+  Future<LiveStopMap> _getLiveStopMap(
+    String routeId, {
+    bool preferCached = false,
+  }) async {
     final generation = _routeDataGeneration;
     final cached = _readFreshCache(_realtimeCache, routeId, _realtimeCacheTtl);
     if (cached != null) {
@@ -2770,7 +2822,7 @@ class BusRepository {
       return inFlight;
     }
 
-    final future = _loadLiveStopMap(routeId);
+    final future = _loadLiveStopMap(routeId, preferCached: preferCached);
     _realtimeInFlight[routeId] = future;
     try {
       final result = await future;
@@ -2785,10 +2837,15 @@ class BusRepository {
     }
   }
 
-  Future<LiveStopMap> _loadLiveStopMap(String routeId) async {
+  Future<LiveStopMap> _loadLiveStopMap(
+    String routeId, {
+    bool preferCached = false,
+  }) async {
+    final generation = _routeDataGeneration;
     final response = await _client.get(
       Uri.parse(
-        '$_apiBaseUrl/api/v1/routes/${Uri.encodeComponent(routeId)}/realtime',
+        '$_apiBaseUrl/api/v1/routes/${Uri.encodeComponent(routeId)}/realtime'
+        '${preferCached ? '?prefer_cached=true' : ''}',
       ),
       headers: _apiJsonHeaders,
     );
@@ -2801,6 +2858,13 @@ class BusRepository {
 
     final decoded =
         await apiDecodeJsonResponseAsync(response) as Map<String, dynamic>;
+    if (generation == _routeDataGeneration) {
+      if (decoded['partial'] == true) {
+        _partiallyLoadedRealtimeRoutes.add(routeId);
+      } else {
+        _partiallyLoadedRealtimeRoutes.remove(routeId);
+      }
+    }
     final result = <String, LiveStopPayload>{};
 
     for (final rawPath in decoded['paths'] as List<dynamic>? ?? const []) {
@@ -3256,6 +3320,7 @@ class BusRepository {
   }
 
   Future<BatchLiveStopMap> _loadBatchLiveStopMaps(List<String> routeIds) async {
+    final generation = _routeDataGeneration;
     final joinedIds = routeIds.map(Uri.encodeComponent).join(',');
     final uri = Uri.parse(
       '$_apiBaseUrl/api/v1/batchroutes/$joinedIds/realtime',
@@ -3306,6 +3371,9 @@ class BusRepository {
         }
       }
       result[routeId] = liveMap;
+      if (generation == _routeDataGeneration) {
+        _partiallyLoadedRealtimeRoutes.remove(routeId);
+      }
     }
 
     return result;
@@ -3324,6 +3392,7 @@ class BusRepository {
       return;
     }
     _realtimeCache[routeId] = _TimedValue<LiveStopMap>(liveMap);
+    _partiallyLoadedRealtimeRoutes.remove(routeId);
   }
 
   Future<List<RoutePathPoint>> _loadRoutePathPoints(
@@ -3638,8 +3707,14 @@ class BusRepository {
         vehicleId: vehicleId,
         source: _nonEmptyString(rawEta['source']) ?? 'tdx',
         estimated: _truthyPayloadValue(rawEta['estimated']),
+        isArriving: _truthyPayloadValue(rawEta['is_arriving']),
       );
-      if (eta.sec == null && eta.msg == null && eta.vehicleId == null) {
+      // The flag alone is something said of a bus: one at the stop that the
+      // feed neither names nor has an estimate for.
+      if (eta.sec == null &&
+          eta.msg == null &&
+          eta.vehicleId == null &&
+          !eta.isArriving) {
         continue;
       }
       result.add(eta);
@@ -4853,6 +4928,30 @@ class BusRepository {
     return null;
   }
 
+  /// The routeids behind [routeKeys], for those of them the local database
+  /// lists. The reverse of [routeKeyForRouteId], done for many keys in the
+  /// one pass over the provider's routes that a single key would take.
+  Future<Map<int, String>> routeIdsForRouteKeys(
+    BusProvider provider,
+    Set<int> routeKeys,
+  ) async {
+    if (routeKeys.isEmpty) {
+      return const <int, String>{};
+    }
+    final rows = await _loadMetadataPathRows(provider: provider);
+    final routeIds = <int, String>{};
+    for (final row in rows) {
+      if (row.routeId.isEmpty) {
+        continue;
+      }
+      final routeKey = _routeKeyForRouteId(row.routeId);
+      if (routeKeys.contains(routeKey)) {
+        routeIds.putIfAbsent(routeKey, () => row.routeId);
+      }
+    }
+    return routeIds;
+  }
+
   /// The stable client-side key for a routeid.
   ///
   /// Route detail is addressed by [routeKey], but anything that arrives from
@@ -4890,6 +4989,15 @@ class BusRepository {
     return (normalized == null || normalized.isEmpty) ? null : normalized;
   }
 
+  /// Parses a stop id into the `int` this app keys stops by.
+  ///
+  /// Stop ids are 64-bit in the feeds (高雄's look like `100100128221`), so
+  /// this keeps the full value rather than narrowing it, and every Dart-side
+  /// map is keyed with the same result. The native side folds whatever it is
+  /// given into a positive 32-bit key (`foldStopId` in StopIdCodec.kt); the two
+  /// never need to agree on the same number, only to be self-consistent.
+  ///
+  /// Some providers use non-numeric ids (`101-11009`); those hash.
   int _parseStopId(Object? raw) {
     if (raw is num) {
       return raw.toInt();

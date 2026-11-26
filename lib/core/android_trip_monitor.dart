@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'models.dart';
+
 enum AndroidBackgroundLocationPermissionRequestStatus {
   granted,
   denied,
@@ -29,21 +31,102 @@ class TripMonitorStop {
     required this.sequence,
     required this.lat,
     required this.lon,
+    this.rawStopId,
+    this.liveData,
   });
 
+  factory TripMonitorStop.fromStop(StopInfo stop) {
+    final now = DateTime.now();
+    final fresh = !isStopRealtimeStale(stop, now: now);
+    return TripMonitorStop(
+      stopId: stop.stopId,
+      rawStopId: stop.rawStopId,
+      stopName: stop.stopName,
+      sequence: stop.sequence,
+      lat: stop.lat,
+      lon: stop.lon,
+      // What the route screen is showing, for the monitor to show too — and,
+      // marked apart from it, what the backend observed and when. The screen
+      // counts estimates down between refreshes and keeps the last ones up
+      // when a refresh fails; neither is the feed saying anything new, and
+      // the monitor reads arrivals and departures only from what the feed
+      // said (`observedEta`), once per observation (`observedAtMs`).
+      liveData: {
+        'eta': effectiveStopEtaSeconds(stop, now: now),
+        'observedEta': stop.sec,
+        'observedAtMs': stopRealtimeObservedAt(
+          stop,
+          now: now,
+        )?.millisecondsSinceEpoch,
+        // A stop merged from the routes of a family: what each of them
+        // observed. The soonest estimate above is the badge; these are what
+        // the feed said — an estimate, a bus arriving — each with the moment
+        // it said it.
+        if (stop.routeObservations.isNotEmpty)
+          'observations': [
+            for (final observation in stop.routeObservations)
+              {
+                'source': observation.routeId,
+                'eta': observation.sec,
+                'atMs': observation
+                    .observedAt(now: now)
+                    ?.millisecondsSinceEpoch,
+                'arriving': observation.isArriving,
+                'message': observation.msg,
+              },
+          ],
+        'message': stop.msg,
+        'buses': [
+          if (fresh)
+            for (final bus in stop.buses) {'id': bus.id},
+        ],
+        // Every entry, as the feed has it. Whether a bus is at the stop is
+        // for the monitor to judge, and it needs what the feed says for that:
+        // `is_arriving`, and the entries that carry no plate — a bus the feed
+        // has at the stop without naming it is still a bus at the stop.
+        'etas': [
+          if (fresh)
+            for (final eta in stop.etas)
+              {
+                'plate': normalizeBusVehicleId(eta.vehicleId) == null
+                    ? null
+                    : eta.vehicleId,
+                'eta': normalizeBusVehicleId(eta.vehicleId) == null
+                    ? eta.sec
+                    : effectiveStopEtaSecondsForVehicle(
+                        stop,
+                        eta.vehicleId,
+                        now: now,
+                      ),
+                'observedEta': eta.sec,
+                'message': eta.msg,
+                'is_arriving': eta.isArriving,
+                // Which routes of the family list it: what is said of the
+                // bus is as old as their observations.
+                if (eta.routeIds.isNotEmpty) 'routes': eta.routeIds,
+              },
+        ],
+      },
+    );
+  }
+
   final int stopId;
+  final String? rawStopId;
   final String stopName;
   final int sequence;
   final double lat;
   final double lon;
+  final Map<String, Object?>? liveData;
 
   Map<String, Object?> toMap() {
     return {
       'stopId': stopId,
+      'rawStopId': rawStopId,
       'stopName': stopName,
       'sequence': sequence,
       'lat': lat,
       'lon': lon,
+      if (liveData != null) 'liveData': liveData,
     };
   }
 }
@@ -53,6 +136,7 @@ class TripMonitorSession {
     required this.providerName,
     required this.routeKey,
     this.routeId,
+    this.familyRouteIds = const [],
     required this.routeName,
     required this.pathId,
     required this.pathName,
@@ -61,6 +145,7 @@ class TripMonitorSession {
     required this.stops,
     this.initialLatitude,
     this.initialLongitude,
+    this.initialLocationTimestampMs,
     this.boardingStopId,
     this.boardingStopName,
     this.destinationStopId,
@@ -70,6 +155,7 @@ class TripMonitorSession {
   final String providerName;
   final int routeKey;
   final String? routeId;
+  final List<String> familyRouteIds;
   final String routeName;
   final int pathId;
   final String pathName;
@@ -78,6 +164,11 @@ class TripMonitorSession {
   final List<TripMonitorStop> stops;
   final double? initialLatitude;
   final double? initialLongitude;
+
+  /// When the initial position was measured, in epoch milliseconds. The route
+  /// screen's last fix can be minutes old by the time a trip starts, and the
+  /// monitor must not mistake where the rider was for where they are.
+  final int? initialLocationTimestampMs;
   final int? boardingStopId;
   final String? boardingStopName;
   final int? destinationStopId;
@@ -88,6 +179,7 @@ class TripMonitorSession {
       'provider': providerName,
       'routeKey': routeKey,
       'routeId': routeId,
+      'familyRouteIds': familyRouteIds,
       'routeName': routeName,
       'pathId': pathId,
       'pathName': pathName,
@@ -95,6 +187,7 @@ class TripMonitorSession {
       'backgroundLocationAlwaysGranted': backgroundLocationAlwaysGranted,
       'initialLatitude': initialLatitude,
       'initialLongitude': initialLongitude,
+      'initialLocationTimestampMs': initialLocationTimestampMs,
       'boardingStopId': boardingStopId,
       'boardingStopName': boardingStopName,
       'destinationStopId': destinationStopId,

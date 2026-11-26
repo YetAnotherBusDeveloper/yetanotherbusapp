@@ -4,6 +4,7 @@ class AppRoutes {
   AppRoutes._();
 
   static const home = '/';
+  static const webHome = '/app/';
   static const search = '/search';
   static const favorites = '/favorites';
   static const nearby = '/nearby';
@@ -197,10 +198,12 @@ AppRouteIntent parseAppRoute(String? rawLocation) {
     );
   }
 
-  if (uri.path == AppRoutes.home) {
-    return const AppRouteIntent(
+  if (uri.path == AppRoutes.home ||
+      uri.path == '/app' ||
+      uri.path == AppRoutes.webHome) {
+    return AppRouteIntent(
       kind: AppRouteKind.home,
-      location: AppRoutes.home,
+      location: uri.path == AppRoutes.home ? AppRoutes.home : AppRoutes.webHome,
     );
   }
   if (uri.path == AppRoutes.search) {

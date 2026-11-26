@@ -1,0 +1,182 @@
+[
+  {
+    "id": "anna",
+    "platform": "android",
+    "profile": "Retired teacher, 68, low patience with jargon, uses large text.",
+    "goal": "Find a bus without sharing her location, using large Traditional Chinese text.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Small phone, Android 11",
+      "profile": "Nexus 5",
+      "android_api": 30,
+      "font_scale": 1.3,
+      "theme": "light"
+    }
+  },
+  {
+    "id": "malik",
+    "platform": "android",
+    "profile": "Student, 21, skips every text, taps fast, dark mode everywhere.",
+    "goal": "Reach the main feature as fast as possible, skipping optional steps.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Pixel 7, Android 14",
+      "profile": "pixel_7",
+      "android_api": 34,
+      "font_scale": 1.0,
+      "theme": "dark"
+    }
+  },
+  {
+    "id": "layla",
+    "platform": "android",
+    "profile": "Pharmacist, 39, reads Arabic, expects every screen to flow right to left.",
+    "goal": "Do the main task end to end and check that text, icons and arrows are mirrored.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Pixel 6, Android 13",
+      "profile": "pixel_6",
+      "android_api": 33,
+      "font_scale": 1.15,
+      "theme": "light"
+    }
+  },
+  {
+    "id": "kenji",
+    "platform": "android",
+    "profile": "Office worker, 29, reads Japanese, uses the app one-handed on the train.",
+    "goal": "Finish the main task in short sessions, leaving the app and coming back.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Pixel 4, Android 11",
+      "profile": "pixel_4",
+      "android_api": 30,
+      "font_scale": 1.0,
+      "theme": "dark"
+    }
+  },
+  {
+    "id": "grace",
+    "platform": "android",
+    "profile": "Retired nurse, 74, low vision, uses Android's largest font size (200%).",
+    "goal": "Read every screen and complete one task without zooming.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Pixel 7, Android 14, 200% font",
+      "profile": "pixel_7",
+      "android_api": 34,
+      "font_scale": 2.0,
+      "theme": "light"
+    }
+  },
+  {
+    "id": "lucia",
+    "platform": "android",
+    "profile": "Teacher, 47, uses the family tablet, reads Spanish.",
+    "goal": "Use the main feature on the big screen and judge whether the layout uses the space.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Pixel Tablet, Android 14",
+      "profile": "pixel_tablet",
+      "android_api": 34,
+      "font_scale": 1.0,
+      "theme": "light"
+    }
+  },
+  {
+    "id": "ravi",
+    "platform": "android",
+    "profile": "Shop owner, 44, reads Hindi, new to apps, careful with every button.",
+    "goal": "Understand what the app is for and finish one task without English.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Small phone, Android 10",
+      "profile": "Nexus 5X",
+      "android_api": 29,
+      "font_scale": 1.15,
+      "theme": "light"
+    }
+  },
+  {
+    "id": "olga",
+    "platform": "android",
+    "profile": "Translator, 36, reads Russian, spots clumsy wording and cut-off labels.",
+    "goal": "Go through every settings screen and check that each label fits.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Pixel 5, Android 12",
+      "profile": "pixel_5",
+      "android_api": 31,
+      "font_scale": 1.0,
+      "theme": "dark"
+    }
+  },
+  {
+    "id": "felipe",
+    "platform": "android",
+    "profile": "Delivery rider, 27, reads Portuguese, cheap phone, taps fast between deliveries.",
+    "goal": "Get to the main feature as fast as possible and use it twice in a row.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Pixel 3a, Android 12",
+      "profile": "pixel_3a",
+      "android_api": 31,
+      "font_scale": 1.15,
+      "theme": "light"
+    }
+  },
+  {
+    "id": "mehmet",
+    "platform": "android",
+    "profile": "Engineer, 33, reads Turkish, types names with İ, ş and ğ, tries odd input.",
+    "goal": "Fill every text field with Turkish characters, emoji and very long text.",
+    "locale": "zh-TW",
+    "geo": [
+      25.0478,
+      121.517
+    ],
+    "device": {
+      "name": "Pixel 8, Android 15",
+      "profile": "pixel_8",
+      "android_api": 35,
+      "font_scale": 1.0,
+      "theme": "dark"
+    }
+  }
+]

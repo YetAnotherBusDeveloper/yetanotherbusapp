@@ -69,8 +69,11 @@ function buildAppleAssociation(env) {
   };
 }
 
-async function serveStatic(request, env) {
-  const response = await env.ASSETS.fetch(request);
+async function serveStatic(request, env, assetPath) {
+  const assetRequest = assetPath
+    ? new Request(new URL(assetPath, request.url), request)
+    : request;
+  const response = await env.ASSETS.fetch(assetRequest);
   const headers = new Headers(response.headers);
   const path = new URL(request.url).pathname;
   const isFont = /\.(?:otf|ttf|woff2?)$/i.test(path);
@@ -124,6 +127,12 @@ export default {
         appClipBundleId: appleAssociation.appClipBundleId,
         appID: appleAssociation.clipId,
       });
+    }
+
+    // Keep Flutter's /index.html as the SPA shell; only the bare site root is
+    // the marketing page. Wrangler runs this Worker before the root asset.
+    if (url.pathname === '/' && (request.method === 'GET' || request.method === 'HEAD')) {
+      return serveStatic(request, env, '/landing');
     }
 
     return serveStatic(request, env);

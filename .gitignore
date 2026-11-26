@@ -32,6 +32,7 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .npm/
 node_modules/
+.wrangler/
 .pub-cache/
 .pub/
 /build/
@@ -47,6 +48,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/build/
 
 # Generated plugin registrant files (auto-generated during build)
 windows/flutter/generated_plugin_registrant.*
