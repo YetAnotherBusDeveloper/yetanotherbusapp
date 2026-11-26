@@ -22,7 +22,7 @@ for label in stable pre-115 post-115 nightly; do
     output="$RUNNER_TEMP/yabus-startup/$label"
     mkdir -p "$output"
     badging=$("$aapt" dump badging "$apk")
-    signer=$("$apksigner" verify --print-certs "$apk" | sed -nE '/^(Signer #[0-9]+|V[0-9.]+ Signer( #[0-9]+)?[:]?)[[:space:]]+certificate SHA-256 digest: /s/.*: ([A-Fa-f0-9]{64})$/\1/p' | tr '[:upper:]' '[:lower:]' | sort -u)
+    signer=$("$apksigner" verify --print-certs "$apk" | sed -nE '/^(V[0-9.]+ )?Signer([[:space:]:]|$).*certificate SHA-256 digest: /s/.*: ([A-Fa-f0-9]{64})$/\1/p' | tr '[:upper:]' '[:lower:]' | sort -u)
     [[ $signer =~ ^[A-Fa-f0-9]{64}$ ]] || { echo "::error::No single verified signer for $label"; exit 1; }
     version=$(sed -nE "/^package: /s/.*versionCode='([0-9]+)'.*/\1/p" <<< "$badging")
     [[ $version =~ ^[0-9]+$ ]]
