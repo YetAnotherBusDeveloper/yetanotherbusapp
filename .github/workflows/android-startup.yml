@@ -1,0 +1,78 @@
+name: Android release startup
+
+on:
+  push:
+    branches: [codex/android-nightly-startup]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  published:
+    name: Published APKs / API ${{ matrix.api }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 30
+            profile: Nexus 5
+          - api: 36
+            profile: pixel_6
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Download and verify published APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk_dir="$RUNNER_TEMP/yabus-apks"
+          mkdir -p "$apk_dir"
+          base=https://github.com/YetAnotherBusDeveloper/yetanotherbusapp/releases/download
+          sha=87dd3a45c63d35be37e523ced682c84d7b29fd7c
+          curl --fail --silent --show-error --location --retry 3 "$base/0.4.1/YABus-0.4.1.apk" -o "$apk_dir/stable.apk"
+          curl --fail --silent --show-error --location --retry 3 "$base/nightly-$sha/YABus-nightly-$sha.apk" -o "$apk_dir/nightly.apk"
+          cd "$apk_dir"
+          sha256sum --check <<'CHECKSUMS'
+          adcb96f7a2634928adad81c81033f53a6a28eab0a31ba032b49f88773f4e9ffa  stable.apk
+          88b527a9cfebb4cde34d472a8e99048f593b2009d5c1885284b27b98e61e1fc7  nightly.apk
+          CHECKSUMS
+          gh run download 45413513581 --repo "$GITHUB_REPOSITORY" --name android-apk-release --dir pre-115
+          gh run download 45754607310 --repo "$GITHUB_REPOSITORY" --name android-apk-release --dir post-115
+          gh run download 45762369532 --repo "$GITHUB_REPOSITORY" --name android-apk-release --dir published
+          cmp nightly.apk published/app-release.apk
+      - name: Prepare and verify KVM
+        run: |
+          if [[ ! -c /dev/kvm ]]; then
+            if grep -qw vmx /proc/cpuinfo; then sudo modprobe kvm_intel
+            elif grep -qw svm /proc/cpuinfo; then sudo modprobe kvm_amd
+            else echo '::error::Runner does not expose CPU virtualization (vmx/svm).'; exit 1; fi
+            sudo udevadm settle --timeout=15
+          fi
+          [[ -c /dev/kvm ]] || { echo '::error::KVM device missing.'; exit 1; }
+          sudo chgrp "$(id -g)" /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          python3 -c "import fcntl, os; assert fcntl.ioctl(os.open('/dev/kvm', os.O_RDWR), 0xae00) == 12"
+      - name: Boot emulator and compare release APKs
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          ram-size: 3072M
+          disable-animations: true
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 420
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: bash tool/android-startup/compare.sh
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: ${{ !cancelled() }}
+        with:
+          name: android-startup-api-${{ matrix.api }}
+          path: ${{ runner.temp }}/yabus-startup/*/*.txt
+          retention-days: 7
