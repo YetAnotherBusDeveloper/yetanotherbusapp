@@ -260,12 +260,11 @@ class _MetroScreenState extends State<MetroScreen> {
       }
       final l10n = AppLocalizations.of(context);
       final available = results.whereType<MetroSystemData>().toList();
-      final partial = available.length != results.length;
       if (available.isEmpty) {
         _showLocationMessage(l10n.metroStationLookupFailed);
         return;
       }
-      final nearest = nearestMetroStation(
+      final (:nearest, :usableSystems) = nearestMetroStation(
         available,
         latitude: position.latitude,
         longitude: position.longitude,
@@ -274,7 +273,9 @@ class _MetroScreenState extends State<MetroScreen> {
       );
       if (nearest == null) {
         _showLocationMessage(
-          partial ? l10n.metroStationLookupFailed : l10n.railPickerNoNearby,
+          available.length < results.length
+              ? l10n.metroStationLookupFailed
+              : l10n.railPickerNoNearby,
         );
         return;
       }
@@ -310,7 +311,9 @@ class _MetroScreenState extends State<MetroScreen> {
       ).forLocale(l10n.localeName);
       final message = l10n.railPickerNearest(name, distance);
       _showLocationMessage(
-        partial ? '$message\n${l10n.metroNearbyPartial}' : message,
+        usableSystems < results.length
+            ? '$message\n${l10n.metroNearbyPartial}'
+            : message,
       );
       unawaited(_loadLineEta());
     } on LocationFailure catch (error) {
