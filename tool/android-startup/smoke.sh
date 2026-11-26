@@ -24,6 +24,9 @@ collect() {
     _device_adb 15 logcat -d -b main -b system -v threadtime \
         AndroidRuntime:E DEBUG:F libc:F flutter:W Flutter:W ActivityTaskManager:I ActivityManager:I '*:S' > "$raw/startup.raw" 2>/dev/null
     _device_adb 15 shell dumpsys activity exit-info "$package" > "$raw/exits.raw" 2>/dev/null
+    # Keep a small window-format sample for diagnosing false readiness failures.
+    _device_adb 15 shell dumpsys window displays 2>/dev/null |
+        grep -E 'mCurrentFocus|mFocusedApp' > "$raw/window.raw"
     python3 - "$raw" "$output" "$package" "$pid" <<'PY'
 import pathlib
 import re
@@ -88,38 +91,53 @@ _device_adb 15 shell am force-stop "$package"
 _device_adb 65 shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$activity" > "$raw/launch.raw" 2>&1
 grep -Eq '^Status: (ok|timeout)[[:space:]]*$' "$raw/launch.raw"
 
-has_app_window() { _device_launcher_drawn "$activity"; }
 app_pid() { _device_value pidof -s "$package"; }
-stage=process
-pid=$(app_pid)
-[[ $pid =~ ^[0-9]+$ ]]
-stage=first-frame
-for ((attempt = 0; attempt < 22; attempt++)); do
-    [[ $(app_pid) == "$pid" ]] || exit 1
-    if has_app_window; then break; fi
-    sleep 2
-done
-has_app_window
-# A Flutter semantics node confirms UI painted beyond the launch theme.
-stage=ui-semantics
-_device_adb 25 shell uiautomator dump /sdcard/yabus-window.xml >/dev/null
-_device_adb 10 exec-out cat /sdcard/yabus-window.xml | python3 -c '
+app_ui_is_foreground() {
+    # Default UiAutomator dump is the active window. Do not count a splash,
+    # a generic error screen, or a system overlay as rendered YABus UI.
+    _device_adb 10 shell rm -f /sdcard/yabus-window.xml >/dev/null 2>&1 &&
+        _device_adb 14 shell uiautomator dump /sdcard/yabus-window.xml >/dev/null 2>&1 &&
+        _device_adb 10 exec-out cat /sdcard/yabus-window.xml 2>/dev/null |
+        python3 -c '
 import sys
 import xml.etree.ElementTree as ET
 
 package = sys.argv[1]
-nodes = ET.parse(sys.stdin).iter("node")
-assert any(node.get("package") == package and
-           (node.get("text") or node.get("content-desc")) for node in nodes), "No rendered app semantics"
+try:
+    root = ET.parse(sys.stdin).getroot()
+except ET.ParseError:
+    sys.exit(1)
+foreground = root.find("node")
+if foreground is None or foreground.get("package") != package:
+    sys.exit(1)
+expected = {"Welcome to YABus", "\u6b61\u8fce\u4f86\u5230 YABus"}
+labels = (node.get(key, "") for node in foreground.iter("node")
+          if node.get("package") == package for key in ("text", "content-desc"))
+sys.exit(not any(marker in label for label in labels for marker in expected))
 ' "$package"
-stage=process-survival
-deadline=$((SECONDS + 30))
-while (( SECONDS < deadline )); do
-    [[ $(app_pid) == "$pid" ]] || exit 1
-    has_app_window
+}
+
+stage=process
+pid=$(app_pid)
+[[ $pid =~ ^[0-9]+$ ]]
+stage=rendered-onboarding
+deadline=$((SECONDS + 45))
+until app_ui_is_foreground; do
+    [[ $(app_pid) == "$pid" && $SECONDS -lt $deadline ]] || exit 1
     sleep 2
 done
+stage=process-survival
+deadline=$((SECONDS + 30))
+next_screen_check=$((SECONDS + 5))
+while (( SECONDS < deadline )); do
+    [[ $(app_pid) == "$pid" ]] || exit 1
+    if (( SECONDS >= next_screen_check )); then
+        app_ui_is_foreground
+        next_screen_check=$((SECONDS + 5))
+    fi
+    sleep 1
+done
+app_ui_is_foreground
 [[ $(app_pid) == "$pid" ]]
-has_app_window
 stage=passed
 echo 'App UI rendered and stayed in the foreground with the same process for 30 seconds.' | tee "$output/result.txt"
