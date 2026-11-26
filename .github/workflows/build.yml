@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FLUTTER_VERSION: 3.41.6
+  FLUTTER_VERSION: 3.44.0
   APP_REPO_OWNER: ${{ github.repository_owner }}
   APP_REPO_NAME: yetanotherbusapp
   APP_WORKFLOW_API_ID: build.yml
@@ -74,7 +74,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -128,6 +128,13 @@ jobs:
           --dart-define=YABUS_GOOGLE_WEB_CLIENT_ID=${{ env.YABUS_GOOGLE_WEB_CLIENT_ID }}
           --dart-define=YABUS_GOOGLE_IOS_CLIENT_ID=${{ env.YABUS_GOOGLE_IOS_CLIENT_ID }}
           --dart-define=APP_NIGHTLY_ARTIFACT=android-apk-release
+
+      - name: Test Android AppFunctions
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest --tests '*YabusAppFunctionsTest' --console=plain
+
+      - name: Verify packaged AppFunctions
+        run: python3 scripts/verify_appfunctions_apk.py build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v6
