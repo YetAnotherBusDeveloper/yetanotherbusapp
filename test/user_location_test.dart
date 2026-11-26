@@ -44,6 +44,29 @@ class _DeniedPosition extends _HangingCurrentPosition {
   }
 }
 
+/// Browser first visit: permission reads as `denied` (prompt) and
+/// `requestPermission()` would block on a fix, so it must not be called.
+class _WebPrompt extends _HangingCurrentPosition {
+  _WebPrompt(this.result) : super(null);
+
+  final Future<Position> Function() result;
+  LocationSettings? settings;
+
+  @override
+  Future<LocationPermission> checkPermission() async =>
+      LocationPermission.denied;
+
+  @override
+  Future<LocationPermission> requestPermission() =>
+      throw StateError('Web must not call requestPermission');
+
+  @override
+  Future<Position> getCurrentPosition({LocationSettings? locationSettings}) {
+    settings = locationSettings;
+    return result();
+  }
+}
+
 Position _position() => Position(
   latitude: 25.033,
   longitude: 121.5654,
@@ -140,4 +163,58 @@ void main() {
       );
     },
   );
+
+  group('web first visit', () {
+    test('asks the browser directly and passes the time limit on', () async {
+      final original = GeolocatorPlatform.instance;
+      final fix = _position();
+      final platform = _WebPrompt(() async => fix);
+      GeolocatorPlatform.instance = platform;
+      addTearDown(() => GeolocatorPlatform.instance = original);
+
+      final position = await resolveUserPosition(
+        webOverride: true,
+        timeLimit: const Duration(seconds: 6),
+      );
+
+      expect(position, same(fix));
+      expect(platform.settings?.timeLimit, const Duration(seconds: 6));
+    });
+
+    test('a refused prompt is a permission failure', () async {
+      final original = GeolocatorPlatform.instance;
+      GeolocatorPlatform.instance = _WebPrompt(
+        () => throw const PermissionDeniedException('denied'),
+      );
+      addTearDown(() => GeolocatorPlatform.instance = original);
+
+      await expectLater(
+        resolveUserPosition(webOverride: true),
+        throwsA(
+          isA<LocationFailure>().having(
+            (failure) => failure.permissionDenied,
+            'permissionDenied',
+            true,
+          ),
+        ),
+      );
+    });
+
+    test('a failed fix after granting is not a permission failure', () async {
+      final original = GeolocatorPlatform.instance;
+      GeolocatorPlatform.instance = _WebPrompt(
+        () => throw TimeoutException('no fix'),
+      );
+      addTearDown(() => GeolocatorPlatform.instance = original);
+
+      await expectLater(
+        resolveUserPosition(webOverride: true),
+        throwsA(
+          isA<LocationFailure>()
+              .having((f) => f.permissionDenied, 'permissionDenied', false)
+              .having((f) => f.message, 'message', '目前無法取得定位，請稍後再試。'),
+        ),
+      );
+    });
+  });
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'transit_repository.dart';
@@ -34,16 +35,26 @@ class LocationFailure implements Exception {
 /// sequence that eight screens each hand-roll today (`nearby_screen.dart:58`,
 /// `bus_map_screen.dart:636`, `youbike_screen.dart:111`, and friends). New code
 /// should call this; migrating the existing eight is separate cleanup.
+///
+/// On web the browser's "prompt" state is reported as
+/// [LocationPermission.denied], and `requestPermission()` itself waits for a
+/// first fix with a one-day timeout. So web skips it and calls
+/// `getCurrentPosition` directly: that triggers the browser prompt, and the
+/// browser starts [timeLimit] only once permission is granted, so a user who is
+/// still deciding is never timed out, while a granted-but-failed fix is bounded.
+/// A position error there is a failed fix, not a permission refusal.
 Future<Position> resolveUserPosition({
   Duration timeLimit = const Duration(seconds: 6),
   LocationAccuracy accuracy = LocationAccuracy.medium,
+  @visibleForTesting bool? webOverride,
 }) async {
+  final isWeb = webOverride ?? kIsWeb;
   if (!await Geolocator.isLocationServiceEnabled()) {
     throw const LocationFailure('定位服務尚未開啟。', serviceDisabled: true);
   }
 
   var permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.denied) {
+  if (permission == LocationPermission.denied && !isWeb) {
     permission = await Geolocator.requestPermission();
   }
   if (permission == LocationPermission.deniedForever) {
@@ -53,7 +64,7 @@ Future<Position> resolveUserPosition({
       permissionDenied: true,
     );
   }
-  if (permission == LocationPermission.denied) {
+  if (permission == LocationPermission.denied && !isWeb) {
     throw const LocationFailure('沒有取得定位權限。', permissionDenied: true);
   }
 
@@ -65,12 +76,17 @@ Future<Position> resolveUserPosition({
   }
 
   try {
-    return await Geolocator.getCurrentPosition(
+    final fix = Geolocator.getCurrentPosition(
       locationSettings: LocationSettings(
         accuracy: accuracy,
         timeLimit: timeLimit,
       ),
-    ).timeout(timeLimit);
+    );
+    // On web the browser enforces the limit after the prompt is answered; a
+    // Dart-side timeout would also expire a prompt the user is still reading.
+    return await (isWeb ? fix : fix.timeout(timeLimit));
+  } on PermissionDeniedException {
+    throw const LocationFailure('沒有取得定位權限。', permissionDenied: true);
   } catch (_) {
     if (lastKnown != null) {
       return lastKnown;
