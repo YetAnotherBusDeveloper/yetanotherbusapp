@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/bus_app.dart';
+import '../l10n/app_localizations.dart';
 
 class AdDensitySetting extends StatelessWidget {
   const AdDensitySetting({super.key});
@@ -11,18 +12,19 @@ class AdDensitySetting extends StatelessWidget {
     'assets/cat_cringe.jpg',
     'assets/cat_scared.jpg',
   ];
-  static const _messages = [
-    '感謝支持',
-    '哇 感謝你的支持<3',
-    '謝謝謝謝謝謝謝謝謝謝',
-    '哥們你真的很愛看廣告嗎 那很謝謝你了',
-  ];
 
   @override
   Widget build(BuildContext context) {
     final controller = AppControllerScope.of(context);
     final settings = controller.settings;
     final density = settings.adDensity;
+    final l10n = AppLocalizations.of(context);
+    final message = switch (density) {
+      1 => l10n.adDensityThanksOne,
+      2 => l10n.adDensityThanksTwo,
+      3 => l10n.adDensityThanksThree,
+      _ => l10n.adDensityThanksFour,
+    };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
@@ -30,7 +32,7 @@ class AdDensitySetting extends StatelessWidget {
         children: [
           ListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('廣告濃度'),
+            title: Text(l10n.adDensityTitle),
             subtitle: Text.rich(
               TextSpan(
                 children: [
@@ -44,7 +46,7 @@ class AdDensitySetting extends StatelessWidget {
                       excludeFromSemantics: true,
                     ),
                   ),
-                  TextSpan(text: ' ${_messages[density - 1]}'),
+                  TextSpan(text: ' $message'),
                 ],
               ),
             ),

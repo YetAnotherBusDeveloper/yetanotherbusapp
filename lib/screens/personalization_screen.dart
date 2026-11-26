@@ -196,7 +196,11 @@ class PersonalizationScreen extends StatelessWidget {
                         contentPadding: EdgeInsets.zero,
                         secondary: const Icon(Icons.dark_mode_outlined),
                         title: Text(l10n.personalizationAmoledTitle),
-                        subtitle: Text(l10n.personalizationAmoledDescription),
+                        subtitle: Text(
+                          settings.enableCompactMode
+                              ? l10n.personalizationAmoledDescriptionCompact
+                              : l10n.personalizationAmoledDescription,
+                        ),
                         value: isAmoled,
                         onChanged: !isDark
                             ? null
@@ -223,7 +227,9 @@ class PersonalizationScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        l10n.personalizationHomeGradientDescription,
+                        settings.enableCompactMode
+                            ? l10n.personalizationHomeGradientDescriptionCompact
+                            : l10n.personalizationHomeGradientDescription,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
@@ -255,7 +261,9 @@ class PersonalizationScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        l10n.personalizationBackgroundImageDescription,
+                        settings.enableCompactMode
+                            ? l10n.personalizationBackgroundImageDescriptionCompact
+                            : l10n.personalizationBackgroundImageDescription,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
@@ -333,7 +341,9 @@ class PersonalizationScreen extends StatelessWidget {
                                   l10n.personalizationPerPageSettings,
                                 ),
                                 subtitle: Text(
-                                  l10n.personalizationPerPageDescription,
+                                  settings.enableCompactMode
+                                      ? l10n.personalizationPerPageDescriptionCompact
+                                      : l10n.personalizationPerPageDescription,
                                 ),
                                 trailing: const Icon(Icons.chevron_right),
                                 onTap: () {
@@ -447,9 +457,13 @@ class PersonalizationScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        AppLocalizations.of(
-                          context,
-                        ).personalizationColorSourceDescription,
+                        settings.enableCompactMode
+                            ? AppLocalizations.of(
+                                context,
+                              ).personalizationColorSourceDescriptionCompact
+                            : AppLocalizations.of(
+                                context,
+                              ).personalizationColorSourceDescription,
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 12),
@@ -780,7 +794,9 @@ class _PerPageBackgroundScreen extends StatelessWidget {
                           pageKey: pageKey,
                           label: _localizedPageLabel(l10n, pageKey),
                           subtitle: pageKey == 'bus'
-                              ? l10n.personalizationGlobalHomeDescription
+                              ? settings.enableCompactMode
+                                    ? l10n.personalizationGlobalHomeDescriptionCompact
+                                    : l10n.personalizationGlobalHomeDescription
                               : null,
                           icon: _pageIcons[pageKey]!,
                           imagePath: settings.pageBackgroundImagePaths[pageKey],
