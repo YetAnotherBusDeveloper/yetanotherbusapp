@@ -92,13 +92,14 @@ _device_adb 65 shell am start -W -a android.intent.action.MAIN -c android.intent
 grep -Eq '^Status: (ok|timeout)[[:space:]]*$' "$raw/launch.raw"
 
 app_pid() { _device_value pidof -s "$package"; }
-app_ui_is_foreground() {
-    # Default UiAutomator dump is the active window. Do not count a splash,
-    # a generic error screen, or a system overlay as rendered YABus UI.
+probe_ui() {
+    # Only inspect the active window. Do not count a splash, a generic error
+    # screen or a system overlay as rendered YABus UI. Never upload the XML.
     _device_adb 10 shell rm -f /sdcard/yabus-window.xml >/dev/null 2>&1 &&
         _device_adb 14 shell uiautomator dump /sdcard/yabus-window.xml >/dev/null 2>&1 &&
         _device_adb 10 exec-out cat /sdcard/yabus-window.xml 2>/dev/null |
         python3 -c '
+import re
 import sys
 import xml.etree.ElementTree as ET
 
@@ -108,12 +109,28 @@ try:
 except ET.ParseError:
     sys.exit(1)
 foreground = root.find("node")
-if foreground is None or foreground.get("package") != package:
+if foreground is None:
     sys.exit(1)
-expected = {"Welcome to YABus", "\u6b61\u8fce\u4f86\u5230 YABus"}
-labels = (node.get(key, "") for node in foreground.iter("node")
-          if node.get("package") == package for key in ("text", "content-desc"))
-sys.exit(not any(marker in label for label in labels for marker in expected))
+active_package = foreground.get("package")
+if active_package == package:
+    expected = {"Welcome to YABus", "\u6b61\u8fce\u4f86\u5230 YABus"}
+    labels = (node.get(key, "") for node in foreground.iter("node")
+              if node.get("package") == package for key in ("text", "content-desc"))
+    if any(marker in label for label in labels for marker in expected):
+        print("ready")
+        sys.exit(0)
+elif active_package in {"com.google.android.permissioncontroller", "com.android.permissioncontroller"}:
+    for node in foreground.iter("node"):
+        if (node.get("package") != active_package or node.get("enabled") != "true"
+                or not node.get("resource-id", "").endswith(":id/permission_deny_button")):
+            continue
+        bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+        if bounds:
+            x0, y0, x1, y1 = map(int, bounds.groups())
+            if x1 > x0 and y1 > y0:
+                print("deny", (x0 + x1) // 2, (y0 + y1) // 2)
+                sys.exit(0)
+sys.exit(1)
 ' "$package"
 }
 
@@ -121,10 +138,21 @@ stage=process
 pid=$(app_pid)
 [[ $pid =~ ^[0-9]+$ ]]
 stage=rendered-onboarding
-deadline=$((SECONDS + 45))
-until app_ui_is_foreground; do
+deadline=$((SECONDS + 60))
+permission_prompts=0
+while :; do
     [[ $(app_pid) == "$pid" && $SECONDS -lt $deadline ]] || exit 1
-    sleep 2
+    ui=$(probe_ui) || ui=''
+    [[ $ui != ready ]] || break
+    if [[ $ui =~ ^deny\ ([0-9]+)\ ([0-9]+)$ ]]; then
+        _device_value dumpsys window displays | grep -E 'mCurrentFocus=.*com\.(google\.)?android\.permissioncontroller/.*GrantPermissionsActivity' >/dev/null || exit 1
+        (( permission_prompts < 3 )) || exit 1
+        # Capture regex coordinates before any further Bash regex matching.
+        _device_adb 10 shell input tap "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+        permission_prompts=$((permission_prompts + 1))
+        printf 'Dismissed system permission dialog without granting access.\n' >> "$output/permission.txt"
+    fi
+    sleep 1
 done
 stage=process-survival
 deadline=$((SECONDS + 30))
@@ -132,12 +160,12 @@ next_screen_check=$((SECONDS + 5))
 while (( SECONDS < deadline )); do
     [[ $(app_pid) == "$pid" ]] || exit 1
     if (( SECONDS >= next_screen_check )); then
-        app_ui_is_foreground
+        [[ $(probe_ui) == ready ]]
         next_screen_check=$((SECONDS + 5))
     fi
     sleep 1
 done
-app_ui_is_foreground
+[[ $(probe_ui) == ready ]]
 [[ $(app_pid) == "$pid" ]]
 stage=passed
 echo 'App UI rendered and stayed in the foreground with the same process for 30 seconds.' | tee "$output/result.txt"
