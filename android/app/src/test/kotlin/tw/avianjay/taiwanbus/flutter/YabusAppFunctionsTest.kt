@@ -49,6 +49,23 @@ class YabusAppFunctionsTest {
     }
 
     @Test
+    fun longGroupNamesCanBeListedAndQueriedExactly() {
+        val groupName = "\uD83D\uDE8C".repeat(61) // 122 UTF-16 code units.
+        val preferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+        val key = "flutter.favorite_groups"
+        val groups = org.json.JSONObject(preferences.getString(key, null)!!)
+        groups.put(groupName, groups.getJSONArray("Weekend"))
+        preferences.edit().putString(key, groups.toString()).commit()
+
+        val listedName = repository.groups().single { it == groupName }
+        val page = repository.list(listedName, 0, 20)
+        assertEquals(1, page.total)
+        val favorite = page.items.single()
+        assertEquals(groupName, favorite.group)
+        assertEquals("TPE307", favorite.routeId)
+    }
+
+    @Test
     fun sameFavoriteInDifferentGroupsHasDifferentIds() {
         val first = repository.list("Commute", 0, 1).items.single()
         val other = repository.list("Weekend", 0, 1).items.single()

@@ -124,8 +124,8 @@ internal class YabusAssistantFavorites(private val context: Context) {
     fun groups(): List<String> = all().keys.sorted()
 
     fun list(groupName: String, offset: Int, limit: Int): AssistantFavoritePage {
-        if (groupName.length > 120 || offset < 0 || limit !in 1..50) {
-            throw AppFunctionInvalidArgumentException("Use offset >= 0, limit 1..50 and a group name up to 120 characters.")
+        if (offset < 0 || limit !in 1..50) {
+            throw AppFunctionInvalidArgumentException("Use offset >= 0 and limit 1..50.")
         }
         val groups = all()
         if (groupName.isNotEmpty() && groupName !in groups) {
