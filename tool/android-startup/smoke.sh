@@ -120,9 +120,11 @@ if active_package == package:
         print("ready")
         sys.exit(0)
 elif active_package in {"com.google.android.permissioncontroller", "com.android.permissioncontroller"}:
+    deny_buttons = {"permission_deny_button", "permission_deny_and_dont_ask_again_button", "permission_no_upgrade_button"}
     for node in foreground.iter("node"):
+        resource_id = node.get("resource-id", "").split(":id/", 1)[-1]
         if (node.get("package") != active_package or node.get("enabled") != "true"
-                or not node.get("resource-id", "").endswith(":id/permission_deny_button")):
+                or resource_id not in deny_buttons):
             continue
         bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
         if bounds:
@@ -130,6 +132,9 @@ elif active_package in {"com.google.android.permissioncontroller", "com.android.
             if x1 > x0 and y1 > y0:
                 print("deny", (x0 + x1) // 2, (y0 + y1) // 2)
                 sys.exit(0)
+    # Dialog variants without a visible denial button can be cancelled with Back.
+    print("cancel-permission")
+    sys.exit(0)
 sys.exit(1)
 ' "$package"
 }
@@ -144,11 +149,16 @@ while :; do
     [[ $(app_pid) == "$pid" && $SECONDS -lt $deadline ]] || exit 1
     ui=$(probe_ui) || ui=''
     [[ $ui != ready ]] || break
-    if [[ $ui =~ ^deny\ ([0-9]+)\ ([0-9]+)$ ]]; then
+    if [[ $ui == deny\ * || $ui == cancel-permission ]]; then
         _device_value dumpsys window displays | grep -E 'mCurrentFocus=.*com\.(google\.)?android\.permissioncontroller/.*GrantPermissionsActivity' >/dev/null || exit 1
         (( permission_prompts < 3 )) || exit 1
-        # Capture regex coordinates before any further Bash regex matching.
-        _device_adb 10 shell input tap "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+        if [[ $ui =~ ^deny\ ([0-9]+)\ ([0-9]+)$ ]]; then
+            _device_adb 10 shell input tap "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+        elif [[ $ui == cancel-permission ]]; then
+            _device_adb 10 shell input keyevent KEYCODE_BACK
+        else
+            exit 1
+        fi
         permission_prompts=$((permission_prompts + 1))
         printf 'Dismissed system permission dialog without granting access.\n' >> "$output/permission.txt"
     fi
